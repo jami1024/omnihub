@@ -2,20 +2,20 @@
 
 [English](README.md) · **简体中文**
 
-> **统一 AI 网关 — 供应商可插拔、支付可插拔、可观测性内置，用 Go 实现。**
+> **可商用的统一 AI 网关 — 供应商 / 支付 / 可观测性全部内置，Go 实现。**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Status: Early](https://img.shields.io/badge/status-early%20development-orange)]()
 [![Go Version](https://img.shields.io/badge/go-1.24+-00ADD8?logo=go)]()
 
-OmniHub 是一个开源 AI 网关，把 OpenAI、Anthropic、AWS Bedrock、Google Gemini、
-Vertex AI、Azure OpenAI 等众多 LLM 服务统一在 OpenAI 兼容的 API 之下。
+OmniHub 是一个开源、**可直接商用**的 AI 网关，把 OpenAI、Anthropic、AWS Bedrock、
+Google Gemini、Vertex AI、Azure OpenAI 等众多 LLM 服务统一在 OpenAI 兼容的 API 之下。
 
-它从同一份代码里服务三种场景，仅通过配置切换：
+一份代码覆盖商业化全链路场景：
 
-- **团队** — 多账号统一调度、预算管控、审计日志。
-- **企业** — SSO/RBAC、合规审计、多租户治理。
-- **SaaS 运营商** — 套餐管理、支付插件、多级分销。
+- **内部使用** — 多账号统一调度、预算管控、审计日志。
+- **合规交付** — SSO/RBAC、审计日志、多租户治理。
+- **对外运营** — 套餐管理、支付插件、多级分销。
 
 ## ✨ 核心特性
 

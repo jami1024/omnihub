@@ -2,20 +2,21 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-> **Unified AI gateway with pluggable providers, payments, and observability — built in Go.**
+> **Commercial-grade unified AI gateway — pluggable providers, payments, and observability, built in Go.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Status: Early](https://img.shields.io/badge/status-early%20development-orange)]()
 [![Go Version](https://img.shields.io/badge/go-1.24+-00ADD8?logo=go)]()
 
-OmniHub is an open-source AI gateway that unifies access to OpenAI, Anthropic, AWS Bedrock,
-Google Gemini, Vertex AI, Azure OpenAI and more — behind a single OpenAI-compatible API.
+OmniHub is an open-source, **commercial-ready** AI gateway that unifies access to OpenAI,
+Anthropic, AWS Bedrock, Google Gemini, Vertex AI, Azure OpenAI and more behind a single
+OpenAI-compatible API.
 
-It is designed to serve three audiences from a single codebase, switchable by configuration:
+One codebase, the full commercial spectrum:
 
-- **Teams** — internal multi-account scheduling, budget control, audit trail.
-- **Enterprises** — SSO/RBAC, compliance audit logs, multi-tenant governance.
-- **SaaS operators** — plan management, payment plugins, multi-level affiliate.
+- **Internal use** — multi-account scheduling, budget control, audit trail.
+- **Compliance delivery** — SSO/RBAC, audit logs, multi-tenant governance.
+- **External operation** — plan management, payment plugins, multi-level affiliate.
 
 ## ✨ Highlights
 
