@@ -12,6 +12,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/jami1024/omnihub/internal/handler/gateway"
+	"github.com/jami1024/omnihub/internal/service/forward"
+	"github.com/jami1024/omnihub/internal/service/provider"
+	"github.com/jami1024/omnihub/internal/service/provider/drivers/anthropic"
 )
 
 // Build info populated by the linker via -ldflags (see Makefile).
@@ -81,7 +86,34 @@ func newRouter() *gin.Engine {
 	r.GET("/readyz", handleReady)
 	r.GET("/version", handleVersion)
 
+	mountGatewayRoutes(r)
+
 	return r
+}
+
+// mountGatewayRoutes wires the LLM forwarding endpoints onto r.
+// MVP behaviour: a single Anthropic account is read from
+// OMNIHUB_ANTHROPIC_API_KEY. If the variable is empty, gateway
+// endpoints are skipped and only the health endpoints stay live.
+func mountGatewayRoutes(r *gin.Engine) {
+	apiKey := os.Getenv("OMNIHUB_ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		slog.Warn("OMNIHUB_ANTHROPIC_API_KEY not set; /v1/messages disabled")
+		return
+	}
+
+	driver := anthropic.New()
+
+	account := &provider.Account{
+		Name:        "default",
+		Provider:    "anthropic",
+		Credentials: map[string]string{"api_key": apiKey},
+	}
+
+	forwarder := forward.New(nil)
+	r.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, driver, account))
+
+	slog.Info("anthropic gateway mounted", "path", "/v1/messages")
 }
 
 func handleHealth(c *gin.Context) {

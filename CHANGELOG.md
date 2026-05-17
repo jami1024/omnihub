@@ -28,5 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decodes SSE streaming responses chunk-by-chunk via an explicit Close()
   iterator. Header-only fields (`anthropic_version`, `anthropic_beta`) are
   stripped from the request body.
+- Wire end-to-end forwarding: `internal/service/forward/` owns the shared HTTP
+  client (tuned for high-concurrency LLM forwarding) and pipes either streaming
+  SSE or non-streaming bodies back to the client. `internal/handler/gateway/`
+  exposes the Anthropic-compatible `/v1/messages` endpoint and lifts
+  `anthropic-beta` from the HTTP header into the IR.
+- `cmd/omnihub` now mounts `/v1/messages` when `OMNIHUB_ANTHROPIC_API_KEY` is
+  set, so a single Anthropic account can be forwarded end-to-end.
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main
