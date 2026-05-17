@@ -49,6 +49,18 @@ type Account struct {
 	// preserved in the persisted breakdown so analytics can recover
 	// the base cost.
 	CostMultiplier float64
+
+	// Weight controls weighted-random selection within a priority
+	// bucket. Higher weight = higher relative pick probability.
+	// Zero is treated as 1 (so a freshly inserted row participates
+	// minimally) by the resolver.
+	Weight int
+
+	// Priority groups accounts into "tiers". The resolver picks from
+	// the LOWEST-numbered priority bucket that has at least one
+	// healthy account, falling through to higher numbers as accounts
+	// in the top bucket exhaust their quotas. 0 is the default tier.
+	Priority int
 }
 
 // Credential returns the value for the given credential key, or "" if

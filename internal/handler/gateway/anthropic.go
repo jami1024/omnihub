@@ -2,13 +2,14 @@
 // and dispatch them through the Forwarder.
 //
 // MVP shape: one handler per upstream protocol (Anthropic Messages,
-// later OpenAI Chat Completions, Gemini, etc.), single account, no
-// Guard chain. The Guard pipeline will wrap these handlers later
-// without changing their internals.
+// later OpenAI Chat Completions, Gemini, etc.). The handler asks the
+// Resolver for the (driver, account) pair to use; the Forwarder owns
+// transport, and persistence is optional.
 package gateway
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -23,24 +24,28 @@ import (
 	"github.com/jami1024/omnihub/internal/service/guard"
 	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
+	"github.com/jami1024/omnihub/internal/service/resolver"
 )
+
+// anthropicCompatibleProviders is the allow-list for the Anthropic
+// Messages endpoint. Both the direct API driver and Claude Platform
+// on AWS accept the same wire format.
+var anthropicCompatibleProviders = []string{"anthropic", "claude-platform"}
 
 // AnthropicMessagesHandler returns a gin.HandlerFunc for the
 // Anthropic-compatible POST /v1/messages endpoint.
 //
 // The handler is intentionally thin: read the body, decode into IR,
-// lift the anthropic-beta header into the IR, delegate to the
-// Forwarder, and (when buffer != nil) enqueue a complete
-// MessageRequest row for persistence. All transformation lives in
-// the Driver; the Forwarder owns transport.
+// lift the anthropic-beta header into the IR, ask the Resolver for an
+// (account, driver) pair, delegate to the Forwarder, and (when buffer
+// != nil) enqueue a complete MessageRequest row for persistence.
 //
 // buffer may be nil, in which case the gateway runs in log-only mode
 // (no DB writes) — this keeps `go run` smoke tests working without a
 // Postgres dependency.
 func AnthropicMessagesHandler(
 	forwarder *forward.Forwarder,
-	driver provider.Driver,
-	account *provider.Account,
+	res resolver.Resolver,
 	buffer *repository.WriteBuffer,
 	prices pricing.Table,
 ) gin.HandlerFunc {
@@ -69,12 +74,28 @@ func AnthropicMessagesHandler(
 		c.Set(guard.CtxKeyModel, req.Model)
 		c.Set(guard.CtxKeyStream, req.Stream)
 
+		// Pick the upstream for this request. ErrNoUpstream surfaces
+		// when the pool is empty (e.g. all accounts disabled), which
+		// is a server-side issue: 503 to the client.
+		account, driver, err := res.ResolveForProviders(anthropicCompatibleProviders)
+		if err != nil {
+			if errors.Is(err, resolver.ErrNoUpstream) {
+				errorJSON(c, http.StatusServiceUnavailable, "no_upstream_available",
+					"no upstream account is available for this request")
+				return
+			}
+			slog.Error("resolver failed", "err", err.Error())
+			errorJSON(c, http.StatusInternalServerError, "internal_error", "resolver failed")
+			return
+		}
+
 		result, forwardErr := forwarder.Forward(c.Request.Context(), c.Writer, &req, driver, account)
 		if forwardErr != nil {
 			slog.Error("forward failed",
 				"model", req.Model,
 				"stream", req.Stream,
 				"upstream_status", result.StatusCode,
+				"account", account.Name,
 				"err", forwardErr.Error(),
 			)
 			// Headers may already be flushed (streaming case); we

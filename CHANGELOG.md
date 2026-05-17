@@ -166,5 +166,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     existing `cost_usd` total. Eight unit tests cover Opus 4.7 new
     pricing, cache fallback ratios, prefix tie-break, and multiplier
     application.
+- **Multi-account support + Resolver Guard** (replaces single-account
+  env-var configuration):
+  - Migration `0004_accounts.sql` adds the `accounts` table
+    (name, provider, enabled, weight, priority, cost_multiplier,
+    base_url, credentials JSONB).
+  - `internal/repository/account.go` provides `ListEnabled`,
+    `CountAll`, and `Insert`. Credentials are cleartext JSONB in MVP;
+    encryption at rest is a follow-up commit.
+  - `internal/service/account/Pool` is the in-memory cache. It
+    refreshes from the repository every 30 s in a background
+    goroutine. A failed refresh leaves the previous snapshot in place
+    so a DB blip never drains the routable set.
+  - `internal/service/resolver` implements priority-tiered weighted-
+    random selection. Lower `priority` is the preferred tier; inside
+    a tier, accounts are picked proportional to `weight`. The
+    resolver looks up the driver from the registry by
+    `account.provider`, so adding a driver row to the DB immediately
+    makes it available for routing.
+  - Both `anthropic` and `claude-platform` drivers are now registered
+    on every startup; the resolver freely mixes accounts of either
+    provider for `/v1/messages` requests.
+  - First-boot migration: if the `accounts` table is empty AND
+    `OMNIHUB_ANTHROPIC_API_KEY` / `OMNIHUB_CLAUDE_PLATFORM_*` env
+    vars are set, the gateway auto-inserts one matching row so
+    existing deployments upgrade transparently.
+  - When no DB is configured (log-only mode), the pool sources from
+    env vars directly in memory — smoke tests still work.
+  - Seven resolver tests cover empty-pool error, priority bucket
+    filtering, weighted distribution, allowed-provider filtering,
+    driver lookup, missing driver rejection, and zero-weight
+    fallback to uniform.
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main
