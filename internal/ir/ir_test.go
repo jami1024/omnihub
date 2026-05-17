@@ -1,0 +1,115 @@
+package ir_test
+
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+
+	"github.com/jami1024/omnihub/internal/ir"
+)
+
+func TestUnifiedRequestRoundTrip(t *testing.T) {
+	temp := 0.7
+	req := ir.UnifiedRequest{
+		Model:     "claude-sonnet-4-5",
+		MaxTokens: 1024,
+		Stream:    true,
+		System: []ir.ContentBlock{
+			{Type: ir.BlockText, Text: "You are a helpful assistant.",
+				CacheControl: &ir.CacheControl{Type: "ephemeral"}},
+		},
+		Messages: []ir.Message{
+			{Role: ir.RoleUser, Content: []ir.ContentBlock{
+				ir.TextBlock("hello"),
+			}},
+		},
+		Temperature: &temp,
+		Thinking: &ir.ThinkingConfig{
+			Type:         "enabled",
+			BudgetTokens: 2000,
+		},
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got ir.UnifiedRequest
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if !reflect.DeepEqual(req, got) {
+		t.Fatalf("round-trip mismatch\nwant: %+v\n got: %+v", req, got)
+	}
+}
+
+func TestContentBlockToolUseShape(t *testing.T) {
+	block := ir.ContentBlock{
+		Type:  ir.BlockToolUse,
+		ID:    "toolu_01ABC",
+		Name:  "get_weather",
+		Input: json.RawMessage(`{"city":"Tokyo"}`),
+	}
+
+	data, err := json.Marshal(block)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	// Anthropic wire shape is flat: id/name/input at the top of the block,
+	// not nested under a "tool_use" key.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+	for _, key := range []string{"id", "name", "input"} {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("expected top-level key %q in marshalled tool_use block, got: %s", key, data)
+		}
+	}
+}
+
+func TestUsageAdd(t *testing.T) {
+	u := ir.Usage{InputTokens: 100, OutputTokens: 50}
+	u.Add(ir.Usage{InputTokens: 20, CacheReadInputTokens: 5})
+
+	if u.InputTokens != 120 {
+		t.Errorf("InputTokens: want 120, got %d", u.InputTokens)
+	}
+	if u.OutputTokens != 50 {
+		t.Errorf("OutputTokens: want 50, got %d", u.OutputTokens)
+	}
+	if u.CacheReadInputTokens != 5 {
+		t.Errorf("CacheReadInputTokens: want 5, got %d", u.CacheReadInputTokens)
+	}
+	if u.TotalTokens() != 170 {
+		t.Errorf("TotalTokens: want 170, got %d", u.TotalTokens())
+	}
+}
+
+func TestChunkSerializesDelta(t *testing.T) {
+	chunk := ir.UnifiedChunk{
+		Type:  ir.ChunkContentBlockDelta,
+		Index: 0,
+		Delta: &ir.Delta{Type: "text_delta", Text: "hello"},
+	}
+
+	data, err := json.Marshal(chunk)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got ir.UnifiedChunk
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got.Type != ir.ChunkContentBlockDelta {
+		t.Errorf("Type: want %q, got %q", ir.ChunkContentBlockDelta, got.Type)
+	}
+	if got.Delta == nil || got.Delta.Text != "hello" {
+		t.Errorf("Delta.Text: want 'hello', got %+v", got.Delta)
+	}
+}

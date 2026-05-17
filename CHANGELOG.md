@@ -15,5 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adopt `gin-gonic/gin` as the HTTP router and middleware stack.
 - ADR 0001 records the rationale for choosing Gin over chi / Echo / Fiber.
 - Add Simplified Chinese README (`README.zh-CN.md`) and cross-link with English.
+- Define internal intermediate representation (`internal/ir/`): `UnifiedRequest`,
+  `UnifiedResponse`, `UnifiedChunk`, plus message / content block / tool / usage
+  types. This is the shared contract between protocol adapters, drivers, and Guards.
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main
