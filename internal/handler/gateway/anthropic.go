@@ -29,6 +29,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/resolver"
+	"github.com/jami1024/omnihub/internal/service/session"
 )
 
 // anthropicCompatibleProviders is the allow-list for the Anthropic
@@ -85,6 +86,11 @@ func AnthropicMessagesHandler(
 		c.Set(guard.CtxKeyModel, req.Model)
 		c.Set(guard.CtxKeyStream, req.Stream)
 
+		// Derive a session key so consecutive turns of the same
+		// conversation hit the same upstream — Anthropic prompt
+		// cache is per-account, so stickiness drives cost down.
+		sessionKey := session.KeyFor(guard.KeyName(c), &req)
+
 		// Retry loop: at most maxFailoverAttempts distinct accounts.
 		var (
 			attempted     []int64
@@ -95,7 +101,7 @@ func AnthropicMessagesHandler(
 		)
 
 		for attempt := 0; attempt < maxFailoverAttempts; attempt++ {
-			account, driver, rerr := res.ResolveForProviders(anthropicCompatibleProviders, attempted)
+			account, driver, rerr := res.ResolveForProviders(sessionKey, anthropicCompatibleProviders, attempted)
 			if rerr != nil {
 				if errors.Is(rerr, resolver.ErrNoUpstream) {
 					if attempt == 0 {

@@ -218,6 +218,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     isolation, and concurrent recording (race-detectable).
   - Resolver tests gain `TestResolveExcludesAlreadyTriedIDs` and
     `TestResolveSkipsUnhealthyAccounts`.
+  - **Session stickiness** for prompt-cache friendliness:
+    - `internal/service/session` derives a per-conversation key as
+      `sha256(virtualKey + model + system_prompt[:8KB] + first_user_text)`,
+      stable across the turns of one chat and distinct across
+      callers / prompts / conversations.
+    - In-memory `session.Store` with default 5-minute TTL (matching
+      Anthropic's 5-minute prompt-cache window). A background
+      sweeper bounds memory to TTL × request rate.
+    - The resolver checks the sticky binding first; on health /
+      provider / exclusion mismatch it transparently falls back to
+      fresh selection. New selections on the "clean" path bind to
+      the session for future turns; retry-loop fallbacks do NOT
+      bind (so a sick attempt does not freeze the session onto a
+      sub-par account).
+    - `OMNIHUB_SESSION_TTL` env var configures the TTL; the values
+      `0`, `off`, or `false` disable stickiness entirely.
+    - 12 unit tests cover key derivation stability + uniqueness,
+      bind / get / TTL expiry / refresh, sticky re-use across
+      iterations, fallback when bound account turns unhealthy, and
+      the retry-loop "don't bind" guarantee.
   - Circuit-breaker thresholds are configurable via env vars:
     `OMNIHUB_CIRCUIT_FAILURE_THRESHOLD` (int, ≥0; 0 disables),
     `OMNIHUB_CIRCUIT_OPEN_DURATION` (Go duration, e.g. `30s`, `2m`),

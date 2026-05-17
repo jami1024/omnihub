@@ -29,6 +29,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/anthropic"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/claudeplatform"
 	"github.com/jami1024/omnihub/internal/service/resolver"
+	"github.com/jami1024/omnihub/internal/service/session"
 )
 
 // Build info populated by the linker via -ldflags (see Makefile).
@@ -221,20 +222,56 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 
 	healthCfg := loadHealthConfig()
 	tracker := health.New(healthCfg)
-	res := resolver.New(accountPool, registry, tracker)
+
+	sessionTTL := loadSessionTTL()
+	var sessions *session.Store
+	if sessionTTL > 0 {
+		sessions = session.New(sessionTTL)
+		// Sweep at half the TTL so stale entries do not linger more
+		// than 1.5× their lifetime on a fully idle deployment.
+		sessions.Start(context.Background(), sessionTTL/2)
+	}
+
+	res := resolver.New(accountPool, registry, tracker, sessions)
 	forwarder := forward.New(nil)
 	prices := pricing.Default()
 
 	gw := r.Group("/", auth.Middleware(), guard.RequestLog())
 	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices))
 
+	stickyDesc := "off"
+	if sessions != nil {
+		stickyDesc = sessionTTL.String()
+	}
 	slog.Info("gateway mounted",
 		"path", "/v1/messages",
 		"account_count", accountPool.Size(),
 		"circuit_failure_threshold", healthCfg.FailureThreshold,
 		"circuit_open_duration", healthCfg.OpenDuration,
 		"circuit_half_open_success", healthCfg.HalfOpenSuccessThreshold,
+		"session_stickiness", stickyDesc,
 	)
+}
+
+// loadSessionTTL parses OMNIHUB_SESSION_TTL into a Go duration.
+// Unset falls back to session.DefaultTTL (5 minutes). The special
+// value "0" or "off" disables stickiness entirely. Malformed values
+// log a warning and fall back to the default.
+func loadSessionTTL() time.Duration {
+	v := os.Getenv("OMNIHUB_SESSION_TTL")
+	if v == "" {
+		return session.DefaultTTL
+	}
+	if v == "0" || v == "off" || v == "false" {
+		return 0
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		slog.Warn("OMNIHUB_SESSION_TTL invalid; using default",
+			"value", v, "default", session.DefaultTTL)
+		return session.DefaultTTL
+	}
+	return d
 }
 
 // loadHealthConfig builds the circuit-breaker configuration, falling
