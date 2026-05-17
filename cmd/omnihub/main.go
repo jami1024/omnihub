@@ -282,7 +282,14 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 	forwarder := forward.New(nil)
 	prices := pricing.Default()
 
-	gw := r.Group("/", auth.Middleware(), guard.RequestLog())
+	clientGate := guard.NewClientGate(os.Getenv("OMNIHUB_ALLOWED_CLIENT_UA_PREFIXES"))
+	if clientGate.IsOpen() {
+		slog.Warn("OMNIHUB_ALLOWED_CLIENT_UA_PREFIXES=* — every client User-Agent is accepted; this gateway is no longer locked to Claude CLI")
+	} else {
+		slog.Info("client UA gate enabled", "allowed_prefixes", clientGate.Prefixes())
+	}
+
+	gw := r.Group("/", clientGate.Middleware(), auth.Middleware(), guard.RequestLog())
 	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices))
 
 	stickyDesc := "off"

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Client User-Agent gate (`internal/service/guard/client_gate.go`): rejects
+  non-Claude-CLI requests with HTTP 403 (`client_not_allowed`) BEFORE the
+  authentication middleware runs, so scanners and curl one-liners do not
+  consume a DB lookup. The allow-list is a comma-separated UA prefix list
+  controlled by `OMNIHUB_ALLOWED_CLIENT_UA_PREFIXES`; the default is
+  `claude-cli/`. Setting it to `*` opens the gate and logs a warning at
+  startup. `deploy/.env.example` and `deploy/docker-compose.yaml` document
+  and pass through the new variable.
+
 - Initial project scaffolding (`README`, `.gitignore`, `Makefile`).
 - Minimal HTTP entry point at `cmd/omnihub` with `/healthz`, `/readyz`, `/version` endpoints.
 - Architecture overview document under `docs/architecture/`.
