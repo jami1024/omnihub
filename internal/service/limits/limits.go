@@ -33,17 +33,19 @@ type Reject struct {
 func (r *Reject) Error() string { return r.Message }
 
 // Limiter holds the policy machinery. Construct one via New and
-// share it across the gateway — the cache inside is safe for
+// share it across the gateway — the caches inside are safe for
 // concurrent use.
 type Limiter struct {
 	cache *SpendCache
+	rpm   *RPMCache
 }
 
-// New returns a Limiter. A nil cache disables the daily USD check
-// (useful in tests, or when running without a DB-backed pricing
-// pipeline); the model allow-list still runs.
-func New(cache *SpendCache) *Limiter {
-	return &Limiter{cache: cache}
+// New returns a Limiter. A nil spend cache disables the daily USD
+// check (useful in tests, or when running without a DB-backed
+// pricing pipeline); a nil rpm cache disables the RPM check. The
+// model allow-list always runs.
+func New(spend *SpendCache, rpm *RPMCache) *Limiter {
+	return &Limiter{cache: spend, rpm: rpm}
 }
 
 // Check enforces both the model allow-list and the rolling 24h USD
@@ -69,6 +71,21 @@ func (l *Limiter) Check(ctx context.Context, k *apikey.Key, model string) *Rejec
 				"model %q is not in the allow-list for key %q",
 				model, k.Name,
 			),
+		}
+	}
+
+	// RPM runs before the daily check because it's purely in-process
+	// and rejects without touching the DB.
+	if k.RPMLimit != nil && l.rpm != nil {
+		if !l.rpm.Allow(k.Name, *k.RPMLimit) {
+			return &Reject{
+				Status: 429,
+				Type:   "rate_limit_exceeded",
+				Message: fmt.Sprintf(
+					"key %q exceeded its rate limit of %d requests per minute",
+					k.Name, *k.RPMLimit,
+				),
+			}
 		}
 	}
 

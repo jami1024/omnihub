@@ -489,22 +489,24 @@ func loadHealthConfig() health.Config {
 // keep hot keys off the DB. Tuneable via OMNIHUB_LIMIT_REFRESH_TTL.
 const spendCacheTTL = 5 * time.Second
 
-// buildLimiter wires the per-key limits service. Returns nil only
-// when running without a DB pool — the limiter is still useful in
-// that mode for the model allow-list but the daily-USD check is
-// inert without a SpendSource, so we keep the field nil to make the
-// no-policy path explicit at call sites.
+// buildLimiter wires the per-key limits service. The RPM cache is
+// always built (it's pure in-memory and free when no key carries an
+// rpm_limit); the spend cache requires a DB-backed SpendSource and
+// stays nil in log-only mode, which makes the daily-USD path a no-op
+// at call sites.
 func buildLimiter() *limits.Limiter {
+	rpm := limits.NewRPMCache()
 	if pool == nil {
-		return limits.New(nil)
+		return limits.New(nil, rpm)
 	}
 	src := repository.NewMessageRequestRepo(pool)
 	cache := limits.NewSpendCache(src, spendCacheTTL)
 	slog.Info("per-key limits enabled",
 		"spend_cache_ttl", spendCacheTTL,
 		"daily_window", "24h rolling",
+		"rpm_enforcement", "in-process token bucket",
 	)
-	return limits.New(cache)
+	return limits.New(cache, rpm)
 }
 
 // buildDriverRegistry registers every built-in driver. Adding a new

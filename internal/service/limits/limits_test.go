@@ -34,7 +34,7 @@ func keyWith(name string, dailyUSD float64, models []string) *apikey.Key {
 
 func TestCheck_AllowsWhenUnderCap(t *testing.T) {
 	src := &stubSource{values: map[string]float64{"alice": 4.99}}
-	l := New(NewSpendCache(src, time.Minute))
+	l := New(NewSpendCache(src, time.Minute), nil)
 
 	if r := l.Check(context.Background(), keyWith("alice", 5.00, nil), "claude-opus-4-7"); r != nil {
 		t.Fatalf("expected pass, got reject: %+v", r)
@@ -43,7 +43,7 @@ func TestCheck_AllowsWhenUnderCap(t *testing.T) {
 
 func TestCheck_RejectsAtCap(t *testing.T) {
 	src := &stubSource{values: map[string]float64{"alice": 5.00}}
-	l := New(NewSpendCache(src, time.Minute))
+	l := New(NewSpendCache(src, time.Minute), nil)
 
 	r := l.Check(context.Background(), keyWith("alice", 5.00, nil), "claude-opus-4-7")
 	if r == nil {
@@ -58,7 +58,7 @@ func TestCheck_RejectsAtCap(t *testing.T) {
 }
 
 func TestCheck_RejectsModelNotInAllowList(t *testing.T) {
-	l := New(nil) // no cache needed; model check is sync
+	l := New(nil, nil) // no cache needed; model check is sync
 	k := keyWith("alice", 0, []string{"claude-haiku-4-5"})
 
 	r := l.Check(context.Background(), k, "claude-opus-4-7")
@@ -74,7 +74,7 @@ func TestCheck_RejectsModelNotInAllowList(t *testing.T) {
 }
 
 func TestCheck_EmptyAllowListAllowsEveryModel(t *testing.T) {
-	l := New(nil)
+	l := New(nil, nil)
 	if r := l.Check(context.Background(), keyWith("alice", 0, nil), "anything-goes"); r != nil {
 		t.Fatalf("empty allow-list should pass, got reject: %+v", r)
 	}
@@ -82,7 +82,7 @@ func TestCheck_EmptyAllowListAllowsEveryModel(t *testing.T) {
 
 func TestCheck_FailOpenOnDBError(t *testing.T) {
 	src := &stubSource{err: errors.New("db down")}
-	l := New(NewSpendCache(src, time.Minute))
+	l := New(NewSpendCache(src, time.Minute), nil)
 	k := keyWith("alice", 5.00, nil)
 
 	if r := l.Check(context.Background(), k, "claude-opus-4-7"); r != nil {
@@ -91,7 +91,7 @@ func TestCheck_FailOpenOnDBError(t *testing.T) {
 }
 
 func TestCheck_NilKeyBypasses(t *testing.T) {
-	l := New(nil)
+	l := New(nil, nil)
 	if r := l.Check(context.Background(), nil, "anything"); r != nil {
 		t.Fatalf("nil key should bypass, got reject: %+v", r)
 	}
@@ -100,7 +100,7 @@ func TestCheck_NilKeyBypasses(t *testing.T) {
 func TestRecordSpend_FoldsIntoCachedTotal(t *testing.T) {
 	src := &stubSource{values: map[string]float64{"alice": 1.00}}
 	cache := NewSpendCache(src, time.Hour)
-	l := New(cache)
+	l := New(cache, nil)
 	ctx := context.Background()
 
 	// First Check seeds cache with $1.00 from the source.
@@ -135,6 +135,59 @@ func TestSpendCache_RefreshesAfterTTL(t *testing.T) {
 	time.Sleep(15 * time.Millisecond)
 	if v, _ := cache.Spend(ctx, "alice"); v != 2.50 {
 		t.Fatalf("post-TTL read = %.2f, want 2.50", v)
+	}
+}
+
+func TestCheck_RPMRejectsAfterBurstExhausted(t *testing.T) {
+	rpm := NewRPMCache()
+	l := New(nil, rpm)
+	r := 3
+	k := &apikey.Key{Name: "alice", RPMLimit: &r}
+
+	for i := 0; i < r; i++ {
+		if rej := l.Check(context.Background(), k, "m"); rej != nil {
+			t.Fatalf("call %d unexpectedly rejected: %+v", i, rej)
+		}
+	}
+	// Bucket is now empty; the next call must be 429 rate_limit_exceeded.
+	rej := l.Check(context.Background(), k, "m")
+	if rej == nil {
+		t.Fatal("expected rate limit reject")
+	}
+	if rej.Status != 429 || rej.Type != "rate_limit_exceeded" {
+		t.Fatalf("got %d / %q, want 429 / rate_limit_exceeded", rej.Status, rej.Type)
+	}
+}
+
+func TestCheck_RPMNilLimitBypasses(t *testing.T) {
+	l := New(nil, NewRPMCache())
+	k := &apikey.Key{Name: "alice"} // RPMLimit nil
+	for i := 0; i < 100; i++ {
+		if rej := l.Check(context.Background(), k, "m"); rej != nil {
+			t.Fatalf("call %d rejected with nil RPM: %+v", i, rej)
+		}
+	}
+}
+
+func TestCheck_RPMBucketRebuildsOnRateChange(t *testing.T) {
+	rpm := NewRPMCache()
+	l := New(nil, rpm)
+	r := 2
+	k := &apikey.Key{Name: "alice", RPMLimit: &r}
+
+	// Exhaust the rpm=2 bucket.
+	_ = l.Check(context.Background(), k, "m")
+	_ = l.Check(context.Background(), k, "m")
+	if rej := l.Check(context.Background(), k, "m"); rej == nil {
+		t.Fatal("expected rate limit reject before rate bump")
+	}
+
+	// Operator bumps the limit to 10/min; next Check rebuilds the
+	// bucket with the new rate and the request goes through.
+	r2 := 10
+	k.RPMLimit = &r2
+	if rej := l.Check(context.Background(), k, "m"); rej != nil {
+		t.Fatalf("expected pass after rate bump, got reject: %+v", rej)
 	}
 }
 

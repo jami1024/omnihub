@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-key RPM enforcement (`internal/service/limits/rpm.go`): the
+  `Limiter` now also honours `api_keys.rpm_limit`. Backed by a
+  `golang.org/x/time/rate` token bucket per key — refills at
+  `rpm/60` tokens per second with burst = `rpm`, so a key with
+  `rpm=60` may fire 60 requests instantly and then waits one second
+  per subsequent request. Exhausted buckets return HTTP 429
+  `rate_limit_exceeded`. When an operator updates a key's
+  `rpm_limit`, the cached bucket is rebuilt on the next request so
+  the new policy takes effect immediately (any goodwill in the old
+  bucket is discarded). Buckets are pure in-process state: zero DB
+  cost on the hot path, ordered before the daily-USD check.
 - Per-key policy enforcement (`internal/service/limits/`): the
   `Limiter` runs after authentication and rejects requests that
   violate either of two policies on the matching `api_keys` row.
