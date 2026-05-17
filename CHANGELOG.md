@@ -187,15 +187,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Both `anthropic` and `claude-platform` drivers are now registered
     on every startup; the resolver freely mixes accounts of either
     provider for `/v1/messages` requests.
-  - First-boot migration: if the `accounts` table is empty AND
-    `OMNIHUB_ANTHROPIC_API_KEY` / `OMNIHUB_CLAUDE_PLATFORM_*` env
-    vars are set, the gateway auto-inserts one matching row so
-    existing deployments upgrade transparently.
-  - When no DB is configured (log-only mode), the pool sources from
-    env vars directly in memory — smoke tests still work.
   - Seven resolver tests cover empty-pool error, priority bucket
     filtering, weighted distribution, allowed-provider filtering,
     driver lookup, missing driver rejection, and zero-weight
     fallback to uniform.
+- **BREAKING:** Removed env-var based upstream-account bootstrap.
+  `OMNIHUB_ANTHROPIC_API_KEY`, `OMNIHUB_CLAUDE_PLATFORM_API_KEY`,
+  `OMNIHUB_CLAUDE_PLATFORM_REGION`, and
+  `OMNIHUB_CLAUDE_PLATFORM_WORKSPACE_ID` are no longer read. Accounts
+  live in the database; an empty `accounts` table leaves /v1/messages
+  unmounted and the gateway logs an INSERT SQL snippet for the
+  operator. Running without `OMNIHUB_DATABASE_URL` also leaves
+  /v1/messages unmounted (log-only mode for smoke tests).
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main

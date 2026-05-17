@@ -35,7 +35,8 @@ var (
 )
 
 // Process-wide singletons. nil values are valid for graceful
-// degradation: no pool / buffer means log-only mode.
+// degradation: no pool / buffer means log-only mode and the gateway
+// will not mount /v1/messages.
 var (
 	pool        *pgxpool.Pool
 	writeBuffer *repository.WriteBuffer
@@ -66,12 +67,8 @@ func main() {
 	}
 	cancelBoot()
 
-	// Build the driver registry (one entry per built-in driver) and
-	// the account pool. The pool starts empty; we seed from env vars
-	// when the table is empty for backward compatibility, then start
-	// the periodic refresher.
 	registry := buildDriverRegistry()
-	if err := setupAccountPool(rootCtx, registry); err != nil {
+	if err := setupAccountPool(rootCtx); err != nil {
 		slog.Error("account pool init failed", "err", err)
 		os.Exit(1)
 	}
@@ -143,19 +140,29 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 
 // mountGatewayRoutes wires the LLM forwarding endpoints onto r.
 //
-// MVP behaviour: a Resolver picks one upstream account per request
-// from the in-memory account pool. The pool is populated from the
-// `accounts` table; first-run deployments are auto-seeded from env
-// vars (OMNIHUB_ANTHROPIC_API_KEY or OMNIHUB_CLAUDE_PLATFORM_*).
+// The accounts table is the sole source of truth for upstream
+// providers. If it is empty (or the gateway is running without a
+// database at all), /v1/messages is not mounted — only the health
+// endpoints stay live so a load balancer can drain the instance.
 //
-// If no upstream credentials exist anywhere — empty table AND empty
-// env — /v1/messages is not mounted and only the health endpoints
-// remain live.
+// The operator is expected to add at least one row to the accounts
+// table before the gateway can serve traffic. See the README for the
+// SQL snippets; a CLI / admin API will follow.
 func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
-	if accountPool == nil || accountPool.Size() == 0 {
-		slog.Warn("no upstream accounts available; /v1/messages disabled. " +
-			"Either insert rows into the accounts table or set " +
-			"OMNIHUB_ANTHROPIC_API_KEY / OMNIHUB_CLAUDE_PLATFORM_* env vars.")
+	if accountPool == nil {
+		slog.Error("/v1/messages disabled: no database configured; set OMNIHUB_DATABASE_URL and add accounts to the accounts table")
+		return
+	}
+	if accountPool.Size() == 0 {
+		slog.Error("/v1/messages disabled: accounts table is empty. " +
+			"Add a row to enable routing, e.g.:\n\n" +
+			"  INSERT INTO accounts (name, provider, credentials) VALUES (\n" +
+			"      'my-anthropic', 'anthropic',\n" +
+			"      '{\"api_key\":\"sk-ant-...\"}'::jsonb);\n\n" +
+			"or for Claude Platform on AWS:\n\n" +
+			"  INSERT INTO accounts (name, provider, credentials) VALUES (\n" +
+			"      'my-cp', 'claude-platform',\n" +
+			"      '{\"api_key\":\"sk-aws-...\",\"aws_region\":\"us-east-1\",\"workspace_id\":\"ws_...\"}'::jsonb);")
 		return
 	}
 
@@ -188,36 +195,16 @@ func buildDriverRegistry() *provider.Registry {
 	return reg
 }
 
-// setupAccountPool wires the in-memory account pool against the DB
-// (when configured) and bootstraps from env vars on first run.
-//
-// When the DB is not configured (log-only mode), the function builds
-// the pool from env vars in memory only — accounts disappear on
-// process exit, which is fine for smoke tests.
-func setupAccountPool(ctx context.Context, registry *provider.Registry) error {
+// setupAccountPool wires the in-memory account pool against the DB.
+// When no DB is configured the pool stays nil and mountGatewayRoutes
+// reports the missing-provider state to the operator.
+func setupAccountPool(ctx context.Context) error {
 	if pool == nil {
-		// No DB — build an ephemeral, env-only pool so smoke tests
-		// can still exercise the gateway without Postgres.
-		accountPool = account.NewPool(envOnlySource{})
-		return accountPool.Refresh(ctx)
+		// log-only mode without DB — no account source, no routing.
+		return nil
 	}
 
 	repo := repository.NewAccountRepo(pool)
-
-	count, err := repo.CountAll(ctx)
-	if err != nil {
-		return err
-	}
-	if count == 0 {
-		seeded, err := seedFromEnv(ctx, repo, registry)
-		if err != nil {
-			return err
-		}
-		if seeded > 0 {
-			slog.Info("auto-seeded accounts from env vars", "count", seeded)
-		}
-	}
-
 	accountPool = account.NewPool(repo)
 	if err := accountPool.Start(ctx, accountPoolRefreshInterval); err != nil {
 		return err
@@ -227,99 +214,6 @@ func setupAccountPool(ctx context.Context, registry *provider.Registry) error {
 		"refresh_interval", accountPoolRefreshInterval,
 	)
 	return nil
-}
-
-// seedFromEnv inserts one account row per recognised env-var block on
-// an empty `accounts` table. Returns the number of rows inserted.
-//
-// This preserves the env-var workflow that previous MVP revisions
-// used, so an upgrade with the same configuration just works.
-func seedFromEnv(ctx context.Context, repo *repository.AccountRepo, registry *provider.Registry) (int, error) {
-	inserted := 0
-
-	if key := os.Getenv("OMNIHUB_ANTHROPIC_API_KEY"); key != "" {
-		if _, ok := registry.Get(anthropic.DriverName); ok {
-			id, err := repo.Insert(ctx, repository.InsertParams{
-				Name:           "anthropic-env",
-				Provider:       anthropic.DriverName,
-				Enabled:        true,
-				Weight:         100,
-				Priority:       0,
-				CostMultiplier: 1.0,
-				Credentials:    map[string]string{"api_key": key},
-			})
-			if err != nil {
-				return inserted, err
-			}
-			slog.Info("seeded anthropic account from env", "id", id)
-			inserted++
-		}
-	}
-
-	cpKey := os.Getenv("OMNIHUB_CLAUDE_PLATFORM_API_KEY")
-	cpRegion := os.Getenv("OMNIHUB_CLAUDE_PLATFORM_REGION")
-	cpWorkspace := os.Getenv("OMNIHUB_CLAUDE_PLATFORM_WORKSPACE_ID")
-	if cpKey != "" && cpRegion != "" && cpWorkspace != "" {
-		if _, ok := registry.Get(claudeplatform.DriverName); ok {
-			id, err := repo.Insert(ctx, repository.InsertParams{
-				Name:           "claude-platform-env",
-				Provider:       claudeplatform.DriverName,
-				Enabled:        true,
-				Weight:         100,
-				Priority:       0,
-				CostMultiplier: 1.0,
-				Credentials: map[string]string{
-					"api_key":      cpKey,
-					"aws_region":   cpRegion,
-					"workspace_id": cpWorkspace,
-				},
-			})
-			if err != nil {
-				return inserted, err
-			}
-			slog.Info("seeded claude-platform account from env", "id", id)
-			inserted++
-		}
-	}
-
-	return inserted, nil
-}
-
-// envOnlySource builds accounts from env vars purely in memory.
-// Used when no DB is configured so the gateway still works for
-// smoke tests.
-type envOnlySource struct{}
-
-func (envOnlySource) ListEnabled(_ context.Context) ([]*provider.Account, error) {
-	var out []*provider.Account
-	if key := os.Getenv("OMNIHUB_ANTHROPIC_API_KEY"); key != "" {
-		out = append(out, &provider.Account{
-			Name:           "anthropic-env",
-			Provider:       anthropic.DriverName,
-			Weight:         100,
-			Priority:       0,
-			CostMultiplier: 1.0,
-			Credentials:    map[string]string{"api_key": key},
-		})
-	}
-	cpKey := os.Getenv("OMNIHUB_CLAUDE_PLATFORM_API_KEY")
-	cpRegion := os.Getenv("OMNIHUB_CLAUDE_PLATFORM_REGION")
-	cpWorkspace := os.Getenv("OMNIHUB_CLAUDE_PLATFORM_WORKSPACE_ID")
-	if cpKey != "" && cpRegion != "" && cpWorkspace != "" {
-		out = append(out, &provider.Account{
-			Name:           "claude-platform-env",
-			Provider:       claudeplatform.DriverName,
-			Weight:         100,
-			Priority:       0,
-			CostMultiplier: 1.0,
-			Credentials: map[string]string{
-				"api_key":      cpKey,
-				"aws_region":   cpRegion,
-				"workspace_id": cpWorkspace,
-			},
-		})
-	}
-	return out, nil
 }
 
 func handleHealth(c *gin.Context) {
@@ -351,7 +245,7 @@ func handleReady(c *gin.Context) {
 func initDatabase(ctx context.Context) error {
 	dsn := os.Getenv("OMNIHUB_DATABASE_URL")
 	if dsn == "" {
-		slog.Warn("OMNIHUB_DATABASE_URL is empty; running in log-only mode (no usage persistence)")
+		slog.Warn("OMNIHUB_DATABASE_URL is empty; running in log-only mode (no usage persistence and no upstream accounts)")
 		return nil
 	}
 
