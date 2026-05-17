@@ -1,5 +1,7 @@
 # OmniHub
 
+**English** · [简体中文](README.zh-CN.md)
+
 > **Unified AI gateway with pluggable providers, payments, and observability — built in Go.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

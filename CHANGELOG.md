@@ -14,5 +14,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Architecture overview document under `docs/architecture/`.
 - Adopt `gin-gonic/gin` as the HTTP router and middleware stack.
 - ADR 0001 records the rationale for choosing Gin over chi / Echo / Fiber.
+- Add Simplified Chinese README (`README.zh-CN.md`) and cross-link with English.
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main
