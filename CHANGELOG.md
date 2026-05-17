@@ -137,5 +137,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `RequestLog` emits `cost_usd` so log-only deployments see cost too.
   - 6 unit tests covering known/unknown models, prefix match,
     cache-token charging, and longest-prefix tie-break.
+- **Fix Anthropic price sheet** to match the official
+  platform.claude.com pricing page (2026-05):
+  - Opus 4.7 is **$5/$25 per MTok**, not $15/$75 — Anthropic reduced
+    Opus rates on 2026-04-16. Cache fields adjusted to the canonical
+    ratios off input (5m = 1.25×, 1h = 2.00×, read = 0.10×).
+  - Removed the non-existent `claude-sonnet-4-7` entry; 4.7 is
+    Opus-only as of 2026-05.
+  - Added legacy `claude-opus-4-1` so older alias hits the right row.
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main

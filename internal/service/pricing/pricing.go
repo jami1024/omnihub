@@ -34,21 +34,50 @@ type Price struct {
 // against the "claude-haiku-4-5" row.
 type Table map[string]Price
 
-// Default returns the built-in Anthropic price list. Numbers reflect
-// the public price sheet for Claude 4.5 / 4.6 / 4.7 models. They are
-// shared by direct Anthropic and Claude Platform on AWS — both bill
-// at Anthropic's rates.
+// Default returns the built-in Anthropic price list (USD / 1M tokens),
+// sourced from https://platform.claude.com/docs/en/about-claude/pricing
+// as of 2026-05.
+//
+// The same rate sheet applies to direct api.anthropic.com calls and
+// Claude Platform on AWS (Anthropic's AWS Marketplace endpoint).
+//
+// Anthropic prompt-cache pricing follows a fixed ratio off the input
+// rate for every model:
+//
+//	5-minute cache write : input × 1.25
+//	1-hour cache write   : input × 2.00
+//	cache read           : input × 0.10
+//
+// ⚠ Notes on Opus 4.7 (launched 2026-04-16): Anthropic dropped the
+// Opus rate from $15/$75 to $5/$25 per MTok. The new tokenizer also
+// produces up to ~35% more tokens for the same input text, so real
+// bills can stay comparable despite the rate cut — be aware when
+// comparing pre- and post-4.7 spend.
+//
+// Inference-geo multipliers ("us" applies a 1.1× factor on Opus 4.6+
+// and Sonnet 4.6+) are not modelled here: the default is "global"
+// pricing, and operators using "us" need to apply the multiplier
+// downstream until we add region tracking to message_requests.
 //
 // To update prices: edit this map and ship a new release.
 func Default() Table {
 	return Table{
-		"claude-haiku-4-5":  {InputPerMillion: 1.00, OutputPerMillion: 5.00, CacheCreation5mPerMillion: 1.25, CacheCreation1hPerMillion: 2.00, CacheReadPerMillion: 0.10},
+		// Haiku 4.5 — current high-volume model.
+		"claude-haiku-4-5": {InputPerMillion: 1.00, OutputPerMillion: 5.00, CacheCreation5mPerMillion: 1.25, CacheCreation1hPerMillion: 2.00, CacheReadPerMillion: 0.10},
+
+		// Sonnet 4.5 / 4.6 — current balanced models, same rate sheet.
+		// (No Sonnet 4.7 exists as of 2026-05; the 4.7 generation is
+		// Opus-only.)
 		"claude-sonnet-4-5": {InputPerMillion: 3.00, OutputPerMillion: 15.00, CacheCreation5mPerMillion: 3.75, CacheCreation1hPerMillion: 6.00, CacheReadPerMillion: 0.30},
 		"claude-sonnet-4-6": {InputPerMillion: 3.00, OutputPerMillion: 15.00, CacheCreation5mPerMillion: 3.75, CacheCreation1hPerMillion: 6.00, CacheReadPerMillion: 0.30},
-		"claude-sonnet-4-7": {InputPerMillion: 3.00, OutputPerMillion: 15.00, CacheCreation5mPerMillion: 3.75, CacheCreation1hPerMillion: 6.00, CacheReadPerMillion: 0.30},
-		"claude-opus-4-5":   {InputPerMillion: 15.00, OutputPerMillion: 75.00, CacheCreation5mPerMillion: 18.75, CacheCreation1hPerMillion: 30.00, CacheReadPerMillion: 1.50},
-		"claude-opus-4-6":   {InputPerMillion: 15.00, OutputPerMillion: 75.00, CacheCreation5mPerMillion: 18.75, CacheCreation1hPerMillion: 30.00, CacheReadPerMillion: 1.50},
-		"claude-opus-4-7":   {InputPerMillion: 15.00, OutputPerMillion: 75.00, CacheCreation5mPerMillion: 18.75, CacheCreation1hPerMillion: 30.00, CacheReadPerMillion: 1.50},
+
+		// Opus 4.1 / 4.5 / 4.6 — pre-4.7 Opus pricing.
+		"claude-opus-4-1": {InputPerMillion: 15.00, OutputPerMillion: 75.00, CacheCreation5mPerMillion: 18.75, CacheCreation1hPerMillion: 30.00, CacheReadPerMillion: 1.50},
+		"claude-opus-4-5": {InputPerMillion: 15.00, OutputPerMillion: 75.00, CacheCreation5mPerMillion: 18.75, CacheCreation1hPerMillion: 30.00, CacheReadPerMillion: 1.50},
+		"claude-opus-4-6": {InputPerMillion: 15.00, OutputPerMillion: 75.00, CacheCreation5mPerMillion: 18.75, CacheCreation1hPerMillion: 30.00, CacheReadPerMillion: 1.50},
+
+		// Opus 4.7 — reduced rate ($5/$25) launched 2026-04-16.
+		"claude-opus-4-7": {InputPerMillion: 5.00, OutputPerMillion: 25.00, CacheCreation5mPerMillion: 6.25, CacheCreation1hPerMillion: 10.00, CacheReadPerMillion: 0.50},
 	}
 }
 
