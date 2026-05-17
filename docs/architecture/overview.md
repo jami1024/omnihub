@@ -124,7 +124,25 @@ Hot-path components that need pluggable behaviour (rate limiter, session store, 
 routing strategy) are exposed as **in-process Go interfaces with multiple implementations**,
 not as IPC plugins. This avoids per-request IPC overhead on streaming responses.
 
-### 3.7 Observability
+### 3.7 HTTP routing & middleware
+
+OmniHub uses [`gin-gonic/gin`](https://github.com/gin-gonic/gin) as its HTTP router
+and middleware stack. Rationale:
+
+- Largest ecosystem in the Go web framework space — abundant tutorials, middleware,
+  and StackOverflow coverage shortens the cost of unfamiliar problems.
+- The `binding` struct tags and `c.JSON` / `c.ShouldBindJSON` helpers eliminate a
+  noticeable amount of CRUD boilerplate on the admin API surface.
+- Battle-tested at the same scale and shape we target — sub2api (the closest
+  reference project for this work) runs Gin in production.
+- Hot-path concerns (streaming SSE, AWS EventStream forwarding, `httputil.ReverseProxy`)
+  are reachable from Gin by dropping into `c.Writer` and `http.Flusher`; Gin sugar
+  is used where it helps, sidestepped where it does not.
+
+See [`adr/0001-web-router.md`](adr/0001-web-router.md) for the full decision record,
+including the alternatives that were considered and rejected.
+
+### 3.8 Observability
 
 - **Metrics** — `prometheus/client_golang`, exposed on `/metrics`.
 - **Tracing** — OpenTelemetry SDK with configurable OTLP exporter.
@@ -134,7 +152,7 @@ not as IPC plugins. This avoids per-request IPC overhead on streaming responses.
 - **Decision-chain audit** — each request records which Guards ran, which provider was
   selected, and why.
 
-### 3.8 Database & cache
+### 3.9 Database & cache
 
 - **PostgreSQL 16+** as the primary store (production deployments).
 - **SQLite** as an embedded fallback for development and single-binary demos.
@@ -143,7 +161,7 @@ not as IPC plugins. This avoids per-request IPC overhead on streaming responses.
 
 ORM choice (Ent vs sqlc vs raw `database/sql`) is still TBD — see future ADR.
 
-### 3.9 Configuration
+### 3.10 Configuration
 
 Config is loaded from YAML + environment variables (env wins). Sensitive values
 (credentials, signing keys) are encrypted at rest in the database, never in config files.

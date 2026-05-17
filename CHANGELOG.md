@@ -12,5 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial project scaffolding (`README`, `.gitignore`, `Makefile`).
 - Minimal HTTP entry point at `cmd/omnihub` with `/healthz`, `/readyz`, `/version` endpoints.
 - Architecture overview document under `docs/architecture/`.
+- Adopt `gin-gonic/gin` as the HTTP router and middleware stack.
+- ADR 0001 records the rationale for choosing Gin over chi / Echo / Fiber.
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main

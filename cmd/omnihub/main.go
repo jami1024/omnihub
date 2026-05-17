@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -11,6 +10,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 // Build info populated by the linker via -ldflags (see Makefile).
@@ -31,15 +32,16 @@ func main() {
 		addr = ":8080"
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", handleHealth)
-	mux.HandleFunc("GET /readyz", handleReady)
-	mux.HandleFunc("GET /version", handleVersion)
+	gin.SetMode(gin.ReleaseMode)
+	r := newRouter()
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
+		// WriteTimeout intentionally left at 0; streaming responses may run
+		// for tens of seconds and must not be killed by the server clock.
+		IdleTimeout: 120 * time.Second,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -71,27 +73,30 @@ func main() {
 	slog.Info("shutdown complete")
 }
 
-func handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+func newRouter() *gin.Engine {
+	r := gin.New()
+	r.Use(gin.Recovery())
+
+	r.GET("/healthz", handleHealth)
+	r.GET("/readyz", handleReady)
+	r.GET("/version", handleVersion)
+
+	return r
 }
 
-func handleReady(w http.ResponseWriter, _ *http.Request) {
+func handleHealth(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func handleReady(c *gin.Context) {
 	// Will eventually verify DB / Redis / plugin connectivity.
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	c.JSON(http.StatusOK, gin.H{"status": "ready"})
 }
 
-func handleVersion(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
+func handleVersion(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
 		"version": version,
 		"commit":  commit,
 		"date":    date,
 	})
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Error("write response failed", "err", err)
-	}
 }
