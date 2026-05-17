@@ -258,7 +258,13 @@ func forwardSSE(
 			sniffer.Feed(line)
 
 			if _, werr := w.Write(line); werr != nil {
-				// Client disconnected — stop draining the upstream.
+				// Client disconnected. Keep reading from upstream
+				// for a bounded window so the sniffer can capture
+				// the final message_delta event — without this we
+				// would record the message_start placeholder
+				// output_tokens (~1–4) and the cost row would
+				// under-bill an otherwise full generation.
+				drainSSE(reader, sniffer, resp.Body)
 				return ttfb, sniffer.Result(), fmt.Errorf("write client: %w", werr)
 			}
 			// Flush at SSE event boundary (blank line) to push tokens.
@@ -272,6 +278,43 @@ func forwardSSE(
 		}
 		if err != nil {
 			return ttfb, sniffer.Result(), fmt.Errorf("read upstream: %w", err)
+		}
+	}
+}
+
+// drainTimeout caps how long the gateway keeps reading from upstream
+// after the client has disconnected. The drain exists purely to record
+// the final usage event; anything past this is upstream taking
+// abnormally long and we cut our losses.
+const drainTimeout = 5 * time.Second
+
+// drainMaxBytes belt-and-suspenders bounds the drain in case the
+// timer fails to wake us (e.g. a transport that doesn't honour Close
+// promptly). 256 KiB is enough for several closing SSE events.
+const drainMaxBytes = 256 * 1024
+
+// drainSSE continues reading SSE chunks past a client disconnect for
+// up to drainTimeout / drainMaxBytes, feeding them into sniffer so
+// the final message_delta event lands in usage.Result() before the
+// cost row is persisted. Bytes are discarded — the client is gone.
+//
+// The timer-driven Close is what gives us a hard ceiling: ReadBytes
+// blocks on the upstream socket, but once Close fires the next read
+// returns immediately with an error. Without the timer a stalled
+// upstream would pin one goroutine until the TCP keepalive expired.
+func drainSSE(reader *bufio.Reader, sniffer *usage.SSESniffer, body io.Closer) {
+	timer := time.AfterFunc(drainTimeout, func() { _ = body.Close() })
+	defer timer.Stop()
+
+	bytesRead := 0
+	for bytesRead < drainMaxBytes {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			sniffer.Feed(line)
+			bytesRead += len(line)
+		}
+		if err != nil {
+			return
 		}
 	}
 }

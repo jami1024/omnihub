@@ -2,6 +2,7 @@ package forward_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -114,6 +115,84 @@ func TestForwardStreamingFlushesEachEvent(t *testing.T) {
 	// Verify the body preserves SSE structure (event/data/blank).
 	if !strings.Contains(body, "event: content_block_delta") {
 		t.Errorf("body missing event line: %s", body)
+	}
+}
+
+// failingResponseWriter wraps httptest.ResponseRecorder and starts
+// returning an error from Write after failAfter successful calls.
+// Flush is a no-op so forwardSSE's http.Flusher assertion passes.
+type failingResponseWriter struct {
+	*httptest.ResponseRecorder
+	failAfter  int
+	writeCount int
+}
+
+func (f *failingResponseWriter) Write(b []byte) (int, error) {
+	f.writeCount++
+	if f.writeCount > f.failAfter {
+		return 0, errors.New("client gone")
+	}
+	return f.ResponseRecorder.Write(b)
+}
+
+func (*failingResponseWriter) Flush() {}
+
+func TestForwardStreamingDrainsAfterClientDisconnect(t *testing.T) {
+	// SSE stream where message_start carries the input/cache counts
+	// and a placeholder output_tokens=1, then message_delta carries
+	// the authoritative output_tokens=237. The client "disconnects"
+	// on the very first write, so the drain MUST run to land 237 in
+	// the result.
+	sse := strings.Join([]string{
+		`data: {"type":"message_start","message":{"id":"msg_drain","model":"claude-haiku-4-5","usage":{"input_tokens":50,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`,
+		``,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`,
+		``,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":237}}`,
+		``,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+
+	srv := upstreamServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		_, _ = io.WriteString(w, sse)
+	})
+
+	rec := &failingResponseWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		failAfter:        0, // first Write fails — simulates immediate disconnect
+	}
+
+	f := forward.New(srv.Client())
+	result, err := f.Forward(
+		context.Background(),
+		rec,
+		&ir.UnifiedRequest{Model: "claude-haiku-4-5", MaxTokens: 100, Stream: true},
+		anthropic.New(),
+		anthropicAccount(srv.URL),
+	)
+
+	// The write failure must surface so the handler can log it.
+	if err == nil {
+		t.Fatal("expected error from client disconnect")
+	}
+	if !strings.Contains(err.Error(), "write client") {
+		t.Errorf("error should mention client write, got: %v", err)
+	}
+
+	// The whole point of this test: drain captured the
+	// authoritative output_tokens from message_delta. Without the
+	// drain we would see 1 (the message_start placeholder).
+	if got := result.Usage.OutputTokens; got != 237 {
+		t.Errorf("output_tokens = %d, want 237 (drain should have captured message_delta)", got)
+	}
+	if got := result.Usage.InputTokens; got != 50 {
+		t.Errorf("input_tokens = %d, want 50", got)
+	}
+	if got := result.Usage.UpstreamRequestID; got != "msg_drain" {
+		t.Errorf("upstream_request_id = %q, want msg_drain", got)
 	}
 }
 

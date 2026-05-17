@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Bounded upstream drain on client disconnect mid-stream
+  (`internal/service/forward/forward.go`): when the SSE forward
+  loop's write to the client fails, the gateway no longer abandons
+  the upstream connection on the spot. Instead it keeps reading
+  upstream lines into the SSE sniffer for up to 5 seconds (or 256
+  KiB) before returning, so the final `message_delta` event lands
+  in `Result.Usage` and the persisted cost row reflects the true
+  generation size. Without this fix a mid-stream disconnect
+  recorded the `message_start` placeholder `output_tokens` (~1-4)
+  and the row under-billed by orders of magnitude. The drain is
+  pinned by a `time.AfterFunc` that calls `resp.Body.Close()` on
+  timeout, so a stalled upstream cannot keep a goroutine alive
+  past the budget.
 - Per-key RPM enforcement (`internal/service/limits/rpm.go`): the
   `Limiter` now also honours `api_keys.rpm_limit`. Backed by a
   `golang.org/x/time/rate` token bucket per key — refills at
