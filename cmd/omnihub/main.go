@@ -20,6 +20,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/account"
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
+	"github.com/jami1024/omnihub/internal/service/health"
 	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/anthropic"
@@ -173,16 +174,19 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 		slog.Info("virtual key auth enabled", "key_count", auth.KeyCount())
 	}
 
-	res := resolver.New(accountPool, registry)
+	tracker := health.New(health.DefaultConfig())
+	res := resolver.New(accountPool, registry, tracker)
 	forwarder := forward.New(nil)
 	prices := pricing.Default()
 
 	gw := r.Group("/", auth.Middleware(), guard.RequestLog())
-	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, writeBuffer, prices))
+	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices))
 
 	slog.Info("gateway mounted",
 		"path", "/v1/messages",
 		"account_count", accountPool.Size(),
+		"failure_threshold", health.DefaultConfig().FailureThreshold,
+		"cooldown", health.DefaultConfig().OpenDuration,
 	)
 }
 

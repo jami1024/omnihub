@@ -2,10 +2,15 @@
 // translate it through a Driver, dispatch via a shared HTTP client,
 // and stream or copy the response back to the client.
 //
-// This is the function that becomes the ForwarderGuard once the Guard
-// pipeline lands. Keeping it as a plain function for the MVP makes it
-// easier to wire end-to-end and refactor into a Guard later without
-// changing the underlying logic.
+// The two-phase API (Dispatch + WriteResponse) exists so the handler
+// can retry on a different account when the upstream returns a
+// retriable error (5xx, 429) without leaking partial bytes to the
+// client. Dispatch sends the request and surfaces the response
+// status; the caller decides whether to commit or roll the dice
+// again on the next account.
+//
+// Forward is kept as a convenience wrapper that does both phases for
+// callers that do not need retry semantics.
 package forward
 
 import (
@@ -25,8 +30,8 @@ import (
 )
 
 // Result reports what the Forwarder learned from one upstream call.
-// All fields are populated when Forward returns nil error; some are
-// populated even on error (e.g. StatusCode for a 4xx passthrough).
+// All fields are populated when WriteResponse returns nil error; some
+// are populated even on error (e.g. StatusCode for a passthrough).
 type Result struct {
 	// StatusCode is the upstream HTTP status (passed through to client).
 	StatusCode int
@@ -81,39 +86,50 @@ func defaultClient() *http.Client {
 	}
 }
 
-// Forward builds an outbound request through the driver, dispatches
-// it, and either streams (SSE) or copies (single response) the body
-// back to w.
+// Dispatch sends an upstream request and returns the response. The
+// caller owns resp.Body and must Close it (or pass it to
+// WriteResponse which closes it).
 //
-// When Forward returns nil error the response has been fully delivered
-// to the client and Result captures status + usage. When it returns a
-// non-nil error the response may be partially written (streaming);
-// callers should not try to send their own error envelope after
-// Forward starts streaming.
-func (f *Forwarder) Forward(
+// requestSentAt is the wall-clock instant the upstream request left
+// the local process; WriteResponse uses it to compute TTFB for
+// streaming responses.
+func (f *Forwarder) Dispatch(
 	ctx context.Context,
-	w http.ResponseWriter,
 	req *ir.UnifiedRequest,
 	driver provider.Driver,
 	account *provider.Account,
-) (Result, error) {
+) (resp *http.Response, requestSentAt time.Time, err error) {
 	if req == nil {
-		return Result{}, errors.New("forward: nil request")
+		return nil, time.Time{}, errors.New("forward: nil request")
 	}
 	if driver == nil {
-		return Result{}, errors.New("forward: nil driver")
+		return nil, time.Time{}, errors.New("forward: nil driver")
 	}
 
 	upstreamReq, err := driver.BuildRequest(ctx, req, account)
 	if err != nil {
-		return Result{}, fmt.Errorf("build request: %w", err)
+		return nil, time.Time{}, fmt.Errorf("build request: %w", err)
 	}
 
-	requestSentAt := time.Now()
-	resp, err := f.client.Do(upstreamReq)
+	requestSentAt = time.Now()
+	resp, err = f.client.Do(upstreamReq)
 	if err != nil {
-		return Result{}, fmt.Errorf("upstream call: %w", err)
+		return nil, requestSentAt, fmt.Errorf("upstream call: %w", err)
 	}
+	return resp, requestSentAt, nil
+}
+
+// WriteResponse pipes resp to w. For streaming requests an SSE
+// sniffer reads each line in parallel with passing it to the client
+// to extract token usage. For non-streaming requests the body is
+// read fully, usage is parsed, then the bytes are written to the
+// client. Always closes resp.Body.
+func (f *Forwarder) WriteResponse(
+	w http.ResponseWriter,
+	resp *http.Response,
+	req *ir.UnifiedRequest,
+	requestSentAt time.Time,
+) (Result, error) {
 	defer resp.Body.Close()
 
 	result := Result{StatusCode: resp.StatusCode}
@@ -121,17 +137,33 @@ func (f *Forwarder) Forward(
 	if resp.StatusCode >= 400 {
 		return result, forwardErrorBody(w, resp)
 	}
-
 	if req.Stream {
 		ttfb, u, err := forwardSSE(w, resp, requestSentAt)
 		result.TTFB = ttfb
 		result.Usage = u
 		return result, err
 	}
-
 	u, err := forwardBody(w, resp)
 	result.Usage = u
 	return result, err
+}
+
+// Forward is the convenience one-shot path: Dispatch then
+// WriteResponse with no retry semantics. Existing call sites use
+// this; the new handler-level retry loop calls Dispatch and
+// WriteResponse directly.
+func (f *Forwarder) Forward(
+	ctx context.Context,
+	w http.ResponseWriter,
+	req *ir.UnifiedRequest,
+	driver provider.Driver,
+	account *provider.Account,
+) (Result, error) {
+	resp, sentAt, err := f.Dispatch(ctx, req, driver, account)
+	if err != nil {
+		return Result{}, err
+	}
+	return f.WriteResponse(w, resp, req, sentAt)
 }
 
 // forwardErrorBody copies an upstream error response verbatim. The
@@ -235,4 +267,13 @@ func copySafeHeaders(dst http.ResponseWriter, src *http.Response) {
 			dst.Header().Set(k, v)
 		}
 	}
+}
+
+// IsRetriable reports whether an upstream HTTP status is worth
+// retrying against a different account. 5xx (server errors) and 429
+// (rate limit) qualify; 4xx other than 429 is a client problem and
+// should be reflected back. Transport-level errors (returned from
+// Dispatch with non-nil err) are always retriable.
+func IsRetriable(status int) bool {
+	return status >= 500 || status == http.StatusTooManyRequests
 }

@@ -191,6 +191,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     filtering, weighted distribution, allowed-provider filtering,
     driver lookup, missing driver rejection, and zero-weight
     fallback to uniform.
+- **Health tracker + automatic failover** for upstream accounts:
+  - `internal/service/health` ships a three-state circuit breaker per
+    account (closed / open / half-open) modelled after claude-code-hub.
+    Defaults: 5 consecutive failures trip → 30 s cooldown → 1 success
+    in half-open closes the breaker. Disabled (FailureThreshold ≤ 0)
+    by configuration if needed.
+  - `forward.Forwarder` split into `Dispatch` + `WriteResponse` so the
+    handler can read the upstream status code BEFORE committing any
+    bytes to the client. Retriable failures (5xx + 429 + transport
+    errors) roll over to a different account; once `WriteResponse`
+    starts writing, the response is committed.
+  - `forward.IsRetriable` exposes the retry policy.
+  - `resolver.WeightedResolver` now accepts an `excludedAccountIDs`
+    slice (skip accounts already tried in this request) and consults
+    `health.Tracker` to filter out accounts whose circuit is open.
+    A nil tracker preserves the old behaviour (no health filtering).
+  - The `/v1/messages` handler runs a bounded retry loop
+    (`maxFailoverAttempts = 3`). Each failure is recorded against the
+    account, and the loop terminates when a non-retriable response is
+    seen or the candidate pool is exhausted. Exhausted retries
+    surface a 502 (or 429 if the last attempt was a 429) and the
+    final attempt is persisted into `message_requests`.
+  - Eleven health-tracker tests cover state transitions, cooldown
+    timing, half-open promotion / demotion, disabled mode, per-account
+    isolation, and concurrent recording (race-detectable).
+  - Resolver tests gain `TestResolveExcludesAlreadyTriedIDs` and
+    `TestResolveSkipsUnhealthyAccounts`.
 - **BREAKING:** Removed env-var based upstream-account bootstrap.
   `OMNIHUB_ANTHROPIC_API_KEY`, `OMNIHUB_CLAUDE_PLATFORM_API_KEY`,
   `OMNIHUB_CLAUDE_PLATFORM_REGION`, and

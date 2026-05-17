@@ -1,15 +1,18 @@
 // Package gateway hosts the HTTP handlers that accept client requests
 // and dispatch them through the Forwarder.
 //
-// MVP shape: one handler per upstream protocol (Anthropic Messages,
-// later OpenAI Chat Completions, Gemini, etc.). The handler asks the
-// Resolver for the (driver, account) pair to use; the Forwarder owns
-// transport, and persistence is optional.
+// MVP shape: one handler per upstream protocol. The handler runs a
+// bounded retry loop on top of the Resolver + Forwarder: the upstream
+// is contacted, and a retriable status code (5xx, 429) or transport
+// error rolls over to a different account before any bytes reach the
+// client. Once Forwarder.WriteResponse starts writing, the response is
+// committed and any subsequent failure surfaces to the client.
 package gateway
 
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -22,6 +25,7 @@ import (
 	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
+	"github.com/jami1024/omnihub/internal/service/health"
 	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/resolver"
@@ -32,20 +36,30 @@ import (
 // on AWS accept the same wire format.
 var anthropicCompatibleProviders = []string{"anthropic", "claude-platform"}
 
+// maxFailoverAttempts caps how many distinct accounts the retry loop
+// will try for one inbound request before surfacing a 503.
+const maxFailoverAttempts = 3
+
 // AnthropicMessagesHandler returns a gin.HandlerFunc for the
 // Anthropic-compatible POST /v1/messages endpoint.
 //
-// The handler is intentionally thin: read the body, decode into IR,
-// lift the anthropic-beta header into the IR, ask the Resolver for an
-// (account, driver) pair, delegate to the Forwarder, and (when buffer
-// != nil) enqueue a complete MessageRequest row for persistence.
+// On each request:
 //
-// buffer may be nil, in which case the gateway runs in log-only mode
-// (no DB writes) — this keeps `go run` smoke tests working without a
-// Postgres dependency.
+//  1. Body is read once and decoded into IR.
+//  2. The retry loop asks the resolver for an account (excluding the
+//     IDs already tried this request), dispatches to it, and on a
+//     retriable failure tries again with another account.
+//  3. The first non-retriable response is committed to the client.
+//  4. Health is recorded per attempt; persistence (when configured)
+//     captures the final attempt.
+//
+// buffer may be nil (log-only mode without DB). tracker may be nil to
+// disable health-aware filtering (every account is always considered
+// available).
 func AnthropicMessagesHandler(
 	forwarder *forward.Forwarder,
 	res resolver.Resolver,
+	tracker *health.Tracker,
 	buffer *repository.WriteBuffer,
 	prices pricing.Table,
 ) gin.HandlerFunc {
@@ -64,88 +78,183 @@ func AnthropicMessagesHandler(
 			return
 		}
 
-		// Lift anthropic-beta from the HTTP header into the IR so the
-		// driver re-emits it as a header to the upstream.
 		if beta := c.GetHeader("anthropic-beta"); beta != "" && len(req.AnthropicBeta) == 0 {
 			req.AnthropicBeta = splitCSV(beta)
 		}
 
-		// Surface routing-relevant fields for the RequestLog guard.
 		c.Set(guard.CtxKeyModel, req.Model)
 		c.Set(guard.CtxKeyStream, req.Stream)
 
-		// Pick the upstream for this request. ErrNoUpstream surfaces
-		// when the pool is empty (e.g. all accounts disabled), which
-		// is a server-side issue: 503 to the client.
-		account, driver, err := res.ResolveForProviders(anthropicCompatibleProviders)
-		if err != nil {
-			if errors.Is(err, resolver.ErrNoUpstream) {
-				errorJSON(c, http.StatusServiceUnavailable, "no_upstream_available",
-					"no upstream account is available for this request")
+		// Retry loop: at most maxFailoverAttempts distinct accounts.
+		var (
+			attempted     []int64
+			lastDriver    provider.Driver
+			lastAccount   *provider.Account
+			lastErr       error
+			lastBadStatus int
+		)
+
+		for attempt := 0; attempt < maxFailoverAttempts; attempt++ {
+			account, driver, rerr := res.ResolveForProviders(anthropicCompatibleProviders, attempted)
+			if rerr != nil {
+				if errors.Is(rerr, resolver.ErrNoUpstream) {
+					if attempt == 0 {
+						errorJSON(c, http.StatusServiceUnavailable, "no_upstream_available",
+							"no upstream account is available for this request")
+						return
+					}
+					// Earlier attempts failed but we ran out of fresh
+					// accounts. Surface the last upstream error.
+					emitFailoverExhausted(c, lastBadStatus, lastErr)
+					recordExhaustedFailure(c, &req, lastDriver, lastAccount, buffer, startedAt, lastBadStatus, lastErr)
+					return
+				}
+				slog.Error("resolver failed", "err", rerr.Error())
+				errorJSON(c, http.StatusInternalServerError, "internal_error", "resolver failed")
 				return
 			}
-			slog.Error("resolver failed", "err", err.Error())
-			errorJSON(c, http.StatusInternalServerError, "internal_error", "resolver failed")
+
+			resp, sentAt, derr := forwarder.Dispatch(c.Request.Context(), &req, driver, account)
+			if derr != nil {
+				// Transport-level failure: always retriable.
+				if tracker != nil {
+					tracker.RecordFailure(account.ID, derr)
+				}
+				slog.Warn("upstream dispatch failed; trying next account",
+					"account", account.Name, "attempt", attempt+1, "err", derr.Error())
+				attempted = append(attempted, account.ID)
+				lastDriver, lastAccount, lastErr, lastBadStatus = driver, account, derr, 0
+				continue
+			}
+
+			if forward.IsRetriable(resp.StatusCode) {
+				_ = resp.Body.Close()
+				if tracker != nil {
+					tracker.RecordFailure(account.ID, fmt.Errorf("upstream HTTP %d", resp.StatusCode))
+				}
+				slog.Warn("upstream returned retriable status; trying next account",
+					"account", account.Name, "attempt", attempt+1, "status", resp.StatusCode)
+				attempted = append(attempted, account.ID)
+				lastDriver, lastAccount, lastBadStatus = driver, account, resp.StatusCode
+				lastErr = fmt.Errorf("upstream HTTP %d", resp.StatusCode)
+				continue
+			}
+
+			// Commit: this response is what the client gets.
+			result, writeErr := forwarder.WriteResponse(c.Writer, resp, &req, sentAt)
+			recordHealthAfterWrite(tracker, account.ID, result, writeErr)
+
+			c.Set(guard.CtxKeyUsage, result.Usage)
+			if result.TTFB > 0 {
+				c.Set(guard.CtxKeyTTFB, result.TTFB)
+			}
+
+			costUSD, costBreakdown := computeCost(prices, &req, &result, account)
+			if costUSD != nil {
+				c.Set(guard.CtxKeyCostUSD, *costUSD)
+			}
+
+			if buffer != nil {
+				rec := buildMessageRequest(c, &req, driver, account, &result, writeErr, startedAt)
+				rec.CostUSD = costUSD
+				rec.CostBreakdown = costBreakdown
+				buffer.Enqueue(rec)
+			}
+
+			if writeErr != nil {
+				slog.Error("forward failed after committing response",
+					"account", account.Name,
+					"status", result.StatusCode,
+					"err", writeErr.Error())
+			}
 			return
 		}
 
-		result, forwardErr := forwarder.Forward(c.Request.Context(), c.Writer, &req, driver, account)
-		if forwardErr != nil {
-			slog.Error("forward failed",
-				"model", req.Model,
-				"stream", req.Stream,
-				"upstream_status", result.StatusCode,
-				"account", account.Name,
-				"err", forwardErr.Error(),
-			)
-			// Headers may already be flushed (streaming case); we
-			// cannot reliably send an error envelope. The partial
-			// response stands, RequestLog records the failure.
-		}
-
-		// Surface usage onto the gin.Context for RequestLog.
-		c.Set(guard.CtxKeyUsage, result.Usage)
-		if result.TTFB > 0 {
-			c.Set(guard.CtxKeyTTFB, result.TTFB)
-		}
-
-		// Resolve the cost using the most specific model we know about
-		// (upstream-reported actual_model takes priority over the
-		// client's requested alias). The account-level multiplier
-		// scales every bucket so resellers can mark up or discount.
-		var (
-			costUSD       *float64
-			costBreakdown *pricing.Breakdown
-		)
-		modelForPricing := result.Usage.ActualModel
-		if modelForPricing == "" {
-			modelForPricing = req.Model
-		}
-		if prices != nil && modelForPricing != "" {
-			if base, ok := prices.Calculate(modelForPricing, result.Usage); ok {
-				final := base.ApplyMultiplier(account.CostMultiplier)
-				costBreakdown = &final
-				costUSD = &final.Total
-			} else {
-				slog.Warn("no pricing entry for model",
-					"requested_model", req.Model,
-					"actual_model", result.Usage.ActualModel,
-				)
-			}
-		}
-		if costUSD != nil {
-			c.Set(guard.CtxKeyCostUSD, *costUSD)
-		}
-
-		// Persistence is opt-in: when no buffer is wired the gateway
-		// runs in log-only mode.
-		if buffer != nil {
-			rec := buildMessageRequest(c, &req, driver, account, &result, forwardErr, startedAt)
-			rec.CostUSD = costUSD
-			rec.CostBreakdown = costBreakdown
-			buffer.Enqueue(rec)
-		}
+		// Loop body returns on every iteration. The only way to fall
+		// out is exhausting maxFailoverAttempts with retriable errors.
+		emitFailoverExhausted(c, lastBadStatus, lastErr)
+		recordExhaustedFailure(c, &req, lastDriver, lastAccount, buffer, startedAt, lastBadStatus, lastErr)
 	}
+}
+
+// recordHealthAfterWrite updates the circuit breaker based on the
+// committed response. 4xx (excluding 429) is a client problem and
+// is NOT counted against the account.
+func recordHealthAfterWrite(tracker *health.Tracker, accountID int64, result forward.Result, writeErr error) {
+	if tracker == nil {
+		return
+	}
+	if writeErr != nil && result.StatusCode == 0 {
+		tracker.RecordFailure(accountID, writeErr)
+		return
+	}
+	switch {
+	case result.StatusCode >= 200 && result.StatusCode < 400:
+		tracker.RecordSuccess(accountID)
+	case result.StatusCode >= 500 || result.StatusCode == http.StatusTooManyRequests:
+		tracker.RecordFailure(accountID, fmt.Errorf("upstream HTTP %d", result.StatusCode))
+	}
+}
+
+// emitFailoverExhausted writes the final error envelope when every
+// allowed account returned a retriable failure.
+func emitFailoverExhausted(c *gin.Context, status int, lastErr error) {
+	message := "all candidate upstream accounts failed after retries"
+	if lastErr != nil {
+		message = fmt.Sprintf("%s: %s", message, lastErr.Error())
+	}
+	httpStatus := http.StatusBadGateway
+	if status == http.StatusTooManyRequests {
+		httpStatus = http.StatusTooManyRequests
+	}
+	errorJSON(c, httpStatus, "all_upstreams_failed", message)
+}
+
+// recordExhaustedFailure logs the final attempt into message_requests
+// when the retry loop runs out of accounts.
+func recordExhaustedFailure(
+	c *gin.Context,
+	req *ir.UnifiedRequest,
+	driver provider.Driver,
+	account *provider.Account,
+	buffer *repository.WriteBuffer,
+	startedAt time.Time,
+	status int,
+	err error,
+) {
+	if buffer == nil || account == nil || driver == nil {
+		return
+	}
+	result := forward.Result{StatusCode: status}
+	rec := buildMessageRequest(c, req, driver, account, &result, err, startedAt)
+	buffer.Enqueue(rec)
+}
+
+// computeCost mirrors the previous handler logic, factored out to
+// keep the retry loop body short.
+func computeCost(
+	prices pricing.Table,
+	req *ir.UnifiedRequest,
+	result *forward.Result,
+	account *provider.Account,
+) (*float64, *pricing.Breakdown) {
+	modelForPricing := result.Usage.ActualModel
+	if modelForPricing == "" {
+		modelForPricing = req.Model
+	}
+	if prices == nil || modelForPricing == "" {
+		return nil, nil
+	}
+	base, ok := prices.Calculate(modelForPricing, result.Usage)
+	if !ok {
+		slog.Warn("no pricing entry for model",
+			"requested_model", req.Model,
+			"actual_model", result.Usage.ActualModel,
+		)
+		return nil, nil
+	}
+	final := base.ApplyMultiplier(account.CostMultiplier)
+	return &final.Total, &final
 }
 
 // buildMessageRequest assembles a complete row for the message_requests

@@ -2,17 +2,18 @@
 // request from the in-memory pool.
 //
 // The MVP resolver implements priority-tiered weighted-random
-// selection:
+// selection with health-aware filtering:
 //
 //  1. Filter to accounts whose provider is in the allowed set for
 //     this request kind (currently: any provider that accepts the
 //     Anthropic Messages format).
-//  2. Bucket by priority. Lower numeric priority = preferred tier.
-//  3. Inside the top bucket, do a weighted random pick.
+//  2. Drop accounts in the excluded set (already tried this request)
+//     and accounts whose circuit breaker is open.
+//  3. Bucket by priority. Lower numeric priority = preferred tier.
+//  4. Inside the top bucket, do a weighted random pick.
 //
-// Health-aware filtering (skip cooled-down accounts), session
-// stickiness, and failover live in a follow-up commit — those need
-// the per-account health tracker that is not yet built.
+// Session stickiness lives in a follow-up commit and will compose with
+// this resolver via a session-binding decorator.
 package resolver
 
 import (
@@ -22,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/jami1024/omnihub/internal/service/account"
+	"github.com/jami1024/omnihub/internal/service/health"
 	"github.com/jami1024/omnihub/internal/service/provider"
 )
 
@@ -30,46 +32,50 @@ import (
 var ErrNoUpstream = errors.New("no upstream account available")
 
 // Resolver maps a request kind to a concrete (driver, account) pair.
-// The interface keeps the handler decoupled from selection strategy:
-// today it's WeightedResolver; tomorrow it could be cost-aware,
-// latency-aware, or sticky.
 type Resolver interface {
 	// ResolveForProviders picks an account whose provider is in
-	// allowedProviders. The empty list means "any provider".
-	ResolveForProviders(allowedProviders []string) (*provider.Account, provider.Driver, error)
+	// allowedProviders. excludedAccountIDs lets a retry loop skip
+	// accounts already attempted on the same request. Empty
+	// allowedProviders means "any provider"; nil excludedAccountIDs
+	// means "no exclusions".
+	ResolveForProviders(
+		allowedProviders []string,
+		excludedAccountIDs []int64,
+	) (*provider.Account, provider.Driver, error)
 }
 
 // WeightedResolver implements Resolver with priority + weighted-random
-// selection.
+// selection and health-aware filtering.
 type WeightedResolver struct {
 	pool     *account.Pool
 	registry *provider.Registry
+	tracker  *health.Tracker
 
-	// mu guards rng, the only mutable state.
 	mu  sync.Mutex
 	rng *rand.Rand
 }
 
-// New returns a resolver wired against the given pool and driver
-// registry. The registry is consulted to translate a chosen
-// account.Provider string into the Driver implementation.
-func New(pool *account.Pool, registry *provider.Registry) *WeightedResolver {
-	// Use a per-resolver rng so tests can substitute a deterministic
-	// source if needed in the future.
+// New returns a resolver wired against the given pool, driver
+// registry, and health tracker. A nil tracker disables health-based
+// filtering (every enabled account is considered routable).
+func New(pool *account.Pool, registry *provider.Registry, tracker *health.Tracker) *WeightedResolver {
 	src := rand.NewPCG(rand.Uint64(), rand.Uint64())
 	return &WeightedResolver{
 		pool:     pool,
 		registry: registry,
+		tracker:  tracker,
 		rng:      rand.New(src),
 	}
 }
 
 // ResolveForProviders selects one account whose provider is in the
-// allowed list. An empty list accepts any provider.
+// allowed list, skipping any in excluded and any with an open
+// circuit breaker. Returns ErrNoUpstream when nothing routable remains.
 func (r *WeightedResolver) ResolveForProviders(
 	allowedProviders []string,
+	excludedAccountIDs []int64,
 ) (*provider.Account, provider.Driver, error) {
-	candidates := r.gather(allowedProviders)
+	candidates := r.gather(allowedProviders, excludedAccountIDs)
 	if len(candidates) == 0 {
 		return nil, nil, ErrNoUpstream
 	}
@@ -97,23 +103,34 @@ func (r *WeightedResolver) ResolveForProviders(
 	return chosen, driver, nil
 }
 
-// gather returns the subset of pool accounts whose provider is in
-// allowed. An empty / nil allow-list passes every account through.
-func (r *WeightedResolver) gather(allowed []string) []*provider.Account {
+// gather returns the subset of pool accounts that:
+//   - have a provider in allowed (empty allow-list passes everything);
+//   - are not in the excluded set;
+//   - pass the health tracker's IsAvailable check.
+func (r *WeightedResolver) gather(allowed []string, excluded []int64) []*provider.Account {
+	excludedSet := make(map[int64]struct{}, len(excluded))
+	for _, id := range excluded {
+		excludedSet[id] = struct{}{}
+	}
+
+	var raw []*provider.Account
 	if len(allowed) == 0 {
-		return r.pool.All()
-	}
-	allow := make(map[string]struct{}, len(allowed))
-	for _, p := range allowed {
-		allow[p] = struct{}{}
-	}
-	var out []*provider.Account
-	for _, p := range allowed {
-		for _, a := range r.pool.ByProvider(p) {
-			if _, ok := allow[a.Provider]; ok {
-				out = append(out, a)
-			}
+		raw = r.pool.All()
+	} else {
+		for _, p := range allowed {
+			raw = append(raw, r.pool.ByProvider(p)...)
 		}
+	}
+
+	out := raw[:0]
+	for _, a := range raw {
+		if _, skip := excludedSet[a.ID]; skip {
+			continue
+		}
+		if r.tracker != nil && !r.tracker.IsAvailable(a.ID) {
+			continue
+		}
+		out = append(out, a)
 	}
 	return out
 }
@@ -135,7 +152,6 @@ func (r *WeightedResolver) weightedPick(accounts []*provider.Account) *provider.
 		totalWeight += w
 	}
 	if totalWeight <= 0 {
-		// All weights non-positive: degenerate to uniform.
 		r.mu.Lock()
 		idx := r.rng.IntN(len(accounts))
 		r.mu.Unlock()
@@ -156,6 +172,5 @@ func (r *WeightedResolver) weightedPick(accounts []*provider.Account) *provider.
 		}
 		pick -= w
 	}
-	// Mathematically unreachable, but the compiler insists.
 	return accounts[len(accounts)-1]
 }
