@@ -1,0 +1,39 @@
+# OmniHub production reverse proxy.
+#
+# Caddy fronts the gateway, terminates TLS (auto Let's Encrypt over
+# HTTP-01 / TLS-ALPN-01), and forwards plain HTTP to the omnihub
+# container on the internal Docker network. The gateway itself is not
+# published on the host — only Caddy is.
+#
+# {$OMNIHUB_DOMAIN} is substituted from the compose environment so a
+# single Caddyfile works for staging / production / preview deployments
+# without edits.
+
+{$OMNIHUB_DOMAIN} {
+	# Strict-Transport-Security on by default below — clients that
+	# upgrade to HTTPS once stay on it for a year, even if DNS later
+	# points somewhere else. Comment out if you ever need to roll back
+	# to plain HTTP for debugging.
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	# Forward everything (including SSE) to the gateway. flush_interval
+	# -1 means "flush every write" — required so streaming responses
+	# reach the client one chunk at a time instead of being buffered.
+	reverse_proxy omnihub:8080 {
+		flush_interval -1
+		# Honour the client's IP through the proxy chain. The gateway
+		# only trusts X-Forwarded-For when OMNIHUB_TRUSTED_PROXIES
+		# names this container's network.
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+	}
+
+	# Skip Caddy's own access log for the health probe so docker
+	# healthchecks do not flood the log file.
+	@health path /healthz /readyz
+	log {
+		output stdout
+		format json
+	}
+	log_skip @health
+}

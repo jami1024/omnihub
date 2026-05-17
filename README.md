@@ -60,6 +60,50 @@ curl http://localhost:8080/version
 
 Override the listen address with `OMNIHUB_LISTEN=:9000 make run`.
 
+## 🏭 Production deploy (Docker + Caddy + Let's Encrypt)
+
+`deploy/` ships a one-host stack: PostgreSQL + the gateway + Caddy
+fronting them with auto-renewing TLS. Prereqs:
+
+- Docker + Compose v2 on the target host.
+- Ports 80 and 443 reachable from the public internet (firewall and
+  any cloud security group must allow inbound).
+- A DNS A and/or AAAA record for your domain already pointing at this
+  host **before** the first `up` — Caddy will request the cert during
+  startup via the HTTP-01 ACME challenge.
+
+```bash
+cp deploy/.env.example deploy/.env
+$EDITOR deploy/.env       # set OMNIHUB_DOMAIN, POSTGRES_PASSWORD,
+                          # OMNIHUB_API_KEYS, and one upstream
+                          # credential block (Anthropic OR Claude
+                          # Platform on AWS).
+
+docker compose -f deploy/docker-compose.yaml --env-file deploy/.env up -d --build
+```
+
+First boot pulls Caddy, builds the gateway image locally, runs
+migrations, and provisions the TLS cert. Watch progress with:
+
+```bash
+docker compose -f deploy/docker-compose.yaml --env-file deploy/.env logs -f
+```
+
+Once `caddy` logs "certificate obtained successfully" the gateway is
+live at `https://${OMNIHUB_DOMAIN}/v1/messages`. Add upstream
+accounts and virtual keys via the CLI inside the container:
+
+```bash
+docker exec -it omnihub-prod-gateway \
+  omnihub account add --name=primary --provider=anthropic \
+                      --api-key=sk-ant-...
+
+docker exec -it omnihub-prod-gateway \
+  omnihub key add --name=alice --daily-usd=50 --rpm=120
+```
+
+The cleartext key is printed once — store it.
+
 ## 📐 Architecture (preview)
 
 ```

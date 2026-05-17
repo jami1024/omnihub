@@ -1,14 +1,15 @@
-# Production-shape deployment: gateway + PostgreSQL together.
+# Production deployment: gateway + PostgreSQL + Caddy reverse proxy.
 #
 # The OmniHub container reaches PostgreSQL over the internal Docker
-# network as "postgres". PostgreSQL is intentionally NOT published on
-# the host so it cannot be reached from outside the compose project;
-# only the gateway listens on the host's port.
+# network as "postgres". Neither postgres nor omnihub is published on
+# the host — Caddy is the sole entry point, terminating TLS for
+# ${OMNIHUB_DOMAIN} via auto Let's Encrypt and forwarding plain HTTP
+# to omnihub:8080.
 #
 # Usage:
 #   cp deploy/.env.example deploy/.env
-#   # edit deploy/.env with real values
-#   docker compose -f deploy/docker-compose.yaml --env-file deploy/.env up -d
+#   $EDITOR deploy/.env                          # set OMNIHUB_DOMAIN, secrets
+#   docker compose -f deploy/docker-compose.yaml --env-file deploy/.env up -d --build
 #
 # To follow logs:
 #   docker compose -f deploy/docker-compose.yaml --env-file deploy/.env logs -f
@@ -18,11 +19,17 @@
 #
 # To tear down AND delete the database volume:
 #   docker compose -f deploy/docker-compose.yaml --env-file deploy/.env down -v
+#
+# Container / volume names are prefixed `omnihub-prod-*` so the
+# production stack can coexist on the same host as the development
+# postgres started by docker-compose.dev.yaml.
+
+name: omnihub-prod
 
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: omnihub-pg
+    container_name: omnihub-prod-pg
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-omnihub}
@@ -34,18 +41,17 @@ services:
       timeout: 3s
       retries: 10
     volumes:
-      - omnihub_pg_data:/var/lib/postgresql/data
+      - omnihub_prod_pg_data:/var/lib/postgresql/data
     # No `ports:` — DB stays on the internal Docker network only.
 
   omnihub:
-    # Pulled from GitHub Container Registry once published. Until you
-    # push your first image, comment out `image:` and uncomment `build:`
-    # to build locally from the source tree.
-    image: ghcr.io/jami1024/omnihub:${OMNIHUB_VERSION:-latest}
-    # build:
-    #   context: ..
-    #   dockerfile: Dockerfile
-    container_name: omnihub-gateway
+    # Build locally from source for the first deploy. Once the image
+    # is pushed to GHCR, swap `build:` for `image:` to skip rebuilds.
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: omnihub:${OMNIHUB_VERSION:-local}
+    container_name: omnihub-prod-gateway
     restart: unless-stopped
     depends_on:
       postgres:
@@ -65,10 +71,31 @@ services:
       OMNIHUB_CIRCUIT_OPEN_DURATION: ${OMNIHUB_CIRCUIT_OPEN_DURATION:-}
       OMNIHUB_CIRCUIT_HALF_OPEN_SUCCESS: ${OMNIHUB_CIRCUIT_HALF_OPEN_SUCCESS:-}
       OMNIHUB_SESSION_TTL: ${OMNIHUB_SESSION_TTL:-}
-      OMNIHUB_TRUSTED_PROXIES: ${OMNIHUB_TRUSTED_PROXIES:-}
+      # Caddy is the only proxy in front; trust its container so
+      # X-Forwarded-For survives. The "172.16.0.0/12" CIDR covers the
+      # default Docker bridge network range.
+      OMNIHUB_TRUSTED_PROXIES: ${OMNIHUB_TRUSTED_PROXIES:-172.16.0.0/12}
       OMNIHUB_ALLOWED_CLIENT_UA_PREFIXES: ${OMNIHUB_ALLOWED_CLIENT_UA_PREFIXES:-}
+    # No `ports:` — Caddy is the only public entry point.
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: omnihub-prod-caddy
+    restart: unless-stopped
+    depends_on:
+      - omnihub
+    environment:
+      OMNIHUB_DOMAIN: ${OMNIHUB_DOMAIN:?OMNIHUB_DOMAIN must be set in deploy/.env (e.g. api.example.com)}
     ports:
-      - "${OMNIHUB_PORT:-8080}:8080"
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"      # HTTP/3 (QUIC)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - omnihub_prod_caddy_data:/data         # certificates + ACME state
+      - omnihub_prod_caddy_config:/config     # autosaved config
 
 volumes:
-  omnihub_pg_data:
+  omnihub_prod_pg_data:
+  omnihub_prod_caddy_data:
+  omnihub_prod_caddy_config:
