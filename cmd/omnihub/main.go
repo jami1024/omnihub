@@ -222,6 +222,26 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 
 	healthCfg := loadHealthConfig()
 	tracker := health.New(healthCfg)
+	// Per-account overrides: when an account row has non-NULL
+	// circuit_* columns, those values replace the global defaults
+	// for that account only. Pool.ByID is O(1).
+	tracker.SetConfigLookup(func(accountID int64) health.Config {
+		a := accountPool.ByID(accountID)
+		if a == nil {
+			return healthCfg
+		}
+		cfg := healthCfg
+		if a.CircuitFailureThreshold != nil {
+			cfg.FailureThreshold = *a.CircuitFailureThreshold
+		}
+		if a.CircuitOpenDuration != nil {
+			cfg.OpenDuration = *a.CircuitOpenDuration
+		}
+		if a.CircuitHalfOpenSuccess != nil {
+			cfg.HalfOpenSuccessThreshold = *a.CircuitHalfOpenSuccess
+		}
+		return cfg
+	})
 
 	sessionTTL := loadSessionTTL()
 	var sessions *session.Store

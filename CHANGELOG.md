@@ -238,7 +238,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       bind / get / TTL expiry / refresh, sticky re-use across
       iterations, fallback when bound account turns unhealthy, and
       the retry-loop "don't bind" guarantee.
-  - Circuit-breaker thresholds are configurable via env vars:
+  - Per-account circuit-breaker overrides: the `accounts` table now
+    carries three nullable columns (`circuit_failure_threshold`,
+    `circuit_open_duration_ms`, `circuit_half_open_success`).
+    NULL values inherit the env-driven gateway default; non-NULL
+    values replace it for that single account. Migration
+    `0005_account_circuit_overrides.sql` adds the columns with CHECK
+    constraints. The `omnihub account add` CLI gains
+    `--circuit-failure-threshold`, `--circuit-open-duration`, and
+    `--circuit-half-open-success` flags. `health.Tracker` exposes
+    `SetConfigLookup` so the gateway wires `accountPool.ByID` as the
+    resolver, giving O(1) per-call cost on the hot path.
+  - Global circuit-breaker thresholds are configurable via env vars:
     `OMNIHUB_CIRCUIT_FAILURE_THRESHOLD` (int, ≥0; 0 disables),
     `OMNIHUB_CIRCUIT_OPEN_DURATION` (Go duration, e.g. `30s`, `2m`),
     `OMNIHUB_CIRCUIT_HALF_OPEN_SUCCESS` (int, >0). Defaults match

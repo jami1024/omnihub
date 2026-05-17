@@ -15,6 +15,8 @@
 // given request through.
 package provider
 
+import "time"
+
 // Account is one set of upstream credentials plus the configuration
 // the driver needs to route a request. Accounts are persisted in the
 // database and loaded into memory by the account service.
@@ -61,6 +63,16 @@ type Account struct {
 	// healthy account, falling through to higher numbers as accounts
 	// in the top bucket exhaust their quotas. 0 is the default tier.
 	Priority int
+
+	// CircuitFailureThreshold / CircuitOpenDuration /
+	// CircuitHalfOpenSuccess optionally override the gateway-wide
+	// circuit-breaker defaults for this account. A nil value falls
+	// back to the OMNIHUB_CIRCUIT_* env-driven default. The pointer
+	// shape lets the DB distinguish "use default" (NULL) from
+	// "disable for this account" (explicit 0 / minimum).
+	CircuitFailureThreshold *int
+	CircuitOpenDuration     *time.Duration
+	CircuitHalfOpenSuccess  *int
 }
 
 // Credential returns the value for the given credential key, or "" if

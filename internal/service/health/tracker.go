@@ -76,11 +76,19 @@ type Snapshot struct {
 	HalfOpenSuccess int
 }
 
+// ConfigLookup resolves the effective configuration for one account.
+// Returning a zero Config means "fall back to the tracker default".
+// The lookup runs on every IsAvailable / RecordFailure / RecordSuccess
+// call so the implementation should be fast (typically O(1) map
+// access into the account pool).
+type ConfigLookup func(accountID int64) Config
+
 // Tracker is the per-process circuit breaker registry. It is safe
 // for concurrent use.
 type Tracker struct {
-	config Config
-	now    func() time.Time // pluggable clock for tests
+	defaultConfig Config
+	lookup        ConfigLookup    // nil = always use defaultConfig
+	now           func() time.Time // pluggable clock for tests
 
 	mu     sync.Mutex
 	states map[int64]*accountState
@@ -97,17 +105,42 @@ type accountState struct {
 	halfOpenSuccess int
 }
 
-// New constructs a tracker with the given configuration. A zero
-// Config falls back to DefaultConfig.
+// New constructs a tracker with the given default configuration. A
+// zero Config falls back to DefaultConfig.
+//
+// Per-account overrides become active by calling SetConfigLookup.
+// Without a lookup every account shares the default.
 func New(cfg Config) *Tracker {
 	if cfg == (Config{}) {
 		cfg = DefaultConfig()
 	}
 	return &Tracker{
-		config: cfg,
-		now:    time.Now,
-		states: make(map[int64]*accountState),
+		defaultConfig: cfg,
+		now:           time.Now,
+		states:        make(map[int64]*accountState),
 	}
+}
+
+// SetConfigLookup installs a per-account config resolver. Pass nil to
+// remove a previously installed lookup. Safe to call after the
+// tracker is in use; subsequent operations consult the new lookup.
+func (t *Tracker) SetConfigLookup(lookup ConfigLookup) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lookup = lookup
+}
+
+// configFor returns the effective config for one account.
+// Caller must hold t.mu.
+func (t *Tracker) configFor(accountID int64) Config {
+	if t.lookup == nil {
+		return t.defaultConfig
+	}
+	cfg := t.lookup(accountID)
+	if cfg == (Config{}) {
+		return t.defaultConfig
+	}
+	return cfg
 }
 
 // IsAvailable reports whether the resolver should consider this
@@ -115,12 +148,13 @@ func New(cfg Config) *Tracker {
 // configured open duration has elapsed, the breaker transitions to
 // half-open and the call returns true (allowing a trial request).
 func (t *Tracker) IsAvailable(accountID int64) bool {
-	if t.config.Disabled() {
-		return true
-	}
-
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	cfg := t.configFor(accountID)
+	if cfg.Disabled() {
+		return true
+	}
 
 	s, ok := t.states[accountID]
 	if !ok {
@@ -143,11 +177,12 @@ func (t *Tracker) IsAvailable(accountID int64) bool {
 // RecordSuccess clears failure counters or, when in half-open, moves
 // the breaker toward closed.
 func (t *Tracker) RecordSuccess(accountID int64) {
-	if t.config.Disabled() {
-		return
-	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	cfg := t.configFor(accountID)
+	if cfg.Disabled() {
+		return
+	}
 	s := t.getOrCreate(accountID)
 
 	switch s.state {
@@ -157,7 +192,7 @@ func (t *Tracker) RecordSuccess(accountID int64) {
 		s.lastFailure = time.Time{}
 	case StateHalfOpen:
 		s.halfOpenSuccess++
-		if s.halfOpenSuccess >= t.config.HalfOpenSuccessThreshold {
+		if s.halfOpenSuccess >= cfg.HalfOpenSuccessThreshold {
 			s.state = StateClosed
 			s.failureCount = 0
 			s.lastFailure = time.Time{}
@@ -170,7 +205,7 @@ func (t *Tracker) RecordSuccess(accountID int64) {
 		// Treat as half-open success for resilience.
 		s.state = StateHalfOpen
 		s.halfOpenSuccess = 1
-		if s.halfOpenSuccess >= t.config.HalfOpenSuccessThreshold {
+		if s.halfOpenSuccess >= cfg.HalfOpenSuccessThreshold {
 			s.state = StateClosed
 			s.failureCount = 0
 			s.openUntil = time.Time{}
@@ -183,11 +218,12 @@ func (t *Tracker) RecordSuccess(accountID int64) {
 // the breaker if the threshold is crossed. A failure in half-open
 // state immediately re-opens the breaker.
 func (t *Tracker) RecordFailure(accountID int64, _ error) {
-	if t.config.Disabled() {
-		return
-	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	cfg := t.configFor(accountID)
+	if cfg.Disabled() {
+		return
+	}
 	s := t.getOrCreate(accountID)
 
 	now := t.now()
@@ -196,20 +232,20 @@ func (t *Tracker) RecordFailure(accountID int64, _ error) {
 
 	switch s.state {
 	case StateClosed:
-		if s.failureCount >= t.config.FailureThreshold {
+		if s.failureCount >= cfg.FailureThreshold {
 			s.state = StateOpen
-			s.openUntil = now.Add(t.config.OpenDuration)
+			s.openUntil = now.Add(cfg.OpenDuration)
 			s.halfOpenSuccess = 0
 		}
 	case StateHalfOpen:
 		// Trial failed: re-open immediately.
 		s.state = StateOpen
-		s.openUntil = now.Add(t.config.OpenDuration)
+		s.openUntil = now.Add(cfg.OpenDuration)
 		s.halfOpenSuccess = 0
 	case StateOpen:
 		// Already open; refresh openUntil so back-to-back failure
 		// storms extend the cooldown.
-		s.openUntil = now.Add(t.config.OpenDuration)
+		s.openUntil = now.Add(cfg.OpenDuration)
 	}
 }
 

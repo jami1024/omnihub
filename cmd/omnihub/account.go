@@ -89,6 +89,9 @@ func accountAdd(args []string) error {
 		priority    = fs.Int("priority", 0, "priority tier (lower = preferred)")
 		multiplier  = fs.Float64("cost-multiplier", 1.0, "cost multiplier (1.0 = base)")
 		disabled    = fs.Bool("disabled", false, "create in disabled state")
+		cbFailures  = fs.Int("circuit-failure-threshold", -1, "per-account override; -1 = use global default")
+		cbDuration  = fs.String("circuit-open-duration", "", "per-account override Go duration; empty = use global default")
+		cbHalfOpen  = fs.Int("circuit-half-open-success", -1, "per-account override; -1 = use global default")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -116,8 +119,7 @@ func accountAdd(args []string) error {
 	}
 	defer pool.Close()
 
-	repo := repository.NewAccountRepo(pool)
-	id, err := repo.Insert(ctx, repository.InsertParams{
+	params := repository.InsertParams{
 		Name:           *name,
 		Provider:       *drv,
 		Enabled:        !*disabled,
@@ -126,7 +128,25 @@ func accountAdd(args []string) error {
 		CostMultiplier: *multiplier,
 		BaseURL:        *baseURL,
 		Credentials:    creds,
-	})
+	}
+	if *cbFailures >= 0 {
+		v := *cbFailures
+		params.CircuitFailureThreshold = &v
+	}
+	if *cbDuration != "" {
+		d, perr := time.ParseDuration(*cbDuration)
+		if perr != nil {
+			return fmt.Errorf("--circuit-open-duration: %w", perr)
+		}
+		params.CircuitOpenDuration = &d
+	}
+	if *cbHalfOpen > 0 {
+		v := *cbHalfOpen
+		params.CircuitHalfOpenSuccess = &v
+	}
+
+	repo := repository.NewAccountRepo(pool)
+	id, err := repo.Insert(ctx, params)
 	if err != nil {
 		return err
 	}

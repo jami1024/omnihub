@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -36,7 +37,8 @@ var ErrAccountNotFound = errors.New("account not found")
 func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, error) {
 	const q = `
         SELECT id, name, provider, weight, priority, cost_multiplier,
-               COALESCE(base_url, ''), credentials
+               COALESCE(base_url, ''), credentials,
+               circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success
           FROM accounts
          WHERE enabled = TRUE
          ORDER BY priority ASC, id ASC`
@@ -50,25 +52,51 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 	var out []*provider.Account
 	for rows.Next() {
 		var (
-			a              provider.Account
-			credentialsRaw []byte
-			multiplier     float64
+			a                provider.Account
+			credentialsRaw   []byte
+			multiplier       float64
+			failureThreshold *int
+			openDurationMs   *int64
+			halfOpenSuccess  *int
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &a.Weight, &a.Priority, &multiplier,
 			&a.BaseURL, &credentialsRaw,
+			&failureThreshold, &openDurationMs, &halfOpenSuccess,
 		); err != nil {
 			return nil, fmt.Errorf("scan account row: %w", err)
 		}
 		a.CostMultiplier = multiplier
-		if len(credentialsRaw) > 0 {
-			if err := json.Unmarshal(credentialsRaw, &a.Credentials); err != nil {
-				return nil, fmt.Errorf("decode credentials for account %q: %w", a.Name, err)
-			}
+		applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
+		if err := decodeCredentials(&a, credentialsRaw); err != nil {
+			return nil, err
 		}
 		out = append(out, &a)
 	}
 	return out, rows.Err()
+}
+
+// applyCircuitOverrides materialises the three nullable per-account
+// circuit columns onto the Account struct. The DB stores duration as
+// milliseconds (BIGINT); we convert to time.Duration here so callers
+// never see the encoding detail.
+func applyCircuitOverrides(a *provider.Account, failureThreshold *int, openDurationMs *int64, halfOpenSuccess *int) {
+	a.CircuitFailureThreshold = failureThreshold
+	a.CircuitHalfOpenSuccess = halfOpenSuccess
+	if openDurationMs != nil {
+		d := time.Duration(*openDurationMs) * time.Millisecond
+		a.CircuitOpenDuration = &d
+	}
+}
+
+func decodeCredentials(a *provider.Account, raw []byte) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(raw, &a.Credentials); err != nil {
+		return fmt.Errorf("decode credentials for account %q: %w", a.Name, err)
+	}
+	return nil
 }
 
 // CountAll returns the total number of rows regardless of enabled
@@ -95,6 +123,12 @@ type InsertParams struct {
 	CostMultiplier float64
 	BaseURL        string
 	Credentials    map[string]string
+
+	// Per-account circuit-breaker overrides. Nil writes NULL (the
+	// account uses the env-driven global default).
+	CircuitFailureThreshold *int
+	CircuitOpenDuration     *time.Duration
+	CircuitHalfOpenSuccess  *int
 }
 
 // ListAll returns every row regardless of enabled flag, ordered by id.
@@ -102,7 +136,8 @@ type InsertParams struct {
 func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool, error) {
 	const q = `
         SELECT id, name, provider, enabled, weight, priority, cost_multiplier,
-               COALESCE(base_url, ''), credentials
+               COALESCE(base_url, ''), credentials,
+               circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success
           FROM accounts
          ORDER BY id ASC`
 	rows, err := r.pool.Query(ctx, q)
@@ -117,23 +152,26 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 	)
 	for rows.Next() {
 		var (
-			a              provider.Account
-			enabled        bool
-			multiplier     float64
-			credentialsRaw []byte
+			a                provider.Account
+			enabled          bool
+			credentialsRaw   []byte
+			multiplier       float64
+			failureThreshold *int
+			openDurationMs   *int64
+			halfOpenSuccess  *int
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &enabled,
 			&a.Weight, &a.Priority, &multiplier,
 			&a.BaseURL, &credentialsRaw,
+			&failureThreshold, &openDurationMs, &halfOpenSuccess,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan account row: %w", err)
 		}
 		a.CostMultiplier = multiplier
-		if len(credentialsRaw) > 0 {
-			if err := json.Unmarshal(credentialsRaw, &a.Credentials); err != nil {
-				return nil, nil, fmt.Errorf("decode credentials for account %q: %w", a.Name, err)
-			}
+		applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
+		if err := decodeCredentials(&a, credentialsRaw); err != nil {
+			return nil, nil, err
 		}
 		accounts = append(accounts, &a)
 		flags = append(flags, enabled)
@@ -177,18 +215,26 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 		return 0, fmt.Errorf("encode credentials: %w", err)
 	}
 
+	var openDurationMs *int64
+	if p.CircuitOpenDuration != nil {
+		ms := p.CircuitOpenDuration.Milliseconds()
+		openDurationMs = &ms
+	}
+
 	const q = `
         INSERT INTO accounts (
             name, provider, enabled, weight, priority,
-            cost_multiplier, base_url, credentials
+            cost_multiplier, base_url, credentials,
+            circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success
         )
-        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8)
+        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11)
         RETURNING id`
 
 	var id int64
 	err = r.pool.QueryRow(ctx, q,
 		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
+		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
 	).Scan(&id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

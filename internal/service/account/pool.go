@@ -33,6 +33,7 @@ type Pool struct {
 
 	mu         sync.RWMutex
 	byProvider map[string][]*provider.Account
+	byID       map[int64]*provider.Account
 	all        []*provider.Account
 
 	// lastRefresh records the most recent successful refresh. Reading
@@ -46,6 +47,7 @@ func NewPool(source Source) *Pool {
 	return &Pool{
 		source:     source,
 		byProvider: make(map[string][]*provider.Account),
+		byID:       make(map[int64]*provider.Account),
 	}
 }
 
@@ -59,12 +61,15 @@ func (p *Pool) Refresh(ctx context.Context) error {
 	}
 
 	grouped := make(map[string][]*provider.Account, 4)
+	byID := make(map[int64]*provider.Account, len(accounts))
 	for _, a := range accounts {
 		grouped[a.Provider] = append(grouped[a.Provider], a)
+		byID[a.ID] = a
 	}
 
 	p.mu.Lock()
 	p.byProvider = grouped
+	p.byID = byID
 	p.all = accounts
 	p.mu.Unlock()
 
@@ -105,6 +110,16 @@ func (p *Pool) ByProvider(name string) []*provider.Account {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.byProvider[name]
+}
+
+// ByID returns the enabled account with the given id, or nil if no
+// such account is present in the current snapshot. Lookup is O(1).
+// Used by hot-path callers (health tracker, sticky resolver) that
+// need a single account by id without scanning All().
+func (p *Pool) ByID(id int64) *provider.Account {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.byID[id]
 }
 
 // All returns every enabled account across providers. Useful for the
