@@ -4,6 +4,8 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -48,6 +50,48 @@ var (
 const accountPoolRefreshInterval = 30 * time.Second
 
 func main() {
+	// Dispatch on the first non-flag arg so this binary doubles as
+	// gateway daemon AND admin CLI. No args (or "serve") runs the
+	// gateway; "account" routes into the management subcommands.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "serve":
+			os.Args = append(os.Args[:1], os.Args[2:]...)
+		case "account":
+			runAccountCommand(os.Args[2:])
+			return
+		case "help", "-h", "--help":
+			printUsage(os.Stdout)
+			return
+		case "version", "-v", "--version":
+			fmt.Printf("omnihub %s (%s, %s)\n", version, commit, date)
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", os.Args[1])
+			printUsage(os.Stderr)
+			os.Exit(2)
+		}
+	}
+
+	runGateway()
+}
+
+// printUsage prints the top-level CLI synopsis. Subcommands have
+// their own --help.
+func printUsage(w io.Writer) {
+	fmt.Fprintf(w, `omnihub — commercial-grade unified AI gateway
+
+Usage:
+  omnihub [serve]           Start the gateway (default when no args).
+  omnihub account <cmd>     Manage upstream accounts (add/list/enable/disable/delete).
+  omnihub version           Print build version.
+  omnihub help              Print this help.
+
+Run 'omnihub account help' for subcommand details.
+`)
+}
+
+func runGateway() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))

@@ -97,6 +97,78 @@ type InsertParams struct {
 	Credentials    map[string]string
 }
 
+// ListAll returns every row regardless of enabled flag, ordered by id.
+// Used by the CLI list command and admin views.
+func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool, error) {
+	const q = `
+        SELECT id, name, provider, enabled, weight, priority, cost_multiplier,
+               COALESCE(base_url, ''), credentials
+          FROM accounts
+         ORDER BY id ASC`
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, nil, fmt.Errorf("query accounts: %w", err)
+	}
+	defer rows.Close()
+
+	var (
+		accounts []*provider.Account
+		flags    []bool
+	)
+	for rows.Next() {
+		var (
+			a              provider.Account
+			enabled        bool
+			multiplier     float64
+			credentialsRaw []byte
+		)
+		if err := rows.Scan(
+			&a.ID, &a.Name, &a.Provider, &enabled,
+			&a.Weight, &a.Priority, &multiplier,
+			&a.BaseURL, &credentialsRaw,
+		); err != nil {
+			return nil, nil, fmt.Errorf("scan account row: %w", err)
+		}
+		a.CostMultiplier = multiplier
+		if len(credentialsRaw) > 0 {
+			if err := json.Unmarshal(credentialsRaw, &a.Credentials); err != nil {
+				return nil, nil, fmt.Errorf("decode credentials for account %q: %w", a.Name, err)
+			}
+		}
+		accounts = append(accounts, &a)
+		flags = append(flags, enabled)
+	}
+	return accounts, flags, rows.Err()
+}
+
+// SetEnabled flips the enabled flag for the named account. Returns
+// ErrAccountNotFound when no row matches.
+func (r *AccountRepo) SetEnabled(ctx context.Context, name string, enabled bool) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE accounts SET enabled = $1, updated_at = NOW() WHERE name = $2`,
+		enabled, name)
+	if err != nil {
+		return fmt.Errorf("update enabled for %q: %w", name, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrAccountNotFound
+	}
+	return nil
+}
+
+// Delete hard-deletes the account row by name. Returns
+// ErrAccountNotFound when no row matches.
+func (r *AccountRepo) Delete(ctx context.Context, name string) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM accounts WHERE name = $1`, name)
+	if err != nil {
+		return fmt.Errorf("delete account %q: %w", name, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrAccountNotFound
+	}
+	return nil
+}
+
 // Insert creates a new account row and returns its id. Duplicate
 // names are rejected by the UNIQUE constraint.
 func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error) {

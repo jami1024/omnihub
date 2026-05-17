@@ -224,6 +224,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `OMNIHUB_CIRCUIT_HALF_OPEN_SUCCESS` (int, >0). Defaults match
     claude-code-hub (5 / 30 s / 1). Per-account DB-level overrides
     arrive in a follow-up commit.
+- Account-management CLI baked into the main binary
+  (`omnihub account ...`):
+  - `omnihub account add` inserts a row with explicit flags so
+    operators no longer write JSONB literals. Provider-specific
+    credentials (`--api-key`, `--aws-region`, `--workspace-id`) plus
+    routing knobs (`--weight`, `--priority`, `--cost-multiplier`,
+    `--base-url`, `--disabled`).
+  - `omnihub account list` prints a tab-aligned table including the
+    enabled flag and credential KEYS — values are deliberately
+    suppressed so secrets never leak to logs / pasted output.
+  - `omnihub account enable|disable <name>` flips the enabled flag;
+    the change becomes routable within the next pool refresh tick.
+  - `omnihub account delete <name>` hard-deletes a row.
+  - `omnihub help` / `omnihub version` for discoverability.
+  - The same binary still runs the gateway via `omnihub` (no args)
+    or `omnihub serve`; subcommands open their own short-lived
+    Postgres pool (4 connections) and do not run migrations — the
+    gateway is the canonical migration owner.
+  - `repository.AccountRepo` gained `ListAll`, `SetEnabled`, and
+    `Delete` to back the new subcommands. `ErrAccountNotFound`
+    surfaces missing rows.
 - **BREAKING:** Removed env-var based upstream-account bootstrap.
   `OMNIHUB_ANTHROPIC_API_KEY`, `OMNIHUB_CLAUDE_PLATFORM_API_KEY`,
   `OMNIHUB_CLAUDE_PLATFORM_REGION`, and
