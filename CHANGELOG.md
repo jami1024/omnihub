@@ -218,6 +218,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     isolation, and concurrent recording (race-detectable).
   - Resolver tests gain `TestResolveExcludesAlreadyTriedIDs` and
     `TestResolveSkipsUnhealthyAccounts`.
+  - Circuit-breaker thresholds are configurable via env vars:
+    `OMNIHUB_CIRCUIT_FAILURE_THRESHOLD` (int, ≥0; 0 disables),
+    `OMNIHUB_CIRCUIT_OPEN_DURATION` (Go duration, e.g. `30s`, `2m`),
+    `OMNIHUB_CIRCUIT_HALF_OPEN_SUCCESS` (int, >0). Defaults match
+    claude-code-hub (5 / 30 s / 1). Per-account DB-level overrides
+    arrive in a follow-up commit.
 - **BREAKING:** Removed env-var based upstream-account bootstrap.
   `OMNIHUB_ANTHROPIC_API_KEY`, `OMNIHUB_CLAUDE_PLATFORM_API_KEY`,
   `OMNIHUB_CLAUDE_PLATFORM_REGION`, and

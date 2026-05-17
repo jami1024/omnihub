@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -174,7 +175,8 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 		slog.Info("virtual key auth enabled", "key_count", auth.KeyCount())
 	}
 
-	tracker := health.New(health.DefaultConfig())
+	healthCfg := loadHealthConfig()
+	tracker := health.New(healthCfg)
 	res := resolver.New(accountPool, registry, tracker)
 	forwarder := forward.New(nil)
 	prices := pricing.Default()
@@ -185,9 +187,55 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 	slog.Info("gateway mounted",
 		"path", "/v1/messages",
 		"account_count", accountPool.Size(),
-		"failure_threshold", health.DefaultConfig().FailureThreshold,
-		"cooldown", health.DefaultConfig().OpenDuration,
+		"circuit_failure_threshold", healthCfg.FailureThreshold,
+		"circuit_open_duration", healthCfg.OpenDuration,
+		"circuit_half_open_success", healthCfg.HalfOpenSuccessThreshold,
 	)
+}
+
+// loadHealthConfig builds the circuit-breaker configuration, falling
+// back to DefaultConfig for any env var that is unset or malformed.
+//
+// Supported overrides:
+//
+//   - OMNIHUB_CIRCUIT_FAILURE_THRESHOLD    integer, ≥ 0; 0 disables
+//   - OMNIHUB_CIRCUIT_OPEN_DURATION        Go duration ("30s", "2m")
+//   - OMNIHUB_CIRCUIT_HALF_OPEN_SUCCESS    integer, > 0
+//
+// Per-account thresholds will arrive as DB columns on the accounts
+// table in a follow-up commit; the global values here serve as the
+// default for accounts that do not override.
+func loadHealthConfig() health.Config {
+	cfg := health.DefaultConfig()
+
+	if v := os.Getenv("OMNIHUB_CIRCUIT_FAILURE_THRESHOLD"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.FailureThreshold = n
+		} else {
+			slog.Warn("OMNIHUB_CIRCUIT_FAILURE_THRESHOLD invalid; using default",
+				"value", v, "default", cfg.FailureThreshold)
+		}
+	}
+
+	if v := os.Getenv("OMNIHUB_CIRCUIT_OPEN_DURATION"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.OpenDuration = d
+		} else {
+			slog.Warn("OMNIHUB_CIRCUIT_OPEN_DURATION invalid; using default",
+				"value", v, "default", cfg.OpenDuration)
+		}
+	}
+
+	if v := os.Getenv("OMNIHUB_CIRCUIT_HALF_OPEN_SUCCESS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.HalfOpenSuccessThreshold = n
+		} else {
+			slog.Warn("OMNIHUB_CIRCUIT_HALF_OPEN_SUCCESS invalid; using default",
+				"value", v, "default", cfg.HalfOpenSuccessThreshold)
+		}
+	}
+
+	return cfg
 }
 
 // buildDriverRegistry registers every built-in driver. Adding a new
