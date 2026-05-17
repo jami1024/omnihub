@@ -31,7 +31,7 @@ func (d *Driver) BuildRequest(
 		return nil, errors.New("anthropic: account missing api_key credential")
 	}
 
-	body, err := json.Marshal(toWireBody(req))
+	body, err := json.Marshal(ToWireBody(req))
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: marshal body: %w", err)
 	}
@@ -68,12 +68,15 @@ func anthropicVersion(req *ir.UnifiedRequest) string {
 	return DefaultAnthropicVersion
 }
 
-// messagesBody is the on-the-wire payload sent to /v1/messages.
+// MessagesBody is the on-the-wire payload sent to /v1/messages.
 //
 // It mirrors UnifiedRequest minus fields that travel as HTTP headers
 // (anthropic_version, anthropic_beta) or that are IR-internal
-// (Extensions, Stream is set via field, Bedrock-only fields).
-type messagesBody struct {
+// (Extensions, Bedrock-only fields).
+//
+// Exported so sibling drivers (e.g. claude_platform) that share the
+// Anthropic wire format can reuse it without copying the schema.
+type MessagesBody struct {
 	Model         string             `json:"model"`
 	Messages      []ir.Message       `json:"messages"`
 	System        []ir.ContentBlock  `json:"system,omitempty"`
@@ -89,8 +92,10 @@ type messagesBody struct {
 	Metadata      map[string]any     `json:"metadata,omitempty"`
 }
 
-func toWireBody(req *ir.UnifiedRequest) *messagesBody {
-	return &messagesBody{
+// ToWireBody projects an IR request into the Anthropic /v1/messages
+// wire body. Exported for reuse by sibling drivers.
+func ToWireBody(req *ir.UnifiedRequest) *MessagesBody {
+	return &MessagesBody{
 		Model:         req.Model,
 		Messages:      req.Messages,
 		System:        req.System,

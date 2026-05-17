@@ -17,6 +17,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/anthropic"
+	"github.com/jami1024/omnihub/internal/service/provider/drivers/claudeplatform"
 )
 
 // Build info populated by the linker via -ldflags (see Makefile).
@@ -92,28 +93,67 @@ func newRouter() *gin.Engine {
 }
 
 // mountGatewayRoutes wires the LLM forwarding endpoints onto r.
-// MVP behaviour: a single Anthropic account is read from
-// OMNIHUB_ANTHROPIC_API_KEY. If the variable is empty, gateway
-// endpoints are skipped and only the health endpoints stay live.
+//
+// MVP behaviour: a single upstream account is selected by environment
+// variables, with Claude Platform on AWS taking precedence over direct
+// Anthropic when both are configured.
+//
+//   - Claude Platform on AWS — requires:
+//     OMNIHUB_CLAUDE_PLATFORM_API_KEY
+//     OMNIHUB_CLAUDE_PLATFORM_REGION
+//     OMNIHUB_CLAUDE_PLATFORM_WORKSPACE_ID
+//   - Direct Anthropic — requires:
+//     OMNIHUB_ANTHROPIC_API_KEY
+//
+// If neither is configured, /v1/messages is not mounted and only the
+// health endpoints remain live.
 func mountGatewayRoutes(r *gin.Engine) {
-	apiKey := os.Getenv("OMNIHUB_ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		slog.Warn("OMNIHUB_ANTHROPIC_API_KEY not set; /v1/messages disabled")
+	driver, account, ok := pickUpstream()
+	if !ok {
 		return
-	}
-
-	driver := anthropic.New()
-
-	account := &provider.Account{
-		Name:        "default",
-		Provider:    "anthropic",
-		Credentials: map[string]string{"api_key": apiKey},
 	}
 
 	forwarder := forward.New(nil)
 	r.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, driver, account))
 
-	slog.Info("anthropic gateway mounted", "path", "/v1/messages")
+	slog.Info("gateway mounted",
+		"path", "/v1/messages",
+		"driver", driver.Name(),
+		"account", account.Name,
+	)
+}
+
+// pickUpstream chooses the upstream driver+account based on env vars.
+// Returns ok=false when nothing is configured.
+func pickUpstream() (provider.Driver, *provider.Account, bool) {
+	if cpKey := os.Getenv("OMNIHUB_CLAUDE_PLATFORM_API_KEY"); cpKey != "" {
+		region := os.Getenv("OMNIHUB_CLAUDE_PLATFORM_REGION")
+		workspace := os.Getenv("OMNIHUB_CLAUDE_PLATFORM_WORKSPACE_ID")
+		if region == "" || workspace == "" {
+			slog.Error("OMNIHUB_CLAUDE_PLATFORM_API_KEY is set but REGION or WORKSPACE_ID is missing; /v1/messages disabled")
+			return nil, nil, false
+		}
+		return claudeplatform.New(), &provider.Account{
+			Name:     "claude-platform-default",
+			Provider: claudeplatform.DriverName,
+			Credentials: map[string]string{
+				"api_key":      cpKey,
+				"aws_region":   region,
+				"workspace_id": workspace,
+			},
+		}, true
+	}
+
+	if apiKey := os.Getenv("OMNIHUB_ANTHROPIC_API_KEY"); apiKey != "" {
+		return anthropic.New(), &provider.Account{
+			Name:        "anthropic-default",
+			Provider:    anthropic.DriverName,
+			Credentials: map[string]string{"api_key": apiKey},
+		}, true
+	}
+
+	slog.Warn("no upstream credentials configured (OMNIHUB_ANTHROPIC_API_KEY or OMNIHUB_CLAUDE_PLATFORM_*); /v1/messages disabled")
+	return nil, nil, false
 }
 
 func handleHealth(c *gin.Context) {

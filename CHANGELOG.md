@@ -35,5 +35,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `anthropic-beta` from the HTTP header into the IR.
 - `cmd/omnihub` now mounts `/v1/messages` when `OMNIHUB_ANTHROPIC_API_KEY` is
   set, so a single Anthropic account can be forwarded end-to-end.
+- Add the Claude Platform on AWS driver
+  (`internal/service/provider/drivers/claudeplatform/`). Composes with the
+  Anthropic driver to reuse body marshalling, response parsing, and SSE
+  decoding; overrides only BuildRequest to target the regional
+  `aws-external-anthropic` endpoint, set the `anthropic-workspace-id`
+  header, and authenticate via the AWS-issued `x-api-key`. SigV4 auth
+  is intentionally deferred to the Bedrock work that already depends
+  on the AWS SDK.
+- Export `anthropic.MessagesBody` and `anthropic.ToWireBody` so sibling
+  drivers sharing the Anthropic wire format do not duplicate the schema.
+- `cmd/omnihub` now picks between Claude Platform and direct Anthropic
+  from env vars; Claude Platform takes precedence when both are
+  configured. Required env: `OMNIHUB_CLAUDE_PLATFORM_API_KEY`,
+  `OMNIHUB_CLAUDE_PLATFORM_REGION`, `OMNIHUB_CLAUDE_PLATFORM_WORKSPACE_ID`.
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main
