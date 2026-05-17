@@ -38,6 +38,17 @@ type Account struct {
 	// Drivers read keys from this map by well-known names, e.g.
 	// "api_key", "aws_access_key_id", "aws_region".
 	Credentials map[string]string
+
+	// CostMultiplier scales the upstream cost stored against this
+	// account. Values <= 0 or == 1.0 mean "no scaling" (the upstream
+	// price is recorded as-is). Reseller deployments use multipliers
+	// > 1.0 to mark up cost; teams with internal subsidies use < 1.0.
+	//
+	// The multiplier is applied at the handler boundary, after the
+	// pricing table returns the base breakdown. The applied factor is
+	// preserved in the persisted breakdown so analytics can recover
+	// the base cost.
+	CostMultiplier float64
 }
 
 // Credential returns the value for the given credential key, or "" if

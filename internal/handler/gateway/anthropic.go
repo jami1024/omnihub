@@ -90,15 +90,21 @@ func AnthropicMessagesHandler(
 
 		// Resolve the cost using the most specific model we know about
 		// (upstream-reported actual_model takes priority over the
-		// client's requested alias).
-		var costUSD *float64
+		// client's requested alias). The account-level multiplier
+		// scales every bucket so resellers can mark up or discount.
+		var (
+			costUSD       *float64
+			costBreakdown *pricing.Breakdown
+		)
 		modelForPricing := result.Usage.ActualModel
 		if modelForPricing == "" {
 			modelForPricing = req.Model
 		}
 		if prices != nil && modelForPricing != "" {
-			if cost, ok := prices.Calculate(modelForPricing, result.Usage); ok {
-				costUSD = &cost
+			if base, ok := prices.Calculate(modelForPricing, result.Usage); ok {
+				final := base.ApplyMultiplier(account.CostMultiplier)
+				costBreakdown = &final
+				costUSD = &final.Total
 			} else {
 				slog.Warn("no pricing entry for model",
 					"requested_model", req.Model,
@@ -115,6 +121,7 @@ func AnthropicMessagesHandler(
 		if buffer != nil {
 			rec := buildMessageRequest(c, &req, driver, account, &result, forwardErr, startedAt)
 			rec.CostUSD = costUSD
+			rec.CostBreakdown = costBreakdown
 			buffer.Enqueue(rec)
 		}
 	}

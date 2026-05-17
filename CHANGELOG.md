@@ -145,5 +145,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed the non-existent `claude-sonnet-4-7` entry; 4.7 is
     Opus-only as of 2026-05.
   - Added legacy `claude-opus-4-1` so older alias hits the right row.
+- Align pricing data model with claude-code-hub / LiteLLM conventions:
+  - `Price` fields renamed to per-token (`InputCostPerToken`, …) with
+    `json:` tags matching LiteLLM's
+    `model_prices_and_context_window.json` snake_case names. A future
+    commit can sync upstream prices without touching the struct.
+  - `Calculate` now returns a `Breakdown` (input / output /
+    cache_creation_5m / cache_creation_1h / cache_read / total /
+    multiplier) instead of a single float so analytics can answer
+    "where did the spend go". Breakdown.Total carries the rolled-up
+    cost for callers that only need a number.
+  - Canonical cache-rate fallbacks (5m = 1.25×, 1h = 2.0×,
+    read = 0.10× of input) kick in when a thin upstream entry omits
+    explicit cache prices.
+  - `Account.CostMultiplier` scales every bucket; the applied factor
+    is preserved in the persisted breakdown so analytics can recover
+    the base upstream cost.
+  - Migration `0003_add_cost_breakdown.sql` adds a JSONB column;
+    `message_requests.cost_breakdown` is populated alongside the
+    existing `cost_usd` total. Eight unit tests cover Opus 4.7 new
+    pricing, cache fallback ratios, prefix tie-break, and multiplier
+    application.
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main
