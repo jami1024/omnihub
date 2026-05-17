@@ -362,9 +362,16 @@ func setupAccountPool(ctx context.Context) error {
 	if err := accountPool.Start(ctx, accountPoolRefreshInterval); err != nil {
 		return err
 	}
+
+	// Subscribe to NOTIFY for instant pool refresh on account
+	// changes. The periodic ticker above stays as a safety net for
+	// missed notifications (process restart, connection drop).
+	account.NewListener(pool, "", accountPool.Refresh).Start(ctx)
+
 	slog.Info("account pool ready",
 		"size", accountPool.Size(),
 		"refresh_interval", accountPoolRefreshInterval,
+		"notify_channel", account.DefaultNotifyChannel,
 	)
 	return nil
 }

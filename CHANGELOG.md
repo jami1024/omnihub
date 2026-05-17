@@ -238,6 +238,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       bind / get / TTL expiry / refresh, sticky re-use across
       iterations, fallback when bound account turns unhealthy, and
       the retry-loop "don't bind" guarantee.
+  - **Instant account-pool refresh via PostgreSQL LISTEN/NOTIFY**:
+    - Migration `0006_accounts_notify_trigger.sql` installs a
+      statement-level trigger on the `accounts` table that fires
+      `pg_notify('omnihub_accounts_changed', TG_OP)` on every
+      INSERT / UPDATE / DELETE.
+    - `internal/service/account/notify.go` runs a background
+      listener that holds one pool connection, issues `LISTEN
+      omnihub_accounts_changed`, and invokes `Pool.Refresh` on each
+      notification. Reconnection is automatic with exponential
+      backoff (1 s → 30 s) on transport errors, so a restarted DB
+      or transient network blip self-heals without intervention.
+    - The 30-second periodic refresh stays in place as a safety
+      net: a notification missed during reconnect is still picked
+      up by the next tick.
+    - Account changes (CLI, SQL, or future admin API) now propagate
+      to the routing pool in well under a second instead of waiting
+      up to 30 seconds.
   - Per-account circuit-breaker overrides: the `accounts` table now
     carries three nullable columns (`circuit_failure_threshold`,
     `circuit_open_duration_ms`, `circuit_half_open_success`).
