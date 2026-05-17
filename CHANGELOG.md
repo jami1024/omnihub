@@ -63,5 +63,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     well-known context keys to handlers without leaking string literals.
 - `/v1/messages` is now mounted behind the auth + log guard chain; the
   health endpoints remain public.
+- Add PostgreSQL scaffolding under `internal/db/`:
+  - `pgx/v5` connection pool with explicit MaxConns / MaxConnLifetime
+    tuning and a 5 s start-up Ping.
+  - Forward-only migration runner (~120 lines, no external migrate
+    library) that walks embedded `migrations/*.sql` files in lexical
+    order, records applied migrations in `schema_migrations`, and runs
+    each as its own transaction so an aborted migration cannot land
+    half-applied.
+  - First migration creates `message_requests` (token usage / latency
+    / status / model / account columns plus three indexes) — the
+    target for the upcoming WriteBuffer.
+- `/readyz` now reports `503` when the database is unreachable so
+  load balancers can drain unhealthy instances. `/healthz` stays a
+  pure liveness probe.
+- `cmd/omnihub` opens the pool and runs migrations at startup when
+  `OMNIHUB_DATABASE_URL` is set. An empty DSN keeps the process in
+  log-only mode (no persistence) — useful for local smoke tests and
+  for the existing MVP flow.
+- Add `deploy/docker-compose.dev.yaml` for a one-command local
+  PostgreSQL (`docker compose -f ... up -d`).
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main

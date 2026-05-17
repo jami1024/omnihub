@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/jami1024/omnihub/internal/db"
 	"github.com/jami1024/omnihub/internal/handler/gateway"
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
@@ -20,6 +22,11 @@ import (
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/anthropic"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/claudeplatform"
 )
+
+// pool is the process-wide PostgreSQL connection pool. It is nil when
+// OMNIHUB_DATABASE_URL is empty; in that case the gateway operates in
+// log-only mode (no persisted usage history).
+var pool *pgxpool.Pool
 
 // Build info populated by the linker via -ldflags (see Makefile).
 var (
@@ -38,6 +45,19 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
+
+	bootCtx, cancelBoot := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := initDatabase(bootCtx); err != nil {
+		cancelBoot()
+		slog.Error("database init failed", "err", err)
+		os.Exit(1)
+	}
+	cancelBoot()
+	defer func() {
+		if pool != nil {
+			pool.Close()
+		}
+	}()
 
 	gin.SetMode(gin.ReleaseMode)
 	r := newRouter()
@@ -172,9 +192,52 @@ func handleHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+// handleReady reports readiness: DB reachable when configured.
+// /healthz is a liveness probe (always 200 if the process is up),
+// /readyz is a readiness probe (200 only when dependencies are usable).
 func handleReady(c *gin.Context) {
-	// Will eventually verify DB / Redis / plugin connectivity.
+	if pool != nil {
+		pingCtx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+		if err := pool.Ping(pingCtx); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status": "not_ready",
+				"detail": "database unreachable: " + err.Error(),
+			})
+			return
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "ready"})
+}
+
+// initDatabase opens a pgx connection pool and runs migrations when
+// OMNIHUB_DATABASE_URL is set. With an empty DSN the gateway runs in
+// log-only mode (no persisted usage history) and the function is a
+// no-op so local smoke tests do not require a database.
+func initDatabase(ctx context.Context) error {
+	dsn := os.Getenv("OMNIHUB_DATABASE_URL")
+	if dsn == "" {
+		slog.Warn("OMNIHUB_DATABASE_URL is empty; running in log-only mode (no usage persistence)")
+		return nil
+	}
+
+	p, err := db.Open(ctx, db.Config{
+		DSN:             dsn,
+		MaxConns:        20,
+		MinConns:        2,
+		MaxConnLifetime: time.Hour,
+		MaxConnIdleTime: 15 * time.Minute,
+	})
+	if err != nil {
+		return err
+	}
+	pool = p
+
+	if err := db.Migrate(ctx, pool); err != nil {
+		return err
+	}
+	slog.Info("database ready", "max_conns", 20)
+	return nil
 }
 
 func handleVersion(c *gin.Context) {
