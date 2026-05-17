@@ -18,6 +18,7 @@ import (
 
 	"github.com/jami1024/omnihub/internal/ir"
 	"github.com/jami1024/omnihub/internal/service/forward"
+	"github.com/jami1024/omnihub/internal/service/guard"
 	"github.com/jami1024/omnihub/internal/service/provider"
 )
 
@@ -51,6 +52,10 @@ func AnthropicMessagesHandler(
 		if beta := c.GetHeader("anthropic-beta"); beta != "" && len(req.AnthropicBeta) == 0 {
 			req.AnthropicBeta = splitCSV(beta)
 		}
+
+		// Surface routing-relevant fields for the RequestLog guard.
+		c.Set(guard.CtxKeyModel, req.Model)
+		c.Set(guard.CtxKeyStream, req.Stream)
 
 		status, err := forwarder.Forward(c.Request.Context(), c.Writer, &req, driver, account)
 		if err != nil {

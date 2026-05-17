@@ -15,6 +15,7 @@ import (
 
 	"github.com/jami1024/omnihub/internal/handler/gateway"
 	"github.com/jami1024/omnihub/internal/service/forward"
+	"github.com/jami1024/omnihub/internal/service/guard"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/anthropic"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/claudeplatform"
@@ -113,8 +114,19 @@ func mountGatewayRoutes(r *gin.Engine) {
 		return
 	}
 
+	auth := guard.NewAuthenticator(os.Getenv("OMNIHUB_API_KEYS"))
+	if auth.Disabled() {
+		slog.Warn("OMNIHUB_API_KEYS is empty; /v1/messages is OPEN to anyone reaching this port — do not expose publicly")
+	} else {
+		slog.Info("virtual key auth enabled", "key_count", auth.KeyCount())
+	}
+
 	forwarder := forward.New(nil)
-	r.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, driver, account))
+
+	// Apply the gateway guard chain (auth → request log) to the
+	// upstream-forwarding routes only; health endpoints stay public.
+	gw := r.Group("/", auth.Middleware(), guard.RequestLog())
+	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, driver, account))
 
 	slog.Info("gateway mounted",
 		"path", "/v1/messages",

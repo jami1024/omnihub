@@ -49,5 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from env vars; Claude Platform takes precedence when both are
   configured. Required env: `OMNIHUB_CLAUDE_PLATFORM_API_KEY`,
   `OMNIHUB_CLAUDE_PLATFORM_REGION`, `OMNIHUB_CLAUDE_PLATFORM_WORKSPACE_ID`.
+- Introduce the Guard chain home (`internal/service/guard/`):
+  - `Authenticator` parses a comma-separated `OMNIHUB_API_KEYS` spec
+    supporting optional `label:key` syntax and validates incoming
+    requests via constant-time comparison against `x-api-key` or
+    `Authorization: Bearer`. Empty spec is allowed (auth disabled) but
+    logs a warning so the operator knows the gateway is open.
+  - `RequestLog` emits one structured slog line per request with method,
+    path, status, duration, virtual-key label, response size, and the
+    upstream model when the handler sets it. Health endpoints are
+    skipped.
+  - Helpers `guard.KeyName`, `guard.Model`, `guard.Stream` expose the
+    well-known context keys to handlers without leaking string literals.
+- `/v1/messages` is now mounted behind the auth + log guard chain; the
+  health endpoints remain public.
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main
