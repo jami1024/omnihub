@@ -22,5 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `StreamIter` interfaces, plus `Account`, `Capabilities`, and a thread-safe
   `Registry` for runtime lookup. Drivers own pure transformation; the Forwarder
   Guard owns transport and retry.
+- Implement the Anthropic driver (`internal/service/provider/drivers/anthropic/`):
+  builds signed Messages API requests (x-api-key + anthropic-version + optional
+  anthropic-beta header), parses non-streaming responses straight into IR, and
+  decodes SSE streaming responses chunk-by-chunk via an explicit Close()
+  iterator. Header-only fields (`anthropic_version`, `anthropic_beta`) are
+  stripped from the request body.
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main
