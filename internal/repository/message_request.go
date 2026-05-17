@@ -59,6 +59,14 @@ type MessageRequest struct {
 	// cache_creation_5m / cache_creation_1h / cache_read / multiplier)
 	// that backs cost_breakdown JSONB. Nil persists NULL.
 	CostBreakdown *pricing.Breakdown
+
+	// ClientIP is the immediate caller's IP as Gin computed it
+	// (honouring trusted proxies). Nil when unavailable.
+	ClientIP *string
+
+	// UserAgent is the raw User-Agent header from the inbound
+	// request. Nil when the client did not send one.
+	UserAgent *string
 }
 
 // MessageRequestRepo provides batched persistence for MessageRequest
@@ -84,14 +92,15 @@ func (r *MessageRequestRepo) InsertBatch(ctx context.Context, batch []MessageReq
 		return nil
 	}
 
-	const colsPerRow = 20
+	const colsPerRow = 22
 	var sb strings.Builder
 	sb.Grow(512 + len(batch)*64)
 	sb.WriteString(`INSERT INTO message_requests (
         created_at, key_name, method, path, model, actual_model, stream,
         status_code, duration_ms, ttfb_ms, error_message,
         input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
-        provider_name, account_name, upstream_request_id, cost_usd, cost_breakdown
+        provider_name, account_name, upstream_request_id, cost_usd, cost_breakdown,
+        client_ip, user_agent
     ) VALUES `)
 
 	args := make([]any, 0, len(batch)*colsPerRow)
@@ -123,6 +132,7 @@ func (r *MessageRequestRepo) InsertBatch(ctx context.Context, batch []MessageReq
 			m.StatusCode, m.DurationMs, m.TtfbMs, m.ErrorMessage,
 			m.InputTokens, m.OutputTokens, m.CacheCreationInputTokens, m.CacheReadInputTokens,
 			m.ProviderName, m.AccountName, m.UpstreamRequestID, m.CostUSD, breakdownJSON,
+			m.ClientIP, m.UserAgent,
 		)
 	}
 

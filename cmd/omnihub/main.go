@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -176,6 +177,17 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
+	// Trusted proxies for c.ClientIP(): by default Gin trusts EVERY
+	// proxy, which lets a client spoof its IP via X-Forwarded-For.
+	// Operators behind nginx / a cloud LB should set
+	// OMNIHUB_TRUSTED_PROXIES; without it we trust nobody and
+	// c.ClientIP() returns the immediate peer (the LB itself).
+	if err := configureTrustedProxies(r); err != nil {
+		slog.Warn("trusted proxies config rejected; falling back to no-trust",
+			"err", err.Error())
+		_ = r.SetTrustedProxies(nil)
+	}
+
 	r.GET("/healthz", handleHealth)
 	r.GET("/readyz", handleReady)
 	r.GET("/version", handleVersion)
@@ -271,6 +283,34 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 		"circuit_half_open_success", healthCfg.HalfOpenSuccessThreshold,
 		"session_stickiness", stickyDesc,
 	)
+}
+
+// configureTrustedProxies reads OMNIHUB_TRUSTED_PROXIES (comma-
+// separated CIDRs / IPs / hostnames) and hands them to Gin. An empty
+// or unset value trusts no proxy, which is the safe default when the
+// gateway is exposed directly. Common settings:
+//
+//	OMNIHUB_TRUSTED_PROXIES=10.0.0.0/8         # private LAN LBs
+//	OMNIHUB_TRUSTED_PROXIES=127.0.0.1,::1       # reverse proxy on the same host
+//	OMNIHUB_TRUSTED_PROXIES=*                   # trust every proxy (dangerous)
+func configureTrustedProxies(r *gin.Engine) error {
+	raw := strings.TrimSpace(os.Getenv("OMNIHUB_TRUSTED_PROXIES"))
+	if raw == "" {
+		return r.SetTrustedProxies(nil)
+	}
+	if raw == "*" {
+		// Explicit opt-in to "trust everyone" — keep Gin's default
+		// permissive behaviour. Logged loudly so operators see it.
+		slog.Warn("OMNIHUB_TRUSTED_PROXIES=* — every proxy is trusted; clients can spoof X-Forwarded-For")
+		return r.SetTrustedProxies([]string{"0.0.0.0/0", "::/0"})
+	}
+	var entries []string
+	for _, p := range strings.Split(raw, ",") {
+		if t := strings.TrimSpace(p); t != "" {
+			entries = append(entries, t)
+		}
+	}
+	return r.SetTrustedProxies(entries)
 }
 
 // loadSessionTTL parses OMNIHUB_SESSION_TTL into a Go duration.

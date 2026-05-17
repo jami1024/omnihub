@@ -85,6 +85,8 @@ func AnthropicMessagesHandler(
 
 		c.Set(guard.CtxKeyModel, req.Model)
 		c.Set(guard.CtxKeyStream, req.Stream)
+		c.Set(guard.CtxKeyClientIP, c.ClientIP())
+		c.Set(guard.CtxKeyUserAgent, c.GetHeader("User-Agent"))
 
 		// Derive a session key so consecutive turns of the same
 		// conversation hit the same upstream — Anthropic prompt
@@ -294,6 +296,12 @@ func buildMessageRequest(
 
 	if name := guard.KeyName(c); name != "" {
 		rec.KeyName = strPtr(name)
+	}
+	if ip := guard.ClientIP(c); ip != "" {
+		rec.ClientIP = strPtr(ip)
+	}
+	if ua := guard.UserAgent(c); ua != "" {
+		rec.UserAgent = strPtr(ua)
 	}
 	if result.Usage.ActualModel != "" && result.Usage.ActualModel != req.Model {
 		rec.ActualModel = strPtr(result.Usage.ActualModel)

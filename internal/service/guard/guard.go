@@ -25,7 +25,9 @@ const (
 	CtxKeyStream  = "omnihub.stream"   // true when the client asked for SSE
 	CtxKeyUsage   = "omnihub.usage"    // usage.Usage extracted from response
 	CtxKeyTTFB    = "omnihub.ttfb"     // time.Duration from request to first byte
-	CtxKeyCostUSD = "omnihub.cost_usd" // float64 USD cost from pricing.Calculate
+	CtxKeyCostUSD   = "omnihub.cost_usd"   // float64 USD cost from pricing.Calculate
+	CtxKeyClientIP  = "omnihub.client_ip"  // string — immediate caller's IP
+	CtxKeyUserAgent = "omnihub.user_agent" // string — User-Agent header verbatim
 )
 
 // KeyName returns the virtual API key label set by the Auth guard, or
@@ -84,3 +86,10 @@ func CostUSD(c *gin.Context) (float64, bool) {
 	cost, ok := v.(float64)
 	return cost, ok
 }
+
+// ClientIP returns the immediate caller IP captured at handler entry,
+// or "" if not set. Useful for the request log and persistence.
+func ClientIP(c *gin.Context) string { return c.GetString(CtxKeyClientIP) }
+
+// UserAgent returns the inbound User-Agent header verbatim.
+func UserAgent(c *gin.Context) string { return c.GetString(CtxKeyUserAgent) }

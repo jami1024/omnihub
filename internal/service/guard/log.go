@@ -36,6 +36,12 @@ func RequestLog() gin.HandlerFunc {
 			"key_name", KeyName(c),
 			"size", c.Writer.Size(),
 		}
+		if ip := ClientIP(c); ip != "" {
+			attrs = append(attrs, "client_ip", ip)
+		}
+		if ua := UserAgent(c); ua != "" {
+			attrs = append(attrs, "user_agent", ua)
+		}
 		if m := Model(c); m != "" {
 			attrs = append(attrs, "model", m)
 		}

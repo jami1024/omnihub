@@ -238,6 +238,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       bind / get / TTL expiry / refresh, sticky re-use across
       iterations, fallback when bound account turns unhealthy, and
       the retry-loop "don't bind" guarantee.
+  - **Per-request client identity capture**:
+    - Migration `0007_request_client_metadata.sql` adds `client_ip
+      VARCHAR(45)` and `user_agent TEXT` columns to
+      `message_requests` plus a partial index on client_ip for IP
+      forensics.
+    - The handler reads `c.ClientIP()` and `User-Agent` at entry and
+      surfaces them on the gin.Context; the RequestLog guard emits
+      them and the WriteBuffer persists them. The audit log now
+      includes `client_ip` and `user_agent` fields per request.
+    - Gin's `SetTrustedProxies` is wired via `OMNIHUB_TRUSTED_PROXIES`
+      (comma-separated CIDR / IP / hostname; empty = trust no
+      proxy). Default safely returns the immediate peer IP so a
+      direct-exposed gateway is not spoofable; behind a reverse
+      proxy, operators set the list to that proxy's range so
+      `c.ClientIP()` reflects the real caller.
+  - **Strip forwarding headers on outbound upstream calls**: the
+    Forwarder explicitly removes `X-Forwarded-For`, `X-Real-IP`,
+    `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, and the
+    `X-Forwarded-Host` / `X-Forwarded-Proto` companions before
+    dispatch. The upstream (Anthropic / Claude Platform) therefore
+    only ever sees the gateway's outbound IP — no client identity
+    leaks downstream.
   - **Instant account-pool refresh via PostgreSQL LISTEN/NOTIFY**:
     - Migration `0006_accounts_notify_trigger.sql` installs a
       statement-level trigger on the `accounts` table that fires

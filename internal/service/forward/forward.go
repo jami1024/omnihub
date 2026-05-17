@@ -111,6 +111,23 @@ func (f *Forwarder) Dispatch(
 		return nil, time.Time{}, fmt.Errorf("build request: %w", err)
 	}
 
+	// Belt-and-suspenders: drivers should never set forwarding
+	// headers, but if a future driver inherits one from the inbound
+	// request it would leak the client's IP to the upstream. Drop
+	// the common set explicitly so the upstream always sees the
+	// gateway's outbound IP as the originating address.
+	for _, h := range []string{
+		"X-Forwarded-For",
+		"X-Forwarded-Host",
+		"X-Forwarded-Proto",
+		"X-Real-IP",
+		"Forwarded",
+		"CF-Connecting-IP",
+		"True-Client-IP",
+	} {
+		upstreamReq.Header.Del(h)
+	}
+
 	requestSentAt = time.Now()
 	resp, err = f.client.Do(upstreamReq)
 	if err != nil {
