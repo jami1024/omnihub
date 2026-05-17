@@ -18,5 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Define internal intermediate representation (`internal/ir/`): `UnifiedRequest`,
   `UnifiedResponse`, `UnifiedChunk`, plus message / content block / tool / usage
   types. This is the shared contract between protocol adapters, drivers, and Guards.
+- Define the `Driver` contract under `internal/service/provider/`: `Driver` and
+  `StreamIter` interfaces, plus `Account`, `Capabilities`, and a thread-safe
+  `Registry` for runtime lookup. Drivers own pure transformation; the Forwarder
+  Guard owns transport and retry.
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main
