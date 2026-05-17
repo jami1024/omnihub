@@ -128,6 +128,14 @@ func (f *Forwarder) Dispatch(
 		upstreamReq.Header.Del(h)
 	}
 
+	// Force identity transfer encoding regardless of what the driver
+	// or the inbound client requested. A gzip / br compressed
+	// response interferes with streaming SSE: Go's http transport
+	// transparently decompresses the body, but compression buffers
+	// chunks and ruins the per-event flush cadence. claude-code-hub
+	// learned the same lesson; we apply it gateway-wide.
+	upstreamReq.Header.Set("Accept-Encoding", "identity")
+
 	requestSentAt = time.Now()
 	resp, err = f.client.Do(upstreamReq)
 	if err != nil {

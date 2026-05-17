@@ -59,6 +59,19 @@ type UnifiedRequest struct {
 	// Extensions carries provider-specific fields the IR does not
 	// model directly. Drivers may inspect or pass them through.
 	Extensions Extensions `json:"-"`
+
+	// ClientMetadata carries opt-in HTTP headers lifted from the
+	// inbound request that drivers may forward to compatible
+	// upstreams — typically the Anthropic / OpenAI SDK identifier
+	// set (x-stainless-*, x-app, x-claude-code-session-id,
+	// x-client-request-id). Keys are lowercase; empty values are
+	// not present in the map.
+	//
+	// Forwarding these headers improves upstream cache partitioning
+	// and analytics without leaking PII (no IP, no UA fingerprinting,
+	// no auth). Drivers decide which keys to actually emit based on
+	// upstream compatibility.
+	ClientMetadata map[string]string `json:"-"`
 }
 
 // Tool describes a function the model may call.

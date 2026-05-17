@@ -37,6 +37,30 @@ import (
 // on AWS accept the same wire format.
 var anthropicCompatibleProviders = []string{"anthropic", "claude-platform"}
 
+// clientMetadataHeaders is the allow-list of inbound HTTP headers
+// the gateway forwards to compatible upstream LLMs. Limited to:
+//
+//   - Anthropic SDK identifiers (x-stainless-*, x-app)
+//   - Conversation correlation IDs (x-claude-code-session-id,
+//     x-client-request-id)
+//
+// These improve upstream cache partitioning and analytics without
+// leaking PII (no IP, no User-Agent, no auth).
+var clientMetadataHeaders = []string{
+	"x-stainless-lang",
+	"x-stainless-package-version",
+	"x-stainless-os",
+	"x-stainless-arch",
+	"x-stainless-runtime",
+	"x-stainless-runtime-version",
+	"x-stainless-retry-count",
+	"x-stainless-timeout",
+	"x-stainless-helper-method",
+	"x-app",
+	"x-claude-code-session-id",
+	"x-client-request-id",
+}
+
 // maxFailoverAttempts caps how many distinct accounts the retry loop
 // will try for one inbound request before surfacing a 503.
 const maxFailoverAttempts = 3
@@ -82,6 +106,11 @@ func AnthropicMessagesHandler(
 		if beta := c.GetHeader("anthropic-beta"); beta != "" && len(req.AnthropicBeta) == 0 {
 			req.AnthropicBeta = splitCSV(beta)
 		}
+
+		// Collect SDK identifier headers (x-stainless-*, x-app, etc.)
+		// for forwarding to compatible upstreams. See
+		// clientMetadataHeaders for the allow-list.
+		req.ClientMetadata = collectClientMetadata(c)
 
 		c.Set(guard.CtxKeyModel, req.Model)
 		c.Set(guard.CtxKeyStream, req.Stream)
@@ -326,6 +355,22 @@ func errorJSON(c *gin.Context, status int, errType, message string) {
 			"message": message,
 		},
 	})
+}
+
+// collectClientMetadata reads the allow-listed SDK identifier
+// headers from the inbound request. Empty values are skipped so the
+// driver never emits "x-stainless-lang:" with no value.
+func collectClientMetadata(c *gin.Context) map[string]string {
+	out := make(map[string]string, len(clientMetadataHeaders))
+	for _, h := range clientMetadataHeaders {
+		if v := c.GetHeader(h); v != "" {
+			out[h] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func splitCSV(s string) []string {

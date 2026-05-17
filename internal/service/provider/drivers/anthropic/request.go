@@ -51,6 +51,13 @@ func (d *Driver) BuildRequest(
 		httpReq.Header.Set("anthropic-beta", beta)
 	}
 
+	// Forward SDK identifier headers the handler lifted from the
+	// inbound request. Anthropic uses these for cache partitioning
+	// and analytics; forwarding them improves cache hit rate.
+	for k, v := range req.ClientMetadata {
+		httpReq.Header.Set(k, v)
+	}
+
 	return httpReq, nil
 }
 

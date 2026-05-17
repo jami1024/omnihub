@@ -238,6 +238,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       bind / get / TTL expiry / refresh, sticky re-use across
       iterations, fallback when bound account turns unhealthy, and
       the retry-loop "don't bind" guarantee.
+  - **Outbound header optimisations inspired by claude-code-hub and
+    sub2api header analysis**:
+    - The Forwarder now forces `Accept-Encoding: identity` on every
+      upstream request. gzip / brotli compression interferes with
+      streaming SSE because the transport-level decompressor buffers
+      chunks before emitting them, breaking the per-event flush
+      cadence. Tested by claude-code-hub the hard way; we apply it
+      gateway-wide.
+    - The IR gains a `ClientMetadata` map. The handler lifts an
+      allow-list of SDK identifier headers from the inbound request
+      (`x-stainless-lang`, `x-stainless-package-version`,
+      `x-stainless-os`, `x-stainless-arch`, `x-stainless-runtime`,
+      `x-stainless-runtime-version`, `x-stainless-retry-count`,
+      `x-stainless-timeout`, `x-stainless-helper-method`, `x-app`,
+      `x-claude-code-session-id`, `x-client-request-id`) into the IR,
+      and both the Anthropic and Claude-Platform drivers emit them on
+      the outbound request. The list is intentionally narrow:
+      identifiers Anthropic uses for cache partitioning and analytics,
+      with zero PII / IP / User-Agent leakage. Other inbound headers
+      (User-Agent, IP, auth, transfer-encoding, etc.) remain stripped.
   - **Per-request client identity capture**:
     - Migration `0007_request_client_metadata.sql` adds `client_ip
       VARCHAR(45)` and `user_agent TEXT` columns to

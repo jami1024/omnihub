@@ -74,6 +74,13 @@ func (d *Driver) BuildRequest(
 		httpReq.Header.Set("anthropic-beta", beta)
 	}
 
+	// Forward SDK identifier headers the handler lifted from the
+	// inbound request. The AWS Marketplace endpoint accepts the
+	// same x-stainless-* / x-app set as direct Anthropic.
+	for k, v := range req.ClientMetadata {
+		httpReq.Header.Set(k, v)
+	}
+
 	return httpReq, nil
 }
 
