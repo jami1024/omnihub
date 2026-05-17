@@ -16,6 +16,7 @@ import (
 
 	"github.com/jami1024/omnihub/internal/db"
 	"github.com/jami1024/omnihub/internal/handler/gateway"
+	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
 	"github.com/jami1024/omnihub/internal/service/provider"
@@ -27,6 +28,10 @@ import (
 // OMNIHUB_DATABASE_URL is empty; in that case the gateway operates in
 // log-only mode (no persisted usage history).
 var pool *pgxpool.Pool
+
+// writeBuffer batches MessageRequest inserts. It is nil whenever pool
+// is nil (no DB → no buffer).
+var writeBuffer *repository.WriteBuffer
 
 // Build info populated by the linker via -ldflags (see Makefile).
 var (
@@ -54,6 +59,11 @@ func main() {
 	}
 	cancelBoot()
 	defer func() {
+		if writeBuffer != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			writeBuffer.Stop(shutdownCtx)
+			cancel()
+		}
 		if pool != nil {
 			pool.Close()
 		}
@@ -146,7 +156,7 @@ func mountGatewayRoutes(r *gin.Engine) {
 	// Apply the gateway guard chain (auth → request log) to the
 	// upstream-forwarding routes only; health endpoints stay public.
 	gw := r.Group("/", auth.Middleware(), guard.RequestLog())
-	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, driver, account))
+	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, driver, account, writeBuffer))
 
 	slog.Info("gateway mounted",
 		"path", "/v1/messages",
@@ -236,6 +246,11 @@ func initDatabase(ctx context.Context) error {
 	if err := db.Migrate(ctx, pool); err != nil {
 		return err
 	}
+
+	writeBuffer = repository.NewWriteBuffer(
+		repository.NewMessageRequestRepo(pool),
+		repository.WriteBufferConfig{}, // production defaults: 250ms / 200 rows / 5000 cap
+	)
 	slog.Info("database ready", "max_conns", 20)
 	return nil
 }

@@ -11,13 +11,13 @@ import (
 // after each request completes.
 //
 // The log is intentionally compact: method, path, status, duration,
-// virtual-key label, response size, and the requested upstream model
-// when the handler has set it. Health-check endpoints are skipped to
-// keep the signal-to-noise ratio readable.
+// virtual-key label, response size, and — when the handler has set
+// them — the upstream model, stream flag, token usage, and TTFB. The
+// fields mirror the columns persisted in message_requests, so the
+// log lines are useful even when no database is configured.
 //
-// In a future commit this guard will additionally write a row to the
-// usage table (model, account, input/output tokens, cost). For the
-// MVP it stays a slog-only sink.
+// Health-check endpoints are skipped to keep the signal-to-noise ratio
+// readable.
 func RequestLog() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -41,6 +41,29 @@ func RequestLog() gin.HandlerFunc {
 		}
 		if Stream(c) {
 			attrs = append(attrs, "stream", true)
+		}
+		if ttfb := TTFB(c); ttfb > 0 {
+			attrs = append(attrs, "ttfb_ms", ttfb.Milliseconds())
+		}
+
+		u := Usage(c)
+		if u.InputTokens > 0 || u.OutputTokens > 0 {
+			attrs = append(attrs,
+				"input_tokens", u.InputTokens,
+				"output_tokens", u.OutputTokens,
+			)
+			if u.CacheCreationInputTokens > 0 {
+				attrs = append(attrs, "cache_creation_tokens", u.CacheCreationInputTokens)
+			}
+			if u.CacheReadInputTokens > 0 {
+				attrs = append(attrs, "cache_read_tokens", u.CacheReadInputTokens)
+			}
+		}
+		if u.ActualModel != "" && u.ActualModel != Model(c) {
+			attrs = append(attrs, "actual_model", u.ActualModel)
+		}
+		if u.UpstreamRequestID != "" {
+			attrs = append(attrs, "upstream_request_id", u.UpstreamRequestID)
 		}
 
 		slog.Info("request", attrs...)

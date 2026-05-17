@@ -45,7 +45,7 @@ func TestForwardNonStreamingHappyPath(t *testing.T) {
 	f := forward.New(srv.Client())
 	rec := httptest.NewRecorder()
 
-	status, err := f.Forward(
+	result, err := f.Forward(
 		context.Background(),
 		rec,
 		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 100},
@@ -55,8 +55,8 @@ func TestForwardNonStreamingHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Forward: %v", err)
 	}
-	if status != 200 {
-		t.Errorf("status: want 200, got %d", status)
+	if result.StatusCode != 200 {
+		t.Errorf("status: want 200, got %d", result.StatusCode)
 	}
 	if got := rec.Header().Get("x-request-id"); got != "req_test" {
 		t.Errorf("x-request-id should pass through, got %q", got)
@@ -88,7 +88,7 @@ func TestForwardStreamingFlushesEachEvent(t *testing.T) {
 	f := forward.New(srv.Client())
 	rec := httptest.NewRecorder()
 
-	status, err := f.Forward(
+	result, err := f.Forward(
 		context.Background(),
 		rec,
 		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 100, Stream: true},
@@ -98,8 +98,8 @@ func TestForwardStreamingFlushesEachEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Forward: %v", err)
 	}
-	if status != 200 {
-		t.Errorf("status: want 200, got %d", status)
+	if result.StatusCode != 200 {
+		t.Errorf("status: want 200, got %d", result.StatusCode)
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "text/event-stream" {
 		t.Errorf("Content-Type: want text/event-stream, got %q", ct)
@@ -128,7 +128,7 @@ func TestForwardErrorResponsePassthrough(t *testing.T) {
 	f := forward.New(srv.Client())
 	rec := httptest.NewRecorder()
 
-	status, err := f.Forward(
+	result, err := f.Forward(
 		context.Background(),
 		rec,
 		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 100},
@@ -138,8 +138,8 @@ func TestForwardErrorResponsePassthrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Forward: %v", err)
 	}
-	if status != 429 {
-		t.Errorf("status: want 429, got %d", status)
+	if result.StatusCode != 429 {
+		t.Errorf("status: want 429, got %d", result.StatusCode)
 	}
 	if got := rec.Header().Get("retry-after"); got != "30" {
 		t.Errorf("retry-after should pass through, got %q", got)

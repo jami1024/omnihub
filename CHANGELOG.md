@@ -96,5 +96,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   builds from source before the first image is published.
 - `.dockerignore` keeps the build context small (excludes git
   metadata, build outputs, secrets, frontend artefacts).
+- Persist one row per request in `message_requests` when the DB is
+  configured:
+  - `internal/repository/message_request.go` — bulk-INSERT repo over
+    pgx using parameterised multi-row VALUES.
+  - `internal/repository/write_buffer.go` — async batched writer:
+    250 ms / 200 rows / 5 000 max-pending cap, serialised flushes,
+    failure puts the batch back at the head of the queue, drop-oldest
+    under overflow, two-pass drain on Stop. Modelled after
+    claude-code-hub's MessageRequestWriteBuffer.
+  - `internal/service/usage/usage.go` — Anthropic-format usage
+    extraction. Non-streaming bodies parse straight from JSON;
+    streaming responses use an `SSESniffer` that merges
+    `message_start` (input + cache breakdown + ids) with
+    `message_delta` (final output_tokens + stop reason).
+  - `forward.Forwarder.Forward` now returns a `Result` carrying
+    StatusCode, Usage, and TTFB (streaming only). The forwarder feeds
+    every SSE line to the sniffer in parallel with passing it to the
+    client.
+  - The `/v1/messages` handler builds a complete `MessageRequest`
+    record at request end and enqueues it on the buffer. The buffer
+    is nil-safe so log-only mode still works without a DB.
+  - The `RequestLog` guard now emits `input_tokens`, `output_tokens`,
+    optional cache counts, `actual_model`, `upstream_request_id`,
+    and `ttfb_ms` when present.
+- `cmd/omnihub` wires the WriteBuffer to the process lifecycle:
+  initialised together with the DB pool, drained on shutdown via a
+  15 s timeout so in-flight inserts complete before the binary exits.
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main

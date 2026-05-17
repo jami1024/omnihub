@@ -21,7 +21,26 @@ import (
 
 	"github.com/jami1024/omnihub/internal/ir"
 	"github.com/jami1024/omnihub/internal/service/provider"
+	"github.com/jami1024/omnihub/internal/service/usage"
 )
+
+// Result reports what the Forwarder learned from one upstream call.
+// All fields are populated when Forward returns nil error; some are
+// populated even on error (e.g. StatusCode for a 4xx passthrough).
+type Result struct {
+	// StatusCode is the upstream HTTP status (passed through to client).
+	StatusCode int
+
+	// Usage holds extracted token / model / id fields from the upstream
+	// response. Zero value when nothing could be parsed (e.g. error
+	// responses, non-Anthropic shapes).
+	Usage usage.Usage
+
+	// TTFB is the time from sending the upstream request to receiving
+	// the first body byte. Only meaningful for streaming responses;
+	// zero for non-streaming.
+	TTFB time.Duration
+}
 
 // Forwarder dispatches an IR request through a Driver and forwards
 // the response. It owns the shared HTTP client (connection pool,
@@ -64,45 +83,55 @@ func defaultClient() *http.Client {
 
 // Forward builds an outbound request through the driver, dispatches
 // it, and either streams (SSE) or copies (single response) the body
-// back to w. Returns the upstream HTTP status code and any error that
-// occurred.
+// back to w.
 //
-// When Forward returns nil, the response has been fully delivered to
-// the client. When it returns a non-nil error, the response may be
-// partially written (in the streaming case) — callers should not try
-// to send their own error envelope after Forward starts streaming.
+// When Forward returns nil error the response has been fully delivered
+// to the client and Result captures status + usage. When it returns a
+// non-nil error the response may be partially written (streaming);
+// callers should not try to send their own error envelope after
+// Forward starts streaming.
 func (f *Forwarder) Forward(
 	ctx context.Context,
 	w http.ResponseWriter,
 	req *ir.UnifiedRequest,
 	driver provider.Driver,
 	account *provider.Account,
-) (int, error) {
+) (Result, error) {
 	if req == nil {
-		return 0, errors.New("forward: nil request")
+		return Result{}, errors.New("forward: nil request")
 	}
 	if driver == nil {
-		return 0, errors.New("forward: nil driver")
+		return Result{}, errors.New("forward: nil driver")
 	}
 
 	upstreamReq, err := driver.BuildRequest(ctx, req, account)
 	if err != nil {
-		return 0, fmt.Errorf("build request: %w", err)
+		return Result{}, fmt.Errorf("build request: %w", err)
 	}
 
+	requestSentAt := time.Now()
 	resp, err := f.client.Do(upstreamReq)
 	if err != nil {
-		return 0, fmt.Errorf("upstream call: %w", err)
+		return Result{}, fmt.Errorf("upstream call: %w", err)
 	}
 	defer resp.Body.Close()
 
+	result := Result{StatusCode: resp.StatusCode}
+
 	if resp.StatusCode >= 400 {
-		return resp.StatusCode, forwardErrorBody(w, resp)
+		return result, forwardErrorBody(w, resp)
 	}
+
 	if req.Stream {
-		return resp.StatusCode, forwardSSE(w, resp)
+		ttfb, u, err := forwardSSE(w, resp, requestSentAt)
+		result.TTFB = ttfb
+		result.Usage = u
+		return result, err
 	}
-	return resp.StatusCode, forwardBody(w, resp)
+
+	u, err := forwardBody(w, resp)
+	result.Usage = u
+	return result, err
 }
 
 // forwardErrorBody copies an upstream error response verbatim. The
@@ -117,23 +146,39 @@ func forwardErrorBody(w http.ResponseWriter, resp *http.Response) error {
 	return err
 }
 
-// forwardBody copies a successful non-streaming response.
-func forwardBody(w http.ResponseWriter, resp *http.Response) error {
+// forwardBody reads the entire non-streaming response, extracts usage,
+// and copies the body to the client. Reading the body fully (rather
+// than io.Copy) lets us parse usage before writing — at the cost of
+// holding the response in memory briefly, which is fine for chat
+// responses (typically < 100 KB).
+func forwardBody(w http.ResponseWriter, resp *http.Response) (usage.Usage, error) {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return usage.Usage{}, fmt.Errorf("read upstream body: %w", err)
+	}
+	u := usage.FromAnthropicJSON(body)
+
 	copySafeHeaders(w, resp)
 	if w.Header().Get("Content-Type") == "" {
 		w.Header().Set("Content-Type", "application/json")
 	}
 	w.WriteHeader(resp.StatusCode)
-	_, err := io.Copy(w, resp.Body)
-	return err
+	_, err = w.Write(body)
+	return u, err
 }
 
 // forwardSSE pipes upstream SSE chunks to the client, flushing at
 // every event boundary so tokens reach the client without buffering.
-func forwardSSE(w http.ResponseWriter, resp *http.Response) error {
+// A per-request SSESniffer reads the same lines on the side to
+// extract usage. Returns (TTFB, usage, error).
+func forwardSSE(
+	w http.ResponseWriter,
+	resp *http.Response,
+	requestSentAt time.Time,
+) (time.Duration, usage.Usage, error) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		return errors.New("streaming requires http.Flusher")
+		return 0, usage.Usage{}, errors.New("streaming requires http.Flusher")
 	}
 
 	copySafeHeaders(w, resp)
@@ -144,12 +189,20 @@ func forwardSSE(w http.ResponseWriter, resp *http.Response) error {
 	w.WriteHeader(resp.StatusCode)
 
 	reader := bufio.NewReaderSize(resp.Body, 64*1024)
+	sniffer := usage.NewSSESniffer()
+	var ttfb time.Duration
+
 	for {
 		line, err := reader.ReadBytes('\n')
 		if len(line) > 0 {
+			if ttfb == 0 {
+				ttfb = time.Since(requestSentAt)
+			}
+			sniffer.Feed(line)
+
 			if _, werr := w.Write(line); werr != nil {
 				// Client disconnected — stop draining the upstream.
-				return fmt.Errorf("write client: %w", werr)
+				return ttfb, sniffer.Result(), fmt.Errorf("write client: %w", werr)
 			}
 			// Flush at SSE event boundary (blank line) to push tokens.
 			if len(bytes.TrimRight(line, "\r\n")) == 0 {
@@ -158,10 +211,10 @@ func forwardSSE(w http.ResponseWriter, resp *http.Response) error {
 		}
 		if errors.Is(err, io.EOF) {
 			flusher.Flush()
-			return nil
+			return ttfb, sniffer.Result(), nil
 		}
 		if err != nil {
-			return fmt.Errorf("read upstream: %w", err)
+			return ttfb, sniffer.Result(), fmt.Errorf("read upstream: %w", err)
 		}
 	}
 }

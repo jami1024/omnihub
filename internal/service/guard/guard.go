@@ -9,7 +9,13 @@
 // context key strings.
 package guard
 
-import "github.com/gin-gonic/gin"
+import (
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/jami1024/omnihub/internal/service/usage"
+)
 
 // Context key names. Exported as constants so other packages can
 // inspect them in tests without importing private symbols.
@@ -17,6 +23,8 @@ const (
 	CtxKeyKeyName = "omnihub.key_name" // virtual API key label
 	CtxKeyModel   = "omnihub.model"    // model requested by the client
 	CtxKeyStream  = "omnihub.stream"   // true when the client asked for SSE
+	CtxKeyUsage   = "omnihub.usage"    // usage.Usage extracted from response
+	CtxKeyTTFB    = "omnihub.ttfb"     // time.Duration from request to first byte
 )
 
 // KeyName returns the virtual API key label set by the Auth guard, or
@@ -34,4 +42,32 @@ func Model(c *gin.Context) string {
 // Stream returns whether the client asked for a streaming response.
 func Stream(c *gin.Context) bool {
 	return c.GetBool(CtxKeyStream)
+}
+
+// Usage returns the token usage extracted from the upstream response,
+// or the zero value if nothing was parsed.
+func Usage(c *gin.Context) usage.Usage {
+	v, ok := c.Get(CtxKeyUsage)
+	if !ok {
+		return usage.Usage{}
+	}
+	u, ok := v.(usage.Usage)
+	if !ok {
+		return usage.Usage{}
+	}
+	return u
+}
+
+// TTFB returns the time-to-first-byte duration the Forwarder measured
+// for a streaming response, or 0 when not set / not streaming.
+func TTFB(c *gin.Context) time.Duration {
+	v, ok := c.Get(CtxKeyTTFB)
+	if !ok {
+		return 0
+	}
+	d, ok := v.(time.Duration)
+	if !ok {
+		return 0
+	}
+	return d
 }

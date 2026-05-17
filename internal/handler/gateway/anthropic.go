@@ -13,10 +13,12 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/jami1024/omnihub/internal/ir"
+	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
 	"github.com/jami1024/omnihub/internal/service/provider"
@@ -26,15 +28,23 @@ import (
 // Anthropic-compatible POST /v1/messages endpoint.
 //
 // The handler is intentionally thin: read the body, decode into IR,
-// lift the anthropic-beta header into the IR, and delegate to the
-// Forwarder. All transformation lives in the Driver; the Forwarder
-// owns transport.
+// lift the anthropic-beta header into the IR, delegate to the
+// Forwarder, and (when buffer != nil) enqueue a complete
+// MessageRequest row for persistence. All transformation lives in
+// the Driver; the Forwarder owns transport.
+//
+// buffer may be nil, in which case the gateway runs in log-only mode
+// (no DB writes) — this keeps `go run` smoke tests working without a
+// Postgres dependency.
 func AnthropicMessagesHandler(
 	forwarder *forward.Forwarder,
 	driver provider.Driver,
 	account *provider.Account,
+	buffer *repository.WriteBuffer,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		startedAt := time.Now()
+
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			errorJSON(c, http.StatusBadRequest, "invalid_request_error", "read body: "+err.Error())
@@ -57,20 +67,78 @@ func AnthropicMessagesHandler(
 		c.Set(guard.CtxKeyModel, req.Model)
 		c.Set(guard.CtxKeyStream, req.Stream)
 
-		status, err := forwarder.Forward(c.Request.Context(), c.Writer, &req, driver, account)
-		if err != nil {
+		result, forwardErr := forwarder.Forward(c.Request.Context(), c.Writer, &req, driver, account)
+		if forwardErr != nil {
 			slog.Error("forward failed",
 				"model", req.Model,
 				"stream", req.Stream,
-				"upstream_status", status,
-				"err", err.Error(),
+				"upstream_status", result.StatusCode,
+				"err", forwardErr.Error(),
 			)
-			// If headers were already written (the streaming case),
-			// we cannot send a clean error envelope; the error is
-			// logged and the partial response stands.
-			return
+			// Headers may already be flushed (streaming case); we
+			// cannot reliably send an error envelope. The partial
+			// response stands, RequestLog records the failure.
+		}
+
+		// Surface usage onto the gin.Context for RequestLog.
+		c.Set(guard.CtxKeyUsage, result.Usage)
+		if result.TTFB > 0 {
+			c.Set(guard.CtxKeyTTFB, result.TTFB)
+		}
+
+		// Persistence is opt-in: when no buffer is wired the gateway
+		// runs in log-only mode.
+		if buffer != nil {
+			buffer.Enqueue(buildMessageRequest(c, &req, driver, account, &result, forwardErr, startedAt))
 		}
 	}
+}
+
+// buildMessageRequest assembles a complete row for the message_requests
+// table from everything the handler learned.
+func buildMessageRequest(
+	c *gin.Context,
+	req *ir.UnifiedRequest,
+	driver provider.Driver,
+	account *provider.Account,
+	result *forward.Result,
+	forwardErr error,
+	startedAt time.Time,
+) repository.MessageRequest {
+	duration := time.Since(startedAt).Milliseconds()
+
+	rec := repository.MessageRequest{
+		CreatedAt:                startedAt,
+		Method:                   c.Request.Method,
+		Path:                     c.Request.URL.Path,
+		Model:                    req.Model,
+		Stream:                   req.Stream,
+		ProviderName:             driver.Name(),
+		AccountName:              account.Name,
+		InputTokens:              result.Usage.InputTokens,
+		OutputTokens:             result.Usage.OutputTokens,
+		CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
+		StatusCode:               intPtr(result.StatusCode),
+		DurationMs:               int64Ptr(duration),
+	}
+
+	if name := guard.KeyName(c); name != "" {
+		rec.KeyName = strPtr(name)
+	}
+	if result.Usage.ActualModel != "" && result.Usage.ActualModel != req.Model {
+		rec.ActualModel = strPtr(result.Usage.ActualModel)
+	}
+	if result.Usage.UpstreamRequestID != "" {
+		rec.UpstreamRequestID = strPtr(result.Usage.UpstreamRequestID)
+	}
+	if result.TTFB > 0 {
+		rec.TtfbMs = int64Ptr(result.TTFB.Milliseconds())
+	}
+	if forwardErr != nil {
+		rec.ErrorMessage = strPtr(forwardErr.Error())
+	}
+	return rec
 }
 
 func errorJSON(c *gin.Context, status int, errType, message string) {
@@ -92,3 +160,7 @@ func splitCSV(s string) []string {
 	}
 	return out
 }
+
+func strPtr(s string) *string { return &s }
+func intPtr(v int) *int       { return &v }
+func int64Ptr(v int64) *int64 { return &v }
