@@ -123,5 +123,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cmd/omnihub` wires the WriteBuffer to the process lifecycle:
   initialised together with the DB pool, drained on shutdown via a
   15 s timeout so in-flight inserts complete before the binary exits.
+- Compute USD cost per request:
+  - `internal/service/pricing` ships a hard-coded Anthropic table
+    covering Claude Haiku / Sonnet / Opus 4.5 / 4.6 / 4.7. Lookup uses
+    longest-prefix match so `claude-haiku-4-5-20251001` resolves to
+    the `claude-haiku-4-5` row.
+  - The handler resolves the cost from the upstream-reported model
+    (falling back to the requested alias) and stores the float64 USD
+    on the `MessageRequest` record. Unknown models log a warning and
+    persist NULL.
+  - Migration `0002_add_cost_usd.sql` adds `cost_usd NUMERIC(12, 6)`
+    plus a partial index on non-NULL values for quick cost rollups.
+  - `RequestLog` emits `cost_usd` so log-only deployments see cost too.
+  - 6 unit tests covering known/unknown models, prefix match,
+    cache-token charging, and longest-prefix tie-break.
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main

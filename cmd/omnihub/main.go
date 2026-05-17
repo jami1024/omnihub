@@ -19,6 +19,7 @@ import (
 	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
+	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/anthropic"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/claudeplatform"
@@ -155,8 +156,10 @@ func mountGatewayRoutes(r *gin.Engine) {
 
 	// Apply the gateway guard chain (auth → request log) to the
 	// upstream-forwarding routes only; health endpoints stay public.
+	prices := pricing.Default()
+
 	gw := r.Group("/", auth.Middleware(), guard.RequestLog())
-	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, driver, account, writeBuffer))
+	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, driver, account, writeBuffer, prices))
 
 	slog.Info("gateway mounted",
 		"path", "/v1/messages",

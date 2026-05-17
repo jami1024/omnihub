@@ -65,6 +65,9 @@ func RequestLog() gin.HandlerFunc {
 		if u.UpstreamRequestID != "" {
 			attrs = append(attrs, "upstream_request_id", u.UpstreamRequestID)
 		}
+		if cost, ok := CostUSD(c); ok {
+			attrs = append(attrs, "cost_usd", cost)
+		}
 
 		slog.Info("request", attrs...)
 	}

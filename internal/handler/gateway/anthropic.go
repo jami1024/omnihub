@@ -21,6 +21,7 @@ import (
 	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
+	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
 )
 
@@ -41,6 +42,7 @@ func AnthropicMessagesHandler(
 	driver provider.Driver,
 	account *provider.Account,
 	buffer *repository.WriteBuffer,
+	prices pricing.Table,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		startedAt := time.Now()
@@ -86,10 +88,34 @@ func AnthropicMessagesHandler(
 			c.Set(guard.CtxKeyTTFB, result.TTFB)
 		}
 
+		// Resolve the cost using the most specific model we know about
+		// (upstream-reported actual_model takes priority over the
+		// client's requested alias).
+		var costUSD *float64
+		modelForPricing := result.Usage.ActualModel
+		if modelForPricing == "" {
+			modelForPricing = req.Model
+		}
+		if prices != nil && modelForPricing != "" {
+			if cost, ok := prices.Calculate(modelForPricing, result.Usage); ok {
+				costUSD = &cost
+			} else {
+				slog.Warn("no pricing entry for model",
+					"requested_model", req.Model,
+					"actual_model", result.Usage.ActualModel,
+				)
+			}
+		}
+		if costUSD != nil {
+			c.Set(guard.CtxKeyCostUSD, *costUSD)
+		}
+
 		// Persistence is opt-in: when no buffer is wired the gateway
 		// runs in log-only mode.
 		if buffer != nil {
-			buffer.Enqueue(buildMessageRequest(c, &req, driver, account, &result, forwardErr, startedAt))
+			rec := buildMessageRequest(c, &req, driver, account, &result, forwardErr, startedAt)
+			rec.CostUSD = costUSD
+			buffer.Enqueue(rec)
 		}
 	}
 }

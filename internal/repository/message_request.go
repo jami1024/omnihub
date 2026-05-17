@@ -46,6 +46,11 @@ type MessageRequest struct {
 	OutputTokens             int64
 	CacheCreationInputTokens int64
 	CacheReadInputTokens     int64
+
+	// CostUSD is the calculated upstream cost in US dollars, computed
+	// from token counts and the per-model price table. Nil when the
+	// model is not in the table (pricing.Calculate returned false).
+	CostUSD *float64
 }
 
 // MessageRequestRepo provides batched persistence for MessageRequest
@@ -71,14 +76,14 @@ func (r *MessageRequestRepo) InsertBatch(ctx context.Context, batch []MessageReq
 		return nil
 	}
 
-	const colsPerRow = 18
+	const colsPerRow = 19
 	var sb strings.Builder
 	sb.Grow(512 + len(batch)*64)
 	sb.WriteString(`INSERT INTO message_requests (
         created_at, key_name, method, path, model, actual_model, stream,
         status_code, duration_ms, ttfb_ms, error_message,
         input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
-        provider_name, account_name, upstream_request_id
+        provider_name, account_name, upstream_request_id, cost_usd
     ) VALUES `)
 
 	args := make([]any, 0, len(batch)*colsPerRow)
@@ -100,7 +105,7 @@ func (r *MessageRequestRepo) InsertBatch(ctx context.Context, batch []MessageReq
 			m.KeyName, m.Method, m.Path, m.Model, m.ActualModel, m.Stream,
 			m.StatusCode, m.DurationMs, m.TtfbMs, m.ErrorMessage,
 			m.InputTokens, m.OutputTokens, m.CacheCreationInputTokens, m.CacheReadInputTokens,
-			m.ProviderName, m.AccountName, m.UpstreamRequestID,
+			m.ProviderName, m.AccountName, m.UpstreamRequestID, m.CostUSD,
 		)
 	}
 

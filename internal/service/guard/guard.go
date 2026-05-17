@@ -25,6 +25,7 @@ const (
 	CtxKeyStream  = "omnihub.stream"   // true when the client asked for SSE
 	CtxKeyUsage   = "omnihub.usage"    // usage.Usage extracted from response
 	CtxKeyTTFB    = "omnihub.ttfb"     // time.Duration from request to first byte
+	CtxKeyCostUSD = "omnihub.cost_usd" // float64 USD cost from pricing.Calculate
 )
 
 // KeyName returns the virtual API key label set by the Auth guard, or
@@ -70,4 +71,16 @@ func TTFB(c *gin.Context) time.Duration {
 		return 0
 	}
 	return d
+}
+
+// CostUSD returns the resolved USD cost for the request together with
+// whether a price was found in the pricing table. (0, false) when the
+// model is unknown.
+func CostUSD(c *gin.Context) (float64, bool) {
+	v, ok := c.Get(CtxKeyCostUSD)
+	if !ok {
+		return 0, false
+	}
+	cost, ok := v.(float64)
+	return cost, ok
 }
