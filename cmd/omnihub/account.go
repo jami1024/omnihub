@@ -68,6 +68,11 @@ Usage:
   --cost-multiplier=F   scales recorded cost (default 1.0)
   --disabled            create the row in disabled state
 
+  Per-account circuit-breaker overrides (NULL/omit → use OMNIHUB_CIRCUIT_* global):
+  --circuit-failure-threshold=N    consecutive failures that trip the breaker
+  --circuit-open-duration=D        Go duration ("30s", "2m") to keep the breaker open
+  --circuit-half-open-success=N    successes required in half-open to close again
+
 The CLI shares OMNIHUB_DATABASE_URL with the gateway. The DSN must
 point at a Postgres instance whose migrations have already run
 (usually by starting the gateway once).

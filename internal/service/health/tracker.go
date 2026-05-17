@@ -126,15 +126,15 @@ type accountState struct {
 	halfOpenSuccess int
 }
 
-// New constructs a tracker with the given default configuration. A
-// zero Config falls back to DefaultConfig.
+// New constructs a tracker with the given default configuration.
+// Pass DefaultConfig() for the production defaults; pass an
+// explicit Config{FailureThreshold: 0} to get a disabled tracker
+// that always reports accounts available (useful in tests and for
+// operators who want to turn the breaker off via env).
 //
 // Per-account overrides become active by calling SetConfigLookup.
 // Without a lookup every account shares the default.
 func New(cfg Config) *Tracker {
-	if cfg == (Config{}) {
-		cfg = DefaultConfig()
-	}
 	return &Tracker{
 		defaultConfig: cfg,
 		now:           time.Now,

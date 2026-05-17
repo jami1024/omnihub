@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Document circuit-breaker override flags in `omnihub account help`.
+  The flags (`--circuit-failure-threshold`, `--circuit-open-duration`,
+  `--circuit-half-open-success`) have existed since the per-account
+  override commit but were missing from the usage text, so operators
+  had to read the source to find them. No code change to the flag
+  parsing itself.
+
+### Fixed
+
+- `health.New(Config{})` no longer silently swaps in
+  `DefaultConfig()`. The previous fallback collided with the
+  "disable the breaker by setting FailureThreshold=0" semantics
+  (because `Config{FailureThreshold:0}` is structurally equal to a
+  zero `Config`), which caused `TestDisabledConfigIsNoOp` to fail
+  and would have left operators surprised when an
+  `OMNIHUB_CIRCUIT_FAILURE_THRESHOLD=0` deployment didn't actually
+  disable the breaker. Callers in the codebase always pass an
+  explicit config (`loadHealthConfig` starts from
+  `DefaultConfig()`), so the breakage is internal-test only — no
+  behaviour change for production.
+
+### Added (continued)
+
 - Account health event log: every circuit-breaker state transition
   is now persisted to a new `account_health_events` table
   (migration `0009_account_health_events.sql`) so operators can
