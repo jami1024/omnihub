@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-key policy enforcement (`internal/service/limits/`): the
+  `Limiter` runs after authentication and rejects requests that
+  violate either of two policies on the matching `api_keys` row.
+  - **Model allow-list** (`allowed_models`): non-empty array rejects
+    requests whose `model` is not listed, with HTTP 403
+    `model_not_allowed`. Empty array means no restriction.
+  - **Rolling 24h USD cap** (`daily_usd_limit`): rejects with HTTP
+    429 `daily_limit_exceeded` once the SUM of `cost_usd` in
+    `message_requests` over the past 24 hours reaches the limit.
+    Backed by `SpendCache` — a per-key, 5-second-TTL cache that
+    reloads from the DB on miss and is incrementally folded with
+    each completed request via `RecordSpend`, so back-to-back calls
+    against the same key see up-to-date totals without waiting for
+    the WriteBuffer flush.
+  - Fail-open semantics for the DB check: a transient Postgres
+    error logs a warning and allows the request. Black-holing
+    every call during a DB blip is a worse failure mode than a few
+    minutes of unbilled usage.
+  - `repository.MessageRequestRepo.SumCostByKey` is the
+    authoritative source, served by the existing
+    `message_requests(key_name, created_at DESC)` index — no new
+    migration required.
+  - Wired into the gateway handler before any upstream call, so a
+    capped key burns zero upstream quota. The full `*apikey.Key` is
+    now exposed via `guard.APIKey(c)` so downstream policies can
+    read limit fields off context.
 - Client User-Agent gate (`internal/service/guard/client_gate.go`): rejects
   non-Claude-CLI requests with HTTP 403 (`client_not_allowed`) BEFORE the
   authentication middleware runs, so scanners and curl one-liners do not

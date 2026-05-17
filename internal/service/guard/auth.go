@@ -70,6 +70,7 @@ func (a *Authenticator) Middleware() gin.HandlerFunc {
 		}
 		c.Set(CtxKeyKeyName, label)
 		c.Set(CtxKeyAPIKeyID, k.ID)
+		c.Set(CtxKeyAPIKey, k)
 		c.Next()
 	}
 }

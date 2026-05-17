@@ -141,3 +141,24 @@ func (r *MessageRequestRepo) InsertBatch(ctx context.Context, batch []MessageReq
 	}
 	return nil
 }
+
+// SumCostByKey returns the rolling 24h USD spend recorded for keyName,
+// summed from cost_usd in message_requests. Rows with NULL cost (e.g.
+// unknown-model requests where pricing.Calculate returned false) are
+// excluded by SUM's NULL semantics; COALESCE turns "no matching rows"
+// into 0 so the caller does not need to handle pgx.ErrNoRows.
+//
+// The query is served by the existing (key_name, created_at DESC) index.
+func (r *MessageRequestRepo) SumCostByKey(ctx context.Context, keyName string) (float64, error) {
+	var total float64
+	err := r.pool.QueryRow(ctx, `
+        SELECT COALESCE(SUM(cost_usd), 0)::float8
+        FROM message_requests
+        WHERE key_name = $1
+          AND created_at > NOW() - INTERVAL '24 hours'`,
+		keyName).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("sum cost for %q: %w", keyName, err)
+	}
+	return total, nil
+}

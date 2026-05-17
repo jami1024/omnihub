@@ -26,6 +26,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
 	"github.com/jami1024/omnihub/internal/service/health"
+	"github.com/jami1024/omnihub/internal/service/limits"
 	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/anthropic"
@@ -289,8 +290,10 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 		slog.Info("client UA gate enabled", "allowed_prefixes", clientGate.Prefixes())
 	}
 
+	limiter := buildLimiter()
+
 	gw := r.Group("/", clientGate.Middleware(), auth.Middleware(), guard.RequestLog())
-	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices))
+	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices, limiter))
 
 	stickyDesc := "off"
 	if sessions != nil {
@@ -478,6 +481,30 @@ func loadHealthConfig() health.Config {
 	}
 
 	return cfg
+}
+
+// spendCacheTTL bounds how long a cached per-key 24h USD total may
+// drift from the authoritative DB SUM. Short enough that operator-side
+// adjustments (e.g. wiping test rows) reflect quickly; long enough to
+// keep hot keys off the DB. Tuneable via OMNIHUB_LIMIT_REFRESH_TTL.
+const spendCacheTTL = 5 * time.Second
+
+// buildLimiter wires the per-key limits service. Returns nil only
+// when running without a DB pool — the limiter is still useful in
+// that mode for the model allow-list but the daily-USD check is
+// inert without a SpendSource, so we keep the field nil to make the
+// no-policy path explicit at call sites.
+func buildLimiter() *limits.Limiter {
+	if pool == nil {
+		return limits.New(nil)
+	}
+	src := repository.NewMessageRequestRepo(pool)
+	cache := limits.NewSpendCache(src, spendCacheTTL)
+	slog.Info("per-key limits enabled",
+		"spend_cache_ttl", spendCacheTTL,
+		"daily_window", "24h rolling",
+	)
+	return limits.New(cache)
 }
 
 // buildDriverRegistry registers every built-in driver. Adding a new

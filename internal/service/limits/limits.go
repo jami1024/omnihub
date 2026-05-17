@@ -1,0 +1,122 @@
+// Package limits enforces per-key spend and model policies after
+// authentication has identified the caller. It owns two checks:
+//
+//   - Model allow-list (api_keys.allowed_models): synchronous,
+//     in-memory, zero IO. A non-empty allow-list rejects requests
+//     whose model is not present.
+//   - Daily USD cap (api_keys.daily_usd_limit): rolling 24h window of
+//     summed cost_usd from message_requests, served by SpendCache so
+//     hot keys do not hit the DB on every request.
+//
+// RPM and concurrency caps live elsewhere — they need their own
+// clock/state machine and don't share the limits.Check signature.
+package limits
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+
+	"github.com/jami1024/omnihub/internal/service/apikey"
+)
+
+// Reject is the structured rejection returned by Check when a request
+// must be denied. The handler turns it into an HTTP error envelope.
+type Reject struct {
+	Status  int    // HTTP status code (403 / 429)
+	Type    string // Anthropic-shaped error.type
+	Message string // human-readable detail
+}
+
+// Error implements error so callers may use errors.Is-style flow if
+// desired; the field is otherwise the source of truth.
+func (r *Reject) Error() string { return r.Message }
+
+// Limiter holds the policy machinery. Construct one via New and
+// share it across the gateway — the cache inside is safe for
+// concurrent use.
+type Limiter struct {
+	cache *SpendCache
+}
+
+// New returns a Limiter. A nil cache disables the daily USD check
+// (useful in tests, or when running without a DB-backed pricing
+// pipeline); the model allow-list still runs.
+func New(cache *SpendCache) *Limiter {
+	return &Limiter{cache: cache}
+}
+
+// Check enforces both the model allow-list and the rolling 24h USD
+// cap for k. Returns nil when the request may proceed.
+//
+// A nil k (auth disabled, dev mode) bypasses both checks — failure
+// modes belong to the Auth Guard, not here.
+//
+// The daily-cap check is fail-open: a SpendCache / DB error logs a
+// warning and allows the request. The alternative (fail-closed) would
+// black-hole every request during a Postgres blip, which is a worse
+// failure mode than a few minutes of unbilled usage.
+func (l *Limiter) Check(ctx context.Context, k *apikey.Key, model string) *Reject {
+	if k == nil {
+		return nil
+	}
+
+	if !modelAllowed(model, k.AllowedModels) {
+		return &Reject{
+			Status: 403,
+			Type:   "model_not_allowed",
+			Message: fmt.Sprintf(
+				"model %q is not in the allow-list for key %q",
+				model, k.Name,
+			),
+		}
+	}
+
+	if k.DailyUSDLimit == nil || l.cache == nil {
+		return nil
+	}
+	spend, err := l.cache.Spend(ctx, k.Name)
+	if err != nil {
+		slog.Warn("daily limit check failed; request allowed",
+			"key", k.Name, "err", err.Error())
+		return nil
+	}
+	if spend >= *k.DailyUSDLimit {
+		return &Reject{
+			Status: 429,
+			Type:   "daily_limit_exceeded",
+			Message: fmt.Sprintf(
+				"key %q reached its daily USD limit ($%.2f spent of $%.2f); the limit resets on a rolling 24h window",
+				k.Name, spend, *k.DailyUSDLimit,
+			),
+		}
+	}
+	return nil
+}
+
+// RecordSpend folds the cost of a just-completed request into the
+// cache so the next request against the same key sees up-to-date
+// data, without waiting for the WriteBuffer flush or the cache TTL.
+// Safe to call with a nil Limiter or a zero-cost request.
+func (l *Limiter) RecordSpend(keyName string, usd float64) {
+	if l == nil || l.cache == nil {
+		return
+	}
+	l.cache.Add(keyName, usd)
+}
+
+// modelAllowed returns true when allow is empty (no restriction) or
+// when model appears verbatim in allow. Match is case-sensitive on
+// purpose — Anthropic's model identifiers are stable, lowercase
+// strings; a case-insensitive match would hide typos.
+func modelAllowed(model string, allow []string) bool {
+	if len(allow) == 0 {
+		return true
+	}
+	for _, m := range allow {
+		if m == model {
+			return true
+		}
+	}
+	return false
+}

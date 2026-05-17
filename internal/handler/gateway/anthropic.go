@@ -26,6 +26,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
 	"github.com/jami1024/omnihub/internal/service/health"
+	"github.com/jami1024/omnihub/internal/service/limits"
 	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/resolver"
@@ -87,6 +88,7 @@ func AnthropicMessagesHandler(
 	tracker *health.Tracker,
 	buffer *repository.WriteBuffer,
 	prices pricing.Table,
+	limiter *limits.Limiter,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		startedAt := time.Now()
@@ -116,6 +118,16 @@ func AnthropicMessagesHandler(
 		c.Set(guard.CtxKeyStream, req.Stream)
 		c.Set(guard.CtxKeyClientIP, c.ClientIP())
 		c.Set(guard.CtxKeyUserAgent, c.GetHeader("User-Agent"))
+
+		// Per-key policy: model allow-list + rolling 24h USD cap.
+		// Runs after IR is parsed (we need req.Model) but before any
+		// upstream call, so a capped key burns zero upstream quota.
+		if limiter != nil {
+			if rej := limiter.Check(c.Request.Context(), guard.APIKey(c), req.Model); rej != nil {
+				errorJSON(c, rej.Status, rej.Type, rej.Message)
+				return
+			}
+		}
 
 		// Derive a session key so consecutive turns of the same
 		// conversation hit the same upstream — Anthropic prompt
@@ -189,6 +201,15 @@ func AnthropicMessagesHandler(
 			costUSD, costBreakdown := computeCost(prices, &req, &result, account)
 			if costUSD != nil {
 				c.Set(guard.CtxKeyCostUSD, *costUSD)
+				// Fold the just-paid cost into the spend cache so the
+				// next request from this key sees up-to-date data
+				// without waiting for the WriteBuffer flush or the
+				// cache TTL refresh.
+				if limiter != nil {
+					if k := guard.APIKey(c); k != nil {
+						limiter.RecordSpend(k.Name, *costUSD)
+					}
+				}
 			}
 
 			if buffer != nil {

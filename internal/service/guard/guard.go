@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/jami1024/omnihub/internal/service/apikey"
 	"github.com/jami1024/omnihub/internal/service/usage"
 )
 
@@ -29,6 +30,7 @@ const (
 	CtxKeyClientIP  = "omnihub.client_ip"   // string — immediate caller's IP
 	CtxKeyUserAgent = "omnihub.user_agent"  // string — User-Agent header verbatim
 	CtxKeyAPIKeyID  = "omnihub.api_key_id"  // int64 — DB primary key for the auth'd virtual key
+	CtxKeyAPIKey    = "omnihub.api_key"     // *apikey.Key — full record (limits, allowed_models, ...)
 )
 
 // KeyName returns the virtual API key label set by the Auth guard, or
@@ -94,3 +96,19 @@ func ClientIP(c *gin.Context) string { return c.GetString(CtxKeyClientIP) }
 
 // UserAgent returns the inbound User-Agent header verbatim.
 func UserAgent(c *gin.Context) string { return c.GetString(CtxKeyUserAgent) }
+
+// APIKey returns the full authenticated key record, or nil if auth is
+// disabled / the request was not authenticated. Downstream policies
+// (limits, RPM, …) read DailyUSDLimit / AllowedModels / RPMLimit off
+// this struct instead of going back to the pool.
+func APIKey(c *gin.Context) *apikey.Key {
+	v, ok := c.Get(CtxKeyAPIKey)
+	if !ok {
+		return nil
+	}
+	k, ok := v.(*apikey.Key)
+	if !ok {
+		return nil
+	}
+	return k
+}
