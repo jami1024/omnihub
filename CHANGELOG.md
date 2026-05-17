@@ -83,5 +83,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for the existing MVP flow.
 - Add `deploy/docker-compose.dev.yaml` for a one-command local
   PostgreSQL (`docker compose -f ... up -d`).
+- Add multi-stage `Dockerfile`: golang:1.26-alpine builder produces a
+  static binary stripped via `-trimpath -ldflags '-s -w'` with version
+  metadata; alpine:3.20 runtime adds CA certs, tzdata, and a non-root
+  user. Final image ≈ 30–40 MB. `HEALTHCHECK` probes `/healthz` every
+  10 s and `LABEL`s tie the image back to the GitHub repo.
+- Add production-shape `deploy/docker-compose.yaml` and
+  `deploy/.env.example`: PostgreSQL is internal-only; only the gateway
+  listens on the host. `depends_on: service_healthy` makes the
+  gateway wait for PG before starting. Defaults to
+  `ghcr.io/jami1024/omnihub:latest`; a commented `build:` stanza
+  builds from source before the first image is published.
+- `.dockerignore` keeps the build context small (excludes git
+  metadata, build outputs, secrets, frontend artefacts).
 
 [Unreleased]: https://github.com/jami1024/omnihub/commits/main

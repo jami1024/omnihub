@@ -1,0 +1,66 @@
+# Production-shape deployment: gateway + PostgreSQL together.
+#
+# The OmniHub container reaches PostgreSQL over the internal Docker
+# network as "postgres". PostgreSQL is intentionally NOT published on
+# the host so it cannot be reached from outside the compose project;
+# only the gateway listens on the host's port.
+#
+# Usage:
+#   cp deploy/.env.example deploy/.env
+#   # edit deploy/.env with real values
+#   docker compose -f deploy/docker-compose.yaml --env-file deploy/.env up -d
+#
+# To follow logs:
+#   docker compose -f deploy/docker-compose.yaml --env-file deploy/.env logs -f
+#
+# To tear down (keeping data):
+#   docker compose -f deploy/docker-compose.yaml --env-file deploy/.env down
+#
+# To tear down AND delete the database volume:
+#   docker compose -f deploy/docker-compose.yaml --env-file deploy/.env down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: omnihub-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-omnihub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in deploy/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-omnihub}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-omnihub} -d ${POSTGRES_DB:-omnihub}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - omnihub_pg_data:/var/lib/postgresql/data
+    # No `ports:` — DB stays on the internal Docker network only.
+
+  omnihub:
+    # Pulled from GitHub Container Registry once published. Until you
+    # push your first image, comment out `image:` and uncomment `build:`
+    # to build locally from the source tree.
+    image: ghcr.io/jami1024/omnihub:${OMNIHUB_VERSION:-latest}
+    # build:
+    #   context: ..
+    #   dockerfile: Dockerfile
+    container_name: omnihub-gateway
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      OMNIHUB_LISTEN: ":8080"
+      OMNIHUB_DATABASE_URL: "postgres://${POSTGRES_USER:-omnihub}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-omnihub}?sslmode=disable"
+      OMNIHUB_API_KEYS: ${OMNIHUB_API_KEYS:?OMNIHUB_API_KEYS must be set in deploy/.env}
+      # Upstream credentials. Set the block matching your provider.
+      OMNIHUB_ANTHROPIC_API_KEY: ${OMNIHUB_ANTHROPIC_API_KEY:-}
+      OMNIHUB_CLAUDE_PLATFORM_API_KEY: ${OMNIHUB_CLAUDE_PLATFORM_API_KEY:-}
+      OMNIHUB_CLAUDE_PLATFORM_REGION: ${OMNIHUB_CLAUDE_PLATFORM_REGION:-}
+      OMNIHUB_CLAUDE_PLATFORM_WORKSPACE_ID: ${OMNIHUB_CLAUDE_PLATFORM_WORKSPACE_ID:-}
+    ports:
+      - "${OMNIHUB_PORT:-8080}:8080"
+
+volumes:
+  omnihub_pg_data:

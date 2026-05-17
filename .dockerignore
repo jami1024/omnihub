@@ -1,0 +1,52 @@
+# Keep the Docker build context lean. Patterns work like .gitignore but
+# control which paths are uploaded to the daemon, not which are tracked
+# by git.
+
+# Git metadata
+.git
+.gitignore
+.gitattributes
+
+# CI / editor configs
+.github
+.idea
+.vscode
+.dockerignore
+
+# Local build artefacts
+bin/
+dist/
+reports/
+tmp/
+
+# Tests / coverage
+*.test
+*.out
+coverage.*
+
+# Secrets and local config — MUST NEVER ship inside an image
+.env
+.env.local
+*.local
+deploy/.env
+
+# Frontend artefacts (when web/ lands)
+web/node_modules
+web/dist
+web/.vite
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Docs we do not need at runtime
+CHANGELOG.md
+CONTRIBUTING.md
+docs/
+README.md
+README.zh-CN.md
+# LICENSE is intentionally kept — convention for distributed binaries.
