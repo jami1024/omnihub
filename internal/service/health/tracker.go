@@ -83,6 +83,26 @@ type Snapshot struct {
 // access into the account pool).
 type ConfigLookup func(accountID int64) Config
 
+// Transition is one state change of the circuit breaker. Emitted to
+// the registered TransitionHandler (if any) so operators can
+// persist / surface state-change history outside the process.
+type Transition struct {
+	AccountID    int64
+	From         CircuitState
+	To           CircuitState
+	FailureCount int       // failure count at the moment of the transition
+	Reason       error     // nil for non-failure transitions (e.g. cooldown expiry, manual reset)
+	At           time.Time // wall-clock time of the transition
+}
+
+// TransitionHandler is called for every state change. Implementations
+// MUST be non-blocking — the tracker invokes it on its hot path with
+// the mutex released, but a slow handler will still serialise the
+// next state transition for the same account. The recommended
+// pattern is to drop the event into a buffered channel and let a
+// separate goroutine do the heavy lifting (see service/healthlog).
+type TransitionHandler func(Transition)
+
 // Tracker is the per-process circuit breaker registry. It is safe
 // for concurrent use.
 type Tracker struct {
@@ -90,8 +110,9 @@ type Tracker struct {
 	lookup        ConfigLookup    // nil = always use defaultConfig
 	now           func() time.Time // pluggable clock for tests
 
-	mu     sync.Mutex
-	states map[int64]*accountState
+	mu                sync.Mutex
+	states            map[int64]*accountState
+	transitionHandler TransitionHandler
 }
 
 // accountState is the per-account mutable record. Access is guarded
@@ -130,6 +151,18 @@ func (t *Tracker) SetConfigLookup(lookup ConfigLookup) {
 	t.lookup = lookup
 }
 
+// SetTransitionHandler installs a callback that fires on every state
+// change. Pass nil to detach. The handler is invoked outside the
+// tracker mutex, so a slow handler does not block concurrent
+// IsAvailable / Record* calls for *other* accounts — but transitions
+// for the same account are still serialised through the tracker's
+// next-state computation.
+func (t *Tracker) SetTransitionHandler(h TransitionHandler) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.transitionHandler = h
+}
+
 // configFor returns the effective config for one account.
 // Caller must hold t.mu.
 func (t *Tracker) configFor(accountID int64) Config {
@@ -149,26 +182,45 @@ func (t *Tracker) configFor(accountID int64) Config {
 // half-open and the call returns true (allowing a trial request).
 func (t *Tracker) IsAvailable(accountID int64) bool {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 
 	cfg := t.configFor(accountID)
 	if cfg.Disabled() {
+		t.mu.Unlock()
 		return true
 	}
 
 	s, ok := t.states[accountID]
 	if !ok {
+		t.mu.Unlock()
 		return true
 	}
 	if s.state == StateClosed || s.state == StateHalfOpen {
+		t.mu.Unlock()
 		return true
 	}
 
 	// State == Open. Check if we've cooled off enough to allow a
 	// trial request.
+	var trans *Transition
 	if t.now().After(s.openUntil) {
+		from := s.state
 		s.state = StateHalfOpen
 		s.halfOpenSuccess = 0
+		trans = &Transition{
+			AccountID:    accountID,
+			From:         from,
+			To:           s.state,
+			FailureCount: s.failureCount,
+			At:           t.now(),
+		}
+	}
+	h := t.transitionHandler
+	t.mu.Unlock()
+
+	if trans != nil {
+		if h != nil {
+			h(*trans)
+		}
 		return true
 	}
 	return false
@@ -178,12 +230,13 @@ func (t *Tracker) IsAvailable(accountID int64) bool {
 // the breaker toward closed.
 func (t *Tracker) RecordSuccess(accountID int64) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	cfg := t.configFor(accountID)
 	if cfg.Disabled() {
+		t.mu.Unlock()
 		return
 	}
 	s := t.getOrCreate(accountID)
+	before := s.state
 
 	switch s.state {
 	case StateClosed:
@@ -212,19 +265,38 @@ func (t *Tracker) RecordSuccess(accountID int64) {
 			s.halfOpenSuccess = 0
 		}
 	}
+
+	var trans *Transition
+	if before != s.state {
+		trans = &Transition{
+			AccountID:    accountID,
+			From:         before,
+			To:           s.state,
+			FailureCount: s.failureCount,
+			At:           t.now(),
+		}
+	}
+	h := t.transitionHandler
+	t.mu.Unlock()
+
+	if trans != nil && h != nil {
+		h(*trans)
+	}
 }
 
 // RecordFailure increments the per-account failure counter and opens
 // the breaker if the threshold is crossed. A failure in half-open
-// state immediately re-opens the breaker.
-func (t *Tracker) RecordFailure(accountID int64, _ error) {
+// state immediately re-opens the breaker. The error reason is
+// surfaced to the TransitionHandler when a state change occurs.
+func (t *Tracker) RecordFailure(accountID int64, reason error) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	cfg := t.configFor(accountID)
 	if cfg.Disabled() {
+		t.mu.Unlock()
 		return
 	}
 	s := t.getOrCreate(accountID)
+	before := s.state
 
 	now := t.now()
 	s.failureCount++
@@ -244,8 +316,26 @@ func (t *Tracker) RecordFailure(accountID int64, _ error) {
 		s.halfOpenSuccess = 0
 	case StateOpen:
 		// Already open; refresh openUntil so back-to-back failure
-		// storms extend the cooldown.
+		// storms extend the cooldown. No state-change emission.
 		s.openUntil = now.Add(cfg.OpenDuration)
+	}
+
+	var trans *Transition
+	if before != s.state {
+		trans = &Transition{
+			AccountID:    accountID,
+			From:         before,
+			To:           s.state,
+			FailureCount: s.failureCount,
+			Reason:       reason,
+			At:           now,
+		}
+	}
+	h := t.transitionHandler
+	t.mu.Unlock()
+
+	if trans != nil && h != nil {
+		h(*trans)
 	}
 }
 

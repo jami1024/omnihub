@@ -185,6 +185,81 @@ func TestResetClearsState(t *testing.T) {
 	}
 }
 
+func TestTransitionHandlerEmitsClosedToOpen(t *testing.T) {
+	tr, _ := newTracker(t)
+	var got []Transition
+	tr.SetTransitionHandler(func(t Transition) { got = append(got, t) })
+
+	err := errors.New("boom")
+	tr.RecordFailure(1, err) // 1/3 — no transition
+	tr.RecordFailure(1, err) // 2/3 — no transition
+	if len(got) != 0 {
+		t.Fatalf("transitions before threshold = %d, want 0", len(got))
+	}
+	tr.RecordFailure(1, err) // 3/3 — closed → open
+
+	if len(got) != 1 {
+		t.Fatalf("transitions = %d, want 1", len(got))
+	}
+	ev := got[0]
+	if ev.From != StateClosed || ev.To != StateOpen {
+		t.Errorf("transition %s → %s, want closed → open", ev.From, ev.To)
+	}
+	if ev.AccountID != 1 || ev.FailureCount != 3 {
+		t.Errorf("ev = %+v", ev)
+	}
+	if ev.Reason == nil || ev.Reason.Error() != "boom" {
+		t.Errorf("reason = %v, want \"boom\"", ev.Reason)
+	}
+}
+
+func TestTransitionHandlerEmitsOpenToHalfOpenAndClosed(t *testing.T) {
+	tr, clock := newTracker(t)
+	var got []Transition
+	tr.SetTransitionHandler(func(t Transition) { got = append(got, t) })
+
+	err := errors.New("x")
+	for i := 0; i < 3; i++ {
+		tr.RecordFailure(1, err)
+	}
+	// transition 1: closed → open
+	clock.Advance(31 * time.Second)
+	_ = tr.IsAvailable(1) // transition 2: open → half-open (cooldown expired)
+	tr.RecordSuccess(1)   // transition 3: half-open → closed (threshold=1)
+
+	if len(got) != 3 {
+		t.Fatalf("transitions = %d, want 3: %+v", len(got), got)
+	}
+	if got[0].From != StateClosed || got[0].To != StateOpen {
+		t.Errorf("transition[0] = %s → %s", got[0].From, got[0].To)
+	}
+	if got[1].From != StateOpen || got[1].To != StateHalfOpen {
+		t.Errorf("transition[1] = %s → %s", got[1].From, got[1].To)
+	}
+	if got[1].Reason != nil {
+		t.Errorf("cooldown-expiry transition should have nil reason, got %v", got[1].Reason)
+	}
+	if got[2].From != StateHalfOpen || got[2].To != StateClosed {
+		t.Errorf("transition[2] = %s → %s", got[2].From, got[2].To)
+	}
+}
+
+func TestTransitionHandlerSilentOnNoStateChange(t *testing.T) {
+	tr, _ := newTracker(t)
+	var got []Transition
+	tr.SetTransitionHandler(func(t Transition) { got = append(got, t) })
+
+	// Already-open breaker absorbing extra failures: NO new transitions.
+	for i := 0; i < 3; i++ {
+		tr.RecordFailure(1, errors.New("x"))
+	}
+	tr.RecordFailure(1, errors.New("x")) // already open → open: no emit
+	tr.RecordFailure(1, errors.New("x"))
+	if len(got) != 1 {
+		t.Errorf("expected only the initial closed→open transition, got %d: %+v", len(got), got)
+	}
+}
+
 func TestConcurrentRecording(t *testing.T) {
 	tr := New(DefaultConfig())
 	var wg sync.WaitGroup

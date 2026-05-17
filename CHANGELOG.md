@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Account health event log: every circuit-breaker state transition
+  is now persisted to a new `account_health_events` table
+  (migration `0009_account_health_events.sql`) so operators can
+  reconstruct flap history with plain SQL — no Prometheus or
+  external metrics backend required. `health.Tracker` grew a
+  `TransitionHandler` hook that fires on every state change with a
+  structured `Transition{From, To, FailureCount, Reason, At}`
+  payload; the handler runs *outside* the tracker mutex so a slow
+  recorder cannot freeze the breaker. The new
+  `internal/service/healthlog` package wires the hook to a
+  bounded background goroutine that inserts via
+  `repository.AccountHealthEventRepo`; queue overflow drops the
+  event with a warn log + `Dropped()` counter rather than blocking
+  the hot path. Closed→Open and Half-Open→Open carry the
+  triggering error in `reason`; Open→Half-Open (cooldown expiry)
+  carries NULL.
 - Bounded upstream drain on client disconnect mid-stream
   (`internal/service/forward/forward.go`): when the SSE forward
   loop's write to the client fails, the gateway no longer abandons

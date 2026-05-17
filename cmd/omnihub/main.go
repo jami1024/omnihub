@@ -26,6 +26,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
 	"github.com/jami1024/omnihub/internal/service/health"
+	"github.com/jami1024/omnihub/internal/service/healthlog"
 	"github.com/jami1024/omnihub/internal/service/limits"
 	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
@@ -269,6 +270,17 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 		}
 		return cfg
 	})
+
+	// Persist every circuit-breaker transition to account_health_events
+	// so operators can query the flap history with plain SQL. The
+	// recorder runs an async writer goroutine; the hot path on the
+	// tracker side is non-blocking.
+	if pool != nil {
+		recorder := healthlog.New(repository.NewAccountHealthEventRepo(pool), accountPool)
+		recorder.Start(context.Background())
+		tracker.SetTransitionHandler(recorder.Handler)
+		slog.Info("account health event recorder running", "queue_size", 256)
+	}
 
 	sessionTTL := loadSessionTTL()
 	var sessions *session.Store
