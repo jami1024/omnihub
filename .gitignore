@@ -1,0 +1,55 @@
+# ===== Go =====
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work.sum
+
+# Coverage
+*.cover
+coverage.out
+coverage.html
+
+# Air hot reload
+tmp/
+
+# ===== Node / Frontend (web/) =====
+node_modules/
+web/dist/
+web/.vite/
+web/coverage/
+web/*.log
+web/.env
+web/.env.local
+web/.env.*.local
+
+# ===== Build artifacts =====
+/bin/
+/dist/
+/reports/
+/plugins/*/bin/
+
+# ===== Local dev =====
+.env
+.env.local
+*.local
+
+# ===== Editor / OS =====
+.DS_Store
+.idea/
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.recommended.json
+Thumbs.db
+
+# ===== Database =====
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== Logs =====
+*.log
+logs/
