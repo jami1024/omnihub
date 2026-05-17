@@ -79,18 +79,63 @@ func TestUnknownModelReturnsFalse(t *testing.T) {
 	}
 }
 
-func TestOpus47NewPricing(t *testing.T) {
+// TestOpusCurrentTierPricing covers every Opus version on the
+// reduced $5/$25/MTok tier (4.5 / 4.6 / 4.7 share the same numbers).
+// 4.1 stays on the legacy tier and is exercised separately.
+func TestOpusCurrentTierPricing(t *testing.T) {
 	tbl := pricing.Default()
-	got, ok := tbl.Calculate("claude-opus-4-7", usage.Usage{
+	for _, model := range []string{"claude-opus-4-5", "claude-opus-4-6", "claude-opus-4-7"} {
+		t.Run(model, func(t *testing.T) {
+			got, ok := tbl.Calculate(model, usage.Usage{
+				InputTokens:  1_000_000,
+				OutputTokens: 100_000,
+			})
+			if !ok {
+				t.Fatalf("expected price entry for %s", model)
+			}
+			// $5 + 0.1 × $25 = $7.50
+			if !approxEqual(got.Total, 7.50) {
+				t.Errorf("%s should price at current tier ($5/$25 per MTok): want 7.50, got %g", model, got.Total)
+			}
+		})
+	}
+}
+
+// TestOpus41LegacyTier locks in the legacy $15/$75 pricing for the
+// 4.1 series so a future "move everything to current tier" refactor
+// trips a test before going live.
+func TestOpus41LegacyTier(t *testing.T) {
+	tbl := pricing.Default()
+	got, ok := tbl.Calculate("claude-opus-4-1", usage.Usage{
 		InputTokens:  1_000_000,
 		OutputTokens: 100_000,
 	})
 	if !ok {
-		t.Fatalf("expected price for claude-opus-4-7")
+		t.Fatalf("expected price entry for claude-opus-4-1")
 	}
-	// $5 + 0.1 × $25 = $7.50 (post 2026-04-16 reduction)
-	if !approxEqual(got.Total, 7.50) {
-		t.Errorf("Opus 4.7 cost should reflect new $5/$25 pricing: want 7.50, got %g", got.Total)
+	// $15 + 0.1 × $75 = $22.50
+	if !approxEqual(got.Total, 22.50) {
+		t.Errorf("Opus 4.1 should stay on legacy $15/$75 tier: want 22.50, got %g", got.Total)
+	}
+}
+
+// TestOpus46CacheWriteMatchesInvoice regression-tests the bug
+// reported 2026-05-17: a real Claude Platform on AWS invoice showed
+// 29 701 cache_creation tokens billed at $0.185631 on Opus 4.6
+// ($6.25/MTok), but OmniHub had 4.6 misfiled under the legacy
+// $18.75/MTok tier and recorded 3× the cost.
+func TestOpus46CacheWriteMatchesInvoice(t *testing.T) {
+	tbl := pricing.Default()
+	got, _ := tbl.Calculate("claude-opus-4-6", usage.Usage{
+		InputTokens:              3,
+		OutputTokens:             19,
+		CacheCreationInputTokens: 29_701,
+	})
+	// $0.000015 + $0.000475 + $0.18563125 = $0.18612125
+	// (Invoice rounds the cache row to $0.185631; OmniHub keeps the
+	// quarter-micro-cent for accurate daily-cap math.)
+	if !approxEqual(got.Total, 0.18612125) {
+		t.Errorf("Opus 4.6 cost should match invoice (~$0.186121): got %g", got.Total)
 	}
 }
 

@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Fixed (pricing)
+
+- Opus 4.5 and 4.6 were misfiled in the legacy $15/$75 per-MTok tier;
+  Anthropic moved them to the current $5/$25 tier (alongside 4.7) in
+  the 2026-04-16 reprice. OmniHub was billing 3× the real cost,
+  which silently inflated per-key `daily_usd_limit` accounting and
+  the cost-breakdown column. Confirmed against a real Claude
+  Platform on AWS invoice (29 701 cache-creation tokens billed at
+  $0.185631 = $6.25/MTok, not the legacy $0.557 at $18.75/MTok) and
+  against claude-code-hub's cloud price table.
+  - 4.1 stays on the legacy tier (no evidence of reprice).
+  - Two new locked-in tests (`TestOpusCurrentTierPricing`,
+    `TestOpus41LegacyTier`) plus a regression test
+    (`TestOpus46CacheWriteMatchesInvoice`) so a future "everything
+    is current tier" refactor trips before going live.
+
+### Added (continued)
+
 - Document circuit-breaker override flags in `omnihub account help`.
   The flags (`--circuit-failure-threshold`, `--circuit-open-duration`,
   `--circuit-half-open-success`) have existed since the per-account

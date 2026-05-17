@@ -96,19 +96,28 @@ func Default() Table {
 		"claude-sonnet-4-5": sonnetPrice(),
 		"claude-sonnet-4-6": sonnetPrice(),
 
-		// Opus 4.1 / 4.5 / 4.6 — $15.00 / $75.00 / MTok (legacy)
+		// Opus 4.1 — legacy tier: $15.00 / $75.00 / MTok. Only the
+		// 4.1 series remains at these rates; everything 4.5+ moved
+		// to the lower tier with the 2026-04-16 reprice.
 		"claude-opus-4-1": opusLegacyPrice(),
-		"claude-opus-4-5": opusLegacyPrice(),
-		"claude-opus-4-6": opusLegacyPrice(),
 
-		// Opus 4.7 — $5.00 / $25.00 / MTok (released 2026-04-16, new lower rates)
-		"claude-opus-4-7": {
-			InputCostPerToken:                   5.00e-6,
-			OutputCostPerToken:                  25.00e-6,
-			CacheCreationInputTokenCost:         6.25e-6,
-			CacheCreationInputTokenCostAbove1Hr: 10.00e-6,
-			CacheReadInputTokenCost:             0.50e-6,
-		},
+		// Opus 4.5 / 4.6 / 4.7 — current tier: $5.00 / $25.00 / MTok.
+		// Verified against claude-code-hub's cloud-price-table for
+		// 4.5 and against an actual Claude Platform on AWS invoice
+		// for 4.6 ($6.25/MTok cache write 5m).
+		"claude-opus-4-5": opusCurrentPrice(),
+		"claude-opus-4-6": opusCurrentPrice(),
+		"claude-opus-4-7": opusCurrentPrice(),
+	}
+}
+
+func opusCurrentPrice() Price {
+	return Price{
+		InputCostPerToken:                   5.00e-6,
+		OutputCostPerToken:                  25.00e-6,
+		CacheCreationInputTokenCost:         6.25e-6,
+		CacheCreationInputTokenCostAbove1Hr: 10.00e-6,
+		CacheReadInputTokenCost:             0.50e-6,
 	}
 }
 
