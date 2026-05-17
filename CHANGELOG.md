@@ -238,6 +238,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       bind / get / TTL expiry / refresh, sticky re-use across
       iterations, fallback when bound account turns unhealthy, and
       the retry-loop "don't bind" guarantee.
+  - **Virtual API keys as a first-class DB entity** — foundation
+    for the upcoming Limits Guard (daily $, RPM, model allow-list):
+    - Migration `0008_api_keys.sql` creates the `api_keys` table
+      (name unique, sha256-hex `key_hash` unique, label, enabled,
+      `daily_usd_limit`, `rpm_limit`, `allowed_models JSONB`,
+      timestamps) and installs an `omnihub_api_keys_changed` NOTIFY
+      trigger that mirrors the accounts pattern.
+    - `internal/service/apikey` adds `Key`, `HashOf` (sha256 hex),
+      `Generate` (32-byte random keys prefixed `omni-`), `Pool`
+      indexed by hash, and a `Listener` with backoff reconnect.
+    - `internal/repository/api_key.go` provides `ListEnabled`,
+      `ListAll`, `CountAll`, `Insert`, `SetEnabled`, `Delete`.
+    - `guard.Authenticator` now takes a `KeyLookup` callback; the
+      gateway wires it to `apiKeyPool.LookupByHash(HashOf(submitted))`.
+      The auth path therefore hits an O(1) in-memory map; database
+      pressure remains zero on the hot path.
+    - CLI `omnihub key add|list|enable|disable|delete`:
+      - `add` generates a random 48-char key (or accepts `--key=...`),
+        stores only the hash, and prints the cleartext **once** so
+        operators can hand it to the user. Optional `--label`,
+        `--daily-usd`, `--rpm`, `--allowed-models`, `--disabled`.
+      - `list` renders a tab-aligned table without ever printing the
+        hash or any secret material.
+    - First-boot bootstrap: when the `api_keys` table is empty AND
+      `OMNIHUB_API_KEYS` is set, the gateway hashes every legacy
+      `label:key` entry and inserts it. Existing deployments upgrade
+      transparently; the env var becomes unnecessary after the first
+      boot (the DB is now the source of truth).
+    - The `daily_usd_limit` / `rpm_limit` / `allowed_models`
+      columns are populated but NOT yet enforced — Step 2 lights up
+      the Limits Guard in a follow-up commit.
   - **Outbound header optimisations inspired by claude-code-hub and
     sub2api header analysis**:
     - The Forwarder now forces `Accept-Encoding: identity` on every

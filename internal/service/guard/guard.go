@@ -26,8 +26,9 @@ const (
 	CtxKeyUsage   = "omnihub.usage"    // usage.Usage extracted from response
 	CtxKeyTTFB    = "omnihub.ttfb"     // time.Duration from request to first byte
 	CtxKeyCostUSD   = "omnihub.cost_usd"   // float64 USD cost from pricing.Calculate
-	CtxKeyClientIP  = "omnihub.client_ip"  // string — immediate caller's IP
-	CtxKeyUserAgent = "omnihub.user_agent" // string — User-Agent header verbatim
+	CtxKeyClientIP  = "omnihub.client_ip"   // string — immediate caller's IP
+	CtxKeyUserAgent = "omnihub.user_agent"  // string — User-Agent header verbatim
+	CtxKeyAPIKeyID  = "omnihub.api_key_id"  // int64 — DB primary key for the auth'd virtual key
 )
 
 // KeyName returns the virtual API key label set by the Auth guard, or

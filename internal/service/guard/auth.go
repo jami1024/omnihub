@@ -1,77 +1,49 @@
 package guard
 
 import (
-	"crypto/subtle"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/jami1024/omnihub/internal/service/apikey"
 )
 
-// Authenticator holds the set of allowed virtual API keys for the
-// gateway. Keys are loaded once at startup; later mutation (rotation,
-// revocation) lives outside this MVP and will arrive with the database
-// layer.
+// KeyLookup resolves a submitted key (cleartext) into the matching
+// apikey.Key record, or nil if no enabled key matches. The Auth
+// Guard calls it once per request.
+//
+// Production wires this to apikey.Pool.LookupByHash(HashOf(key)).
+// The interface keeps the guard testable without a pool.
+type KeyLookup func(submitted string) *apikey.Key
+
+// Authenticator validates inbound credentials against the configured
+// KeyLookup. A nil lookup disables auth entirely and tags every
+// request with the label "unauthenticated" — useful only for local
+// development.
 type Authenticator struct {
-	// keys maps the raw key value to a human-readable label used in
-	// request logs (e.g. "alice", "ci-bot", "default"). Comparison is
-	// done in constant time, so the value of the map is the *label*,
-	// not a precomputed hash.
-	keys map[string]string
+	lookup KeyLookup
 }
 
-// NewAuthenticator parses a comma-separated key specification into an
-// Authenticator. Each entry may be either a raw key or "name:key".
-// Empty / whitespace entries are skipped.
-//
-// Examples (env value of OMNIHUB_API_KEYS):
-//
-//	"omni-abc"                            // one anonymous key
-//	"alice:omni-abc, bob:omni-def"        // two labelled keys
-//	""                                    // auth disabled
-//
-// An empty spec produces an Authenticator with no keys; its Middleware
-// becomes a pass-through. The caller is expected to log a warning so
-// the operator is aware the gateway is unprotected.
-func NewAuthenticator(spec string) *Authenticator {
-	keys := make(map[string]string)
-	for _, entry := range strings.Split(spec, ",") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		label, value := "default", entry
-		if i := strings.Index(entry, ":"); i > 0 {
-			label = strings.TrimSpace(entry[:i])
-			value = strings.TrimSpace(entry[i+1:])
-		}
-		if value != "" {
-			keys[value] = label
-		}
-	}
-	return &Authenticator{keys: keys}
+// NewAuthenticator returns an Authenticator that delegates to the
+// provided lookup. Pass nil to disable auth (with a loud warning at
+// the call site).
+func NewAuthenticator(lookup KeyLookup) *Authenticator {
+	return &Authenticator{lookup: lookup}
 }
 
-// Disabled reports whether the Authenticator has zero keys. A
-// disabled Authenticator lets every request through; this is intended
-// only for local development.
-func (a *Authenticator) Disabled() bool {
-	return len(a.keys) == 0
-}
+// Disabled reports whether auth is turned off (no lookup wired).
+func (a *Authenticator) Disabled() bool { return a.lookup == nil }
 
-// KeyCount returns the number of registered keys, useful for logging.
-func (a *Authenticator) KeyCount() int { return len(a.keys) }
-
-// Middleware returns a gin.HandlerFunc that enforces virtual key auth.
+// Middleware enforces virtual key auth. Accepted credentials come
+// from x-api-key (Anthropic SDK) or Authorization: Bearer (OpenAI
+// SDK). On success the context gets:
 //
-// Accepted credentials are read in order from:
+//   - CtxKeyKeyName  : the human label
+//   - CtxKeyAPIKeyID : the DB primary key, for the upcoming Limits Guard
 //
-//  1. The "x-api-key" header (Anthropic SDK convention)
-//  2. The "Authorization: Bearer <key>" header (OpenAI SDK convention)
-//
-// On success the gin.Context gets the matched key label under
-// CtxKeyKeyName. On failure the chain is aborted with 401 in an
-// Anthropic-shaped error envelope.
+// On failure the chain is aborted with a 401 in an Anthropic-shaped
+// error envelope.
 func (a *Authenticator) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if a.Disabled() {
@@ -80,36 +52,30 @@ func (a *Authenticator) Middleware() gin.HandlerFunc {
 			return
 		}
 
-		key := extractKey(c.Request)
-		if key == "" {
+		raw := extractKey(c.Request)
+		if raw == "" {
 			abortUnauthorized(c, "missing api key (set x-api-key or Authorization: Bearer)")
 			return
 		}
 
-		label, ok := a.validate(key)
-		if !ok {
+		k := a.lookup(raw)
+		if k == nil {
 			abortUnauthorized(c, "invalid api key")
 			return
 		}
 
+		label := k.Label
+		if label == "" {
+			label = k.Name
+		}
 		c.Set(CtxKeyKeyName, label)
+		c.Set(CtxKeyAPIKeyID, k.ID)
 		c.Next()
 	}
 }
 
-// validate returns (label, true) if key matches one of the registered
-// keys via constant-time comparison.
-func (a *Authenticator) validate(key string) (string, bool) {
-	keyBytes := []byte(key)
-	for k, label := range a.keys {
-		if subtle.ConstantTimeCompare([]byte(k), keyBytes) == 1 {
-			return label, true
-		}
-	}
-	return "", false
-}
-
-// extractKey pulls the credential out of the standard auth headers.
+// extractKey pulls the credential out of the two standard auth
+// headers we accept.
 func extractKey(r *http.Request) string {
 	if k := r.Header.Get("x-api-key"); k != "" {
 		return k

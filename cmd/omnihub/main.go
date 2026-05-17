@@ -22,6 +22,7 @@ import (
 	"github.com/jami1024/omnihub/internal/handler/gateway"
 	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/account"
+	"github.com/jami1024/omnihub/internal/service/apikey"
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
 	"github.com/jami1024/omnihub/internal/service/health"
@@ -47,6 +48,7 @@ var (
 	pool        *pgxpool.Pool
 	writeBuffer *repository.WriteBuffer
 	accountPool *account.Pool
+	apiKeyPool  *apikey.Pool
 )
 
 const accountPoolRefreshInterval = 30 * time.Second
@@ -61,6 +63,9 @@ func main() {
 			os.Args = append(os.Args[:1], os.Args[2:]...)
 		case "account":
 			runAccountCommand(os.Args[2:])
+			return
+		case "key":
+			runKeyCommand(os.Args[2:])
 			return
 		case "help", "-h", "--help":
 			printUsage(os.Stdout)
@@ -86,10 +91,11 @@ func printUsage(w io.Writer) {
 Usage:
   omnihub [serve]           Start the gateway (default when no args).
   omnihub account <cmd>     Manage upstream accounts (add/list/enable/disable/delete).
+  omnihub key <cmd>         Manage virtual API keys (add/list/enable/disable/delete).
   omnihub version           Print build version.
   omnihub help              Print this help.
 
-Run 'omnihub account help' for subcommand details.
+Run 'omnihub account help' / 'omnihub key help' for subcommand details.
 `)
 }
 
@@ -118,6 +124,10 @@ func runGateway() {
 	registry := buildDriverRegistry()
 	if err := setupAccountPool(rootCtx); err != nil {
 		slog.Error("account pool init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := setupApiKeyPool(rootCtx); err != nil {
+		slog.Error("api_keys pool init failed", "err", err)
 		os.Exit(1)
 	}
 
@@ -225,11 +235,15 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 		return
 	}
 
-	auth := guard.NewAuthenticator(os.Getenv("OMNIHUB_API_KEYS"))
-	if auth.Disabled() {
-		slog.Warn("OMNIHUB_API_KEYS is empty; /v1/messages is OPEN to anyone reaching this port — do not expose publicly")
+	var auth *guard.Authenticator
+	if apiKeyPool != nil && apiKeyPool.Size() > 0 {
+		auth = guard.NewAuthenticator(func(submitted string) *apikey.Key {
+			return apiKeyPool.LookupByHash(apikey.HashOf(submitted))
+		})
+		slog.Info("virtual key auth enabled", "key_count", apiKeyPool.Size())
 	} else {
-		slog.Info("virtual key auth enabled", "key_count", auth.KeyCount())
+		auth = guard.NewAuthenticator(nil)
+		slog.Warn("api_keys table is empty (and no OMNIHUB_API_KEYS env to seed); /v1/messages is OPEN — set OMNIHUB_API_KEYS or run `omnihub key add`")
 	}
 
 	healthCfg := loadHealthConfig()
@@ -311,6 +325,86 @@ func configureTrustedProxies(r *gin.Engine) error {
 		}
 	}
 	return r.SetTrustedProxies(entries)
+}
+
+// setupApiKeyPool wires the in-memory api_keys pool against the DB
+// (when configured) and bootstraps from OMNIHUB_API_KEYS when the
+// table is empty so existing deployments upgrade transparently.
+func setupApiKeyPool(ctx context.Context) error {
+	if pool == nil {
+		// log-only mode: no DB, no auth, gateway will not mount routes.
+		return nil
+	}
+
+	repo := repository.NewApiKeyRepo(pool)
+	count, err := repo.CountAll(ctx)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		seeded, err := seedApiKeysFromEnv(ctx, repo)
+		if err != nil {
+			return err
+		}
+		if seeded > 0 {
+			slog.Info("auto-seeded api keys from OMNIHUB_API_KEYS", "count", seeded)
+		}
+	}
+
+	apiKeyPool = apikey.NewPool(repo)
+	if err := apiKeyPool.Start(ctx, accountPoolRefreshInterval); err != nil {
+		return err
+	}
+	apikey.NewListener(pool, "", apiKeyPool.Refresh).Start(ctx)
+
+	slog.Info("api_keys pool ready",
+		"size", apiKeyPool.Size(),
+		"refresh_interval", accountPoolRefreshInterval,
+		"notify_channel", apikey.DefaultNotifyChannel,
+	)
+	return nil
+}
+
+// seedApiKeysFromEnv parses OMNIHUB_API_KEYS (the legacy
+// "label:key,label:key" format) into one row per entry. The
+// cleartext is hashed before insert so the env value remains
+// disposable.
+func seedApiKeysFromEnv(ctx context.Context, repo *repository.ApiKeyRepo) (int, error) {
+	spec := strings.TrimSpace(os.Getenv("OMNIHUB_API_KEYS"))
+	if spec == "" {
+		return 0, nil
+	}
+
+	inserted := 0
+	for _, raw := range strings.Split(spec, ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		label, value := "default", raw
+		if i := strings.Index(raw, ":"); i > 0 {
+			label = strings.TrimSpace(raw[:i])
+			value = strings.TrimSpace(raw[i+1:])
+		}
+		if value == "" {
+			continue
+		}
+		name := label
+		if name == "default" {
+			name = fmt.Sprintf("env-%d", inserted+1)
+		}
+		_, err := repo.Insert(ctx, repository.ApiKeyInsertParams{
+			Name:    name,
+			Hash:    apikey.HashOf(value),
+			Label:   label,
+			Enabled: true,
+		})
+		if err != nil {
+			return inserted, err
+		}
+		inserted++
+	}
+	return inserted, nil
 }
 
 // loadSessionTTL parses OMNIHUB_SESSION_TTL into a Go duration.
