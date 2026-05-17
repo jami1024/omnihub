@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `claude-cli/`. Setting it to `*` opens the gate and logs a warning at
   startup. `deploy/.env.example` and `deploy/docker-compose.yaml` document
   and pass through the new variable.
+- Multi-signal verification on the client gate: requests claiming to be
+  `claude-cli/` must also carry `X-App: cli` and a non-empty
+  `Anthropic-Beta` header — the headers a real Claude CLI emits — or
+  they are rejected with a precise reason in the error body
+  (`missing required header "X-App"` etc.). This closes the trivial
+  UA-spoofing path (`curl -H 'User-Agent: claude-cli/...'`) inspired by
+  claude-code-hub's `client-detector.ts` multi-signal rule, without
+  reading the request body. Custom prefixes added by operators (e.g.
+  `codex-cli/`) pass on UA match alone — signal enforcement is keyed to
+  the prefix, not applied globally.
 
 - Initial project scaffolding (`README`, `.gitignore`, `Makefile`).
 - Minimal HTTP entry point at `cmd/omnihub` with `/healthz`, `/readyz`, `/version` endpoints.
