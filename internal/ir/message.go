@@ -49,11 +49,12 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 type BlockType string
 
 const (
-	BlockText       BlockType = "text"
-	BlockImage      BlockType = "image"
-	BlockToolUse    BlockType = "tool_use"
-	BlockToolResult BlockType = "tool_result"
-	BlockThinking   BlockType = "thinking"
+	BlockText             BlockType = "text"
+	BlockImage            BlockType = "image"
+	BlockToolUse          BlockType = "tool_use"
+	BlockToolResult       BlockType = "tool_result"
+	BlockThinking         BlockType = "thinking"
+	BlockRedactedThinking BlockType = "redacted_thinking"
 )
 
 // ContentBlock is the polymorphic content unit. Exactly one set of
@@ -86,9 +87,40 @@ type ContentBlock struct {
 	Thinking  string `json:"thinking,omitempty"`
 	Signature string `json:"signature,omitempty"`
 
+	// redacted_thinking block (server-redacted thinking, opaque blob)
+	Data string `json:"data,omitempty"`
+
 	// CacheControl flags this block as an Anthropic prompt-cache breakpoint.
 	// Other providers ignore the field.
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+// MarshalJSON emits a wire-shape suited to the block's Type. The flat
+// struct uses `omitempty` so empty values stay off the wire for most
+// variants, but Anthropic's Messages API treats certain fields as
+// required for thinking / redacted_thinking blocks even when their
+// value is empty — replaying an assistant turn whose thinking text
+// was empty otherwise produces a 400 "Field required" error. This
+// method bypasses omitempty for those required fields.
+func (b ContentBlock) MarshalJSON() ([]byte, error) {
+	switch b.Type {
+	case BlockThinking:
+		return json.Marshal(struct {
+			Type         BlockType     `json:"type"`
+			Thinking     string        `json:"thinking"`
+			Signature    string        `json:"signature"`
+			CacheControl *CacheControl `json:"cache_control,omitempty"`
+		}{b.Type, b.Thinking, b.Signature, b.CacheControl})
+	case BlockRedactedThinking:
+		return json.Marshal(struct {
+			Type         BlockType     `json:"type"`
+			Data         string        `json:"data"`
+			CacheControl *CacheControl `json:"cache_control,omitempty"`
+		}{b.Type, b.Data, b.CacheControl})
+	default:
+		type alias ContentBlock
+		return json.Marshal(alias(b))
+	}
 }
 
 // ImageSource describes an image attached to a content block.

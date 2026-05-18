@@ -129,6 +129,49 @@ func TestToolResultContentAcceptsArray(t *testing.T) {
 	}
 }
 
+func TestThinkingBlockEmitsRequiredFields(t *testing.T) {
+	cases := []struct {
+		name  string
+		block ir.ContentBlock
+		want  string
+	}{
+		{
+			name:  "thinking with both fields populated",
+			block: ir.ContentBlock{Type: ir.BlockThinking, Thinking: "step", Signature: "sig"},
+			want:  `{"type":"thinking","thinking":"step","signature":"sig"}`,
+		},
+		{
+			// Anthropic rejects assistant-replay thinking blocks where
+			// the "thinking" key is absent — even an empty string must
+			// survive marshalling.
+			name:  "thinking with empty text still emits key",
+			block: ir.ContentBlock{Type: ir.BlockThinking, Signature: "sig"},
+			want:  `{"type":"thinking","thinking":"","signature":"sig"}`,
+		},
+		{
+			name:  "redacted_thinking emits data even when empty",
+			block: ir.ContentBlock{Type: ir.BlockRedactedThinking},
+			want:  `{"type":"redacted_thinking","data":""}`,
+		},
+		{
+			name:  "redacted_thinking with payload",
+			block: ir.ContentBlock{Type: ir.BlockRedactedThinking, Data: "opaque"},
+			want:  `{"type":"redacted_thinking","data":"opaque"}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := json.Marshal(tc.block)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("marshal:\n  want %s\n  got  %s", tc.want, got)
+			}
+		})
+	}
+}
+
 func TestUsageAdd(t *testing.T) {
 	u := ir.Usage{InputTokens: 100, OutputTokens: 50}
 	u.Add(ir.Usage{InputTokens: 20, CacheReadInputTokens: 5})
