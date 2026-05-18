@@ -17,11 +17,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jami1024/omnihub/internal/ir"
@@ -45,7 +48,17 @@ type Result struct {
 	// the first body byte. Only meaningful for streaming responses;
 	// zero for non-streaming.
 	TTFB time.Duration
+
+	// ErrorBody is the upstream response body captured when StatusCode
+	// is >= 400. Truncated to maxCapturedErrorBodyBytes so we don't
+	// blow up the WriteBuffer rows when an upstream misbehaves.
+	ErrorBody []byte
 }
+
+// maxCapturedErrorBodyBytes caps how much of an upstream error body
+// we keep for diagnostics. Anthropic-style error JSON is well under
+// 1 KiB; the extra room is a safety margin for verbose upstreams.
+const maxCapturedErrorBodyBytes = 8 << 10
 
 // Forwarder dispatches an IR request through a Driver and forwards
 // the response. It owns the shared HTTP client (connection pool,
@@ -160,7 +173,9 @@ func (f *Forwarder) WriteResponse(
 	result := Result{StatusCode: resp.StatusCode}
 
 	if resp.StatusCode >= 400 {
-		return result, forwardErrorBody(w, resp)
+		body, err := forwardErrorBody(w, resp, req)
+		result.ErrorBody = body
+		return result, err
 	}
 	if req.Stream {
 		ttfb, u, err := forwardSSE(w, resp, requestSentAt)
@@ -191,17 +206,116 @@ func (f *Forwarder) Forward(
 	return f.WriteResponse(w, resp, req, sentAt)
 }
 
-// forwardErrorBody copies an upstream error response verbatim. The
-// status code is preserved so the client sees Anthropic's exact reply.
-func forwardErrorBody(w http.ResponseWriter, resp *http.Response) error {
+// forwardErrorBody copies an upstream error response to the client
+// and captures up to maxCapturedErrorBodyBytes of it for diagnostics.
+// When the upstream error message references a specific tool index
+// (e.g. "tools.0.custom.input_schema: ..."), the body is augmented
+// with the offending tool's name so the client sees which tool is
+// at fault rather than just an opaque index.
+func forwardErrorBody(w http.ResponseWriter, resp *http.Response, req *ir.UnifiedRequest) ([]byte, error) {
 	copySafeHeaders(w, resp)
 	if w.Header().Get("Content-Type") == "" {
 		w.Header().Set("Content-Type", "application/json")
 	}
+
+	// Error bodies from Anthropic are well under 1 MiB; the cap is a
+	// guard against a misbehaving upstream rather than a performance
+	// constraint. We need the full body to inspect / rewrite, so
+	// buffering is unavoidable on this path.
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	augmented := augmentToolError(body, req)
+
 	w.WriteHeader(resp.StatusCode)
-	_, err := io.Copy(w, resp.Body)
-	return err
+	_, writeErr := w.Write(augmented)
+	if writeErr == nil {
+		writeErr = readErr
+	}
+
+	capture := augmented
+	if len(capture) > maxCapturedErrorBodyBytes {
+		capture = capture[:maxCapturedErrorBodyBytes]
+	}
+	return capture, writeErr
 }
+
+// augmentToolError enriches an Anthropic-style error JSON when the
+// `error.message` references a specific tool by index. The wire
+// shape is preserved (only the message text changes) so SDK error
+// parsers keep working. If anything about the parse / lookup fails,
+// the original body is returned untouched.
+func augmentToolError(body []byte, req *ir.UnifiedRequest) []byte {
+	if req == nil || len(req.Tools) == 0 || len(body) == 0 {
+		return body
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return body
+	}
+	errRaw, ok := raw["error"]
+	if !ok {
+		return body
+	}
+	var errObj map[string]json.RawMessage
+	if err := json.Unmarshal(errRaw, &errObj); err != nil {
+		return body
+	}
+	msgRaw, ok := errObj["message"]
+	if !ok {
+		return body
+	}
+	var msg string
+	if err := json.Unmarshal(msgRaw, &msg); err != nil {
+		return body
+	}
+	idx, ok := parseToolIndex(msg)
+	if !ok || idx < 0 || idx >= len(req.Tools) {
+		return body
+	}
+	name := req.Tools[idx].Name
+	if name == "" {
+		return body
+	}
+	augmented, err := json.Marshal(fmt.Sprintf("[tool=%s] %s", name, msg))
+	if err != nil {
+		return body
+	}
+	errObj["message"] = augmented
+	newErr, err := json.Marshal(errObj)
+	if err != nil {
+		return body
+	}
+	raw["error"] = newErr
+	out, err := json.Marshal(raw)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+// parseToolIndex looks for "tools.N." in an error message and
+// returns N. The pattern is what Anthropic uses for tool validation
+// errors ("tools.0.custom.input_schema: ...").
+func parseToolIndex(msg string) (int, bool) {
+	const prefix = "tools."
+	i := strings.Index(msg, prefix)
+	if i < 0 {
+		return 0, false
+	}
+	rest := msg[i+len(prefix):]
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+	if end == 0 || end >= len(rest) || rest[end] != '.' {
+		return 0, false
+	}
+	n, err := strconv.Atoi(rest[:end])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
 
 // forwardBody reads the entire non-streaming response, extracts usage,
 // and copies the body to the client. Reading the body fully (rather

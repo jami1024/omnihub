@@ -226,4 +226,105 @@ func TestForwardErrorResponsePassthrough(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "rate_limit_error") {
 		t.Errorf("body missing upstream error: %s", rec.Body.String())
 	}
+	if !strings.Contains(string(result.ErrorBody), "rate_limit_error") {
+		t.Errorf("ErrorBody not captured: %q", result.ErrorBody)
+	}
+}
+
+func TestForwardErrorBodyCappedForLargeUpstream(t *testing.T) {
+	// Upstream emits more bytes than the capture cap. The full body
+	// must still reach the client; the capture is the first slice.
+	big := strings.Repeat("x", 16<<10) // 16 KiB > 8 KiB cap
+	srv := upstreamServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(400)
+		_, _ = io.WriteString(w, big)
+	})
+
+	f := forward.New(srv.Client())
+	rec := httptest.NewRecorder()
+
+	result, err := f.Forward(
+		context.Background(),
+		rec,
+		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 100},
+		anthropic.New(),
+		anthropicAccount(srv.URL),
+	)
+	if err != nil {
+		t.Fatalf("Forward: %v", err)
+	}
+	if rec.Body.Len() != len(big) {
+		t.Errorf("client body truncated: want %d bytes, got %d", len(big), rec.Body.Len())
+	}
+	if len(result.ErrorBody) != 8<<10 {
+		t.Errorf("ErrorBody should be capped at 8KiB, got %d", len(result.ErrorBody))
+	}
+}
+
+func TestForwardErrorAugmentsToolName(t *testing.T) {
+	// Upstream rejects tools[1]; the augmented body should call out
+	// the tool by name so the user knows which one is broken.
+	srv := upstreamServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		_, _ = io.WriteString(w, `{"type":"error","error":{"type":"invalid_request_error","message":"tools.1.custom.input_schema: Input does not match the expected shape."}}`)
+	})
+
+	req := &ir.UnifiedRequest{
+		Model:     "claude-sonnet-4-5",
+		MaxTokens: 100,
+		Tools: []ir.Tool{
+			{Name: "get_weather", InputSchema: []byte(`{}`)},
+			{Name: "search_docs", InputSchema: []byte(`{}`)},
+		},
+	}
+
+	f := forward.New(srv.Client())
+	rec := httptest.NewRecorder()
+
+	result, err := f.Forward(context.Background(), rec, req, anthropic.New(), anthropicAccount(srv.URL))
+	if err != nil {
+		t.Fatalf("Forward: %v", err)
+	}
+	if result.StatusCode != 400 {
+		t.Errorf("status: want 400, got %d", result.StatusCode)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "[tool=search_docs]") {
+		t.Errorf("client body missing tool-name prefix: %s", body)
+	}
+	if !strings.Contains(body, "tools.1.custom.input_schema") {
+		t.Errorf("client body lost original message: %s", body)
+	}
+	// Augmented body is also what gets stored for diagnostics.
+	if !strings.Contains(string(result.ErrorBody), "[tool=search_docs]") {
+		t.Errorf("captured body not augmented: %s", result.ErrorBody)
+	}
+}
+
+func TestForwardErrorAugmentationSkippedWhenNoMatch(t *testing.T) {
+	// Non-tool error message: augmentation must be a no-op so other
+	// error categories aren't mangled.
+	original := `{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 207925 tokens > 200000 maximum"}}`
+	srv := upstreamServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		_, _ = io.WriteString(w, original)
+	})
+
+	req := &ir.UnifiedRequest{
+		Model:     "claude-haiku-4-5",
+		MaxTokens: 100,
+		Tools:     []ir.Tool{{Name: "irrelevant", InputSchema: []byte(`{}`)}},
+	}
+
+	f := forward.New(srv.Client())
+	rec := httptest.NewRecorder()
+
+	if _, err := f.Forward(context.Background(), rec, req, anthropic.New(), anthropicAccount(srv.URL)); err != nil {
+		t.Fatalf("Forward: %v", err)
+	}
+	if rec.Body.String() != original {
+		t.Errorf("body should be untouched, got %s", rec.Body.String())
+	}
 }

@@ -362,10 +362,25 @@ func buildMessageRequest(
 	if result.TTFB > 0 {
 		rec.TtfbMs = int64Ptr(result.TTFB.Milliseconds())
 	}
-	if forwardErr != nil {
-		rec.ErrorMessage = strPtr(forwardErr.Error())
+	if msg := errorMessageFor(result, forwardErr); msg != "" {
+		rec.ErrorMessage = strPtr(msg)
 	}
 	return rec
+}
+
+// errorMessageFor picks the most informative error string for a
+// message_requests row. Upstream non-2xx responses get the captured
+// upstream body (real diagnostic value: "prompt is too long", model
+// blocked, etc.); pure transport / write failures fall back to the
+// Go error string.
+func errorMessageFor(result *forward.Result, forwardErr error) string {
+	if result != nil && result.StatusCode >= 400 && len(result.ErrorBody) > 0 {
+		return string(result.ErrorBody)
+	}
+	if forwardErr != nil {
+		return forwardErr.Error()
+	}
+	return ""
 }
 
 func errorJSON(c *gin.Context, status int, errType, message string) {
