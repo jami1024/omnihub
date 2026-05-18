@@ -1,6 +1,7 @@
 package ir_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -127,6 +128,106 @@ func TestToolResultContentAcceptsArray(t *testing.T) {
 	if !reflect.DeepEqual(block.ResultContent, want) {
 		t.Errorf("ResultContent: want %+v, got %+v", want, block.ResultContent)
 	}
+}
+
+func TestToolRoundTripCustom(t *testing.T) {
+	// Custom tool: no `type` on the wire, input_schema is required.
+	const wire = `{"name":"get_weather","description":"Look up the weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}}}}`
+
+	var tool ir.Tool
+	if err := json.Unmarshal([]byte(wire), &tool); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if tool.Type != "" {
+		t.Errorf("Type should stay empty for custom tools, got %q", tool.Type)
+	}
+	if tool.Name != "get_weather" {
+		t.Errorf("Name: %q", tool.Name)
+	}
+	if len(tool.Extra) != 0 {
+		t.Errorf("Extra should be empty for custom tools, got %v", tool.Extra)
+	}
+	got, err := json.Marshal(tool)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Equal(canonicalize(t, got), canonicalize(t, []byte(wire))) {
+		t.Errorf("round-trip mismatch\n  want %s\n  got  %s", wire, got)
+	}
+}
+
+func TestToolRoundTripServerSideWebSearch(t *testing.T) {
+	// Server-side web_search: discriminator type + max_uses +
+	// allowed_domains + user_location must all survive. This is the
+	// fix for "tools.0.custom.input_schema: ..." 400s.
+	const wire = `{"type":"web_search_20250305","name":"web_search","max_uses":5,"allowed_domains":["example.com"],"user_location":{"type":"approximate","city":"San Francisco","country":"US"}}`
+
+	var tool ir.Tool
+	if err := json.Unmarshal([]byte(wire), &tool); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if tool.Type != "web_search_20250305" {
+		t.Errorf("Type: want %q, got %q", "web_search_20250305", tool.Type)
+	}
+	if tool.Name != "web_search" {
+		t.Errorf("Name: %q", tool.Name)
+	}
+	if len(tool.InputSchema) != 0 {
+		t.Errorf("InputSchema should be absent for server-side tools, got %q", tool.InputSchema)
+	}
+	for _, k := range []string{"max_uses", "allowed_domains", "user_location"} {
+		if _, ok := tool.Extra[k]; !ok {
+			t.Errorf("Extra missing key %q (have %v)", k, tool.Extra)
+		}
+	}
+	got, err := json.Marshal(tool)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Equal(canonicalize(t, got), canonicalize(t, []byte(wire))) {
+		t.Errorf("round-trip mismatch\n  want %s\n  got  %s", wire, got)
+	}
+}
+
+func TestToolExtraDoesNotClobberTypedFields(t *testing.T) {
+	// Defensive: if a caller stuffs "name" into Extra, marshalling
+	// must keep the typed Name as authoritative.
+	tool := ir.Tool{
+		Name: "real_name",
+		Extra: map[string]json.RawMessage{
+			"name": json.RawMessage(`"hijacked"`),
+			"max_uses": json.RawMessage(`3`),
+		},
+	}
+	got, err := json.Marshal(tool)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var roundtrip map[string]json.RawMessage
+	if err := json.Unmarshal(got, &roundtrip); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if string(roundtrip["name"]) != `"real_name"` {
+		t.Errorf("Extra must not clobber Name, got %s", roundtrip["name"])
+	}
+	if string(roundtrip["max_uses"]) != "3" {
+		t.Errorf("Extra max_uses should pass through, got %s", roundtrip["max_uses"])
+	}
+}
+
+// canonicalize re-parses and re-encodes JSON so two equivalent
+// objects with different key orderings compare equal byte-wise.
+func canonicalize(t *testing.T, data []byte) []byte {
+	t.Helper()
+	var v map[string]any
+	if err := json.Unmarshal(data, &v); err != nil {
+		t.Fatalf("canonicalize unmarshal: %v\n  %s", err, data)
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("canonicalize marshal: %v", err)
+	}
+	return out
 }
 
 func TestThinkingBlockEmitsRequiredFields(t *testing.T) {

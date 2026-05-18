@@ -75,14 +75,104 @@ type UnifiedRequest struct {
 }
 
 // Tool describes a function the model may call.
+//
+// Anthropic supports two kinds of tools on the same `tools` array:
+//
+//   - Custom tools: the caller provides Name + InputSchema and the
+//     model returns tool_use blocks to invoke them locally. Wire
+//     shape omits `type` (or sets it to "custom"); InputSchema is
+//     required.
+//   - Server-side tools: opaque, server-executed primitives such as
+//     web_search, computer, bash, text_editor. The wire shape uses
+//     a versioned discriminator like "web_search_20250305" and may
+//     carry tool-specific configuration (max_uses, allowed_domains,
+//     display_width_px, user_location, ...). InputSchema is absent.
+//
+// The struct preserves both forms losslessly. Known fields are
+// typed; anything else lands in Extra and round-trips verbatim, so
+// new server-side tools work without an IR schema bump.
 type Tool struct {
+	Type        string          `json:"type,omitempty"`
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty"`
 
 	// CacheControl marks the tool definition as an Anthropic
 	// prompt-cache breakpoint.
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
+
+	// Extra holds tool-specific fields not covered above. Server-side
+	// tools (web_search, computer, etc.) need this to survive the
+	// IR round-trip — dropping unknown keys silently was how the
+	// gateway turned every server-tool request into a 400 from the
+	// upstream's "custom.input_schema" validator.
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+// reservedToolKeys enumerates the JSON keys Tool models explicitly;
+// every other key found at unmarshal time falls into Extra.
+var reservedToolKeys = map[string]struct{}{
+	"type":          {},
+	"name":          {},
+	"description":   {},
+	"input_schema":  {},
+	"cache_control": {},
+}
+
+// UnmarshalJSON fills the typed fields and captures every other
+// top-level key into Extra so server-side tool configuration is
+// preserved across the IR round-trip.
+func (t *Tool) UnmarshalJSON(data []byte) error {
+	type alias Tool
+	aux := (*alias)(t)
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var extra map[string]json.RawMessage
+	for k, v := range raw {
+		if _, ok := reservedToolKeys[k]; ok {
+			continue
+		}
+		if extra == nil {
+			extra = make(map[string]json.RawMessage, len(raw))
+		}
+		extra[k] = v
+	}
+	t.Extra = extra
+	return nil
+}
+
+// MarshalJSON emits the typed fields followed by every Extra entry.
+// Extra keys never clobber a typed field — if a caller stuffed
+// "name" into Extra it is dropped rather than producing duplicate
+// JSON keys.
+func (t Tool) MarshalJSON() ([]byte, error) {
+	type alias Tool
+	base, err := json.Marshal(alias(t))
+	if err != nil {
+		return nil, err
+	}
+	if len(t.Extra) == 0 {
+		return base, nil
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(base, &out); err != nil {
+		return nil, err
+	}
+	for k, v := range t.Extra {
+		if _, ok := reservedToolKeys[k]; ok {
+			continue
+		}
+		if _, exists := out[k]; exists {
+			continue
+		}
+		out[k] = v
+	}
+	return json.Marshal(out)
 }
 
 // ToolChoiceType enumerates the tool selection modes.
