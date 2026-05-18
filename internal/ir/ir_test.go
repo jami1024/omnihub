@@ -71,6 +71,64 @@ func TestContentBlockToolUseShape(t *testing.T) {
 	}
 }
 
+func TestMessageContentAcceptsString(t *testing.T) {
+	const wire = `{"role":"user","content":"hello"}`
+
+	var msg ir.Message
+	if err := json.Unmarshal([]byte(wire), &msg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if msg.Role != ir.RoleUser {
+		t.Errorf("Role: want %q, got %q", ir.RoleUser, msg.Role)
+	}
+	want := []ir.ContentBlock{ir.TextBlock("hello")}
+	if !reflect.DeepEqual(msg.Content, want) {
+		t.Errorf("Content: want %+v, got %+v", want, msg.Content)
+	}
+}
+
+func TestMessageContentAcceptsArray(t *testing.T) {
+	const wire = `{"role":"user","content":[{"type":"text","text":"hello"}]}`
+
+	var msg ir.Message
+	if err := json.Unmarshal([]byte(wire), &msg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := []ir.ContentBlock{{Type: ir.BlockText, Text: "hello"}}
+	if !reflect.DeepEqual(msg.Content, want) {
+		t.Errorf("Content: want %+v, got %+v", want, msg.Content)
+	}
+}
+
+func TestToolResultContentAcceptsString(t *testing.T) {
+	const wire = `{"type":"tool_result","tool_use_id":"toolu_01","content":"42"}`
+
+	var block ir.ContentBlock
+	if err := json.Unmarshal([]byte(wire), &block); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if block.Type != ir.BlockToolResult {
+		t.Errorf("Type: want %q, got %q", ir.BlockToolResult, block.Type)
+	}
+	want := ir.ToolResultContent{ir.TextBlock("42")}
+	if !reflect.DeepEqual(block.ResultContent, want) {
+		t.Errorf("ResultContent: want %+v, got %+v", want, block.ResultContent)
+	}
+}
+
+func TestToolResultContentAcceptsArray(t *testing.T) {
+	const wire = `{"type":"tool_result","tool_use_id":"toolu_01","content":[{"type":"text","text":"42"}]}`
+
+	var block ir.ContentBlock
+	if err := json.Unmarshal([]byte(wire), &block); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := ir.ToolResultContent{{Type: ir.BlockText, Text: "42"}}
+	if !reflect.DeepEqual(block.ResultContent, want) {
+		t.Errorf("ResultContent: want %+v, got %+v", want, block.ResultContent)
+	}
+}
+
 func TestUsageAdd(t *testing.T) {
 	u := ir.Usage{InputTokens: 100, OutputTokens: 50}
 	u.Add(ir.Usage{InputTokens: 20, CacheReadInputTokens: 5})

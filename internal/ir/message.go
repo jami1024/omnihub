@@ -1,11 +1,48 @@
 package ir
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // Message is one turn in a conversation.
 type Message struct {
 	Role    Role           `json:"role"`
 	Content []ContentBlock `json:"content"`
+}
+
+// UnmarshalJSON accepts the two wire forms Anthropic's Messages API
+// allows for `content`: a JSON array of content blocks, or a bare
+// JSON string that is a shortcut for a single text block. The struct
+// always stores the array form so downstream code only sees one shape.
+func (m *Message) UnmarshalJSON(data []byte) error {
+	type alias Message
+	aux := &struct {
+		Content json.RawMessage `json:"content"`
+		*alias
+	}{alias: (*alias)(m)}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	m.Content = nil
+	raw := bytes.TrimSpace(aux.Content)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return err
+		}
+		m.Content = []ContentBlock{TextBlock(s)}
+		return nil
+	}
+	var blocks []ContentBlock
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return err
+	}
+	m.Content = blocks
+	return nil
 }
 
 // BlockType identifies the variant of a ContentBlock.
@@ -41,9 +78,9 @@ type ContentBlock struct {
 	Input json.RawMessage `json:"input,omitempty"`
 
 	// tool_result block (user reporting a tool's output)
-	ToolUseID     string         `json:"tool_use_id,omitempty"`
-	ResultContent []ContentBlock `json:"content,omitempty"`
-	IsError       bool           `json:"is_error,omitempty"`
+	ToolUseID     string            `json:"tool_use_id,omitempty"`
+	ResultContent ToolResultContent `json:"content,omitempty"`
+	IsError       bool              `json:"is_error,omitempty"`
 
 	// thinking block (Anthropic extended thinking)
 	Thinking  string `json:"thinking,omitempty"`
@@ -82,4 +119,36 @@ type CacheControl struct {
 // TextBlock is a convenience constructor for a plain text block.
 func TextBlock(text string) ContentBlock {
 	return ContentBlock{Type: BlockText, Text: text}
+}
+
+// ToolResultContent is a list of ContentBlocks for a tool_result
+// block that also accepts the bare-string wire form documented by
+// Anthropic ("content": "some text" as a shortcut for a single text
+// block). The underlying type is []ContentBlock so indexing, ranging,
+// and len work as before; default JSON marshalling always emits the
+// array form on the wire.
+type ToolResultContent []ContentBlock
+
+// UnmarshalJSON accepts either a JSON string or a JSON array of
+// content blocks. A string becomes a single text block.
+func (t *ToolResultContent) UnmarshalJSON(data []byte) error {
+	raw := bytes.TrimSpace(data)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		*t = nil
+		return nil
+	}
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return err
+		}
+		*t = ToolResultContent{TextBlock(s)}
+		return nil
+	}
+	var blocks []ContentBlock
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return err
+	}
+	*t = ToolResultContent(blocks)
+	return nil
 }
