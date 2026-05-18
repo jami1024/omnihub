@@ -141,6 +141,7 @@ func AnthropicMessagesHandler(
 			lastAccount   *provider.Account
 			lastErr       error
 			lastBadStatus int
+			lastBody      []byte
 		)
 
 		for attempt := 0; attempt < maxFailoverAttempts; attempt++ {
@@ -150,12 +151,13 @@ func AnthropicMessagesHandler(
 					if attempt == 0 {
 						errorJSON(c, http.StatusServiceUnavailable, "no_upstream_available",
 							"no upstream account is available for this request")
+						recordNoUpstreamRejection(c, &req, buffer, startedAt)
 						return
 					}
 					// Earlier attempts failed but we ran out of fresh
 					// accounts. Surface the last upstream error.
 					emitFailoverExhausted(c, lastBadStatus, lastErr)
-					recordExhaustedFailure(c, &req, lastDriver, lastAccount, buffer, startedAt, lastBadStatus, lastErr)
+					recordExhaustedFailure(c, &req, lastDriver, lastAccount, buffer, startedAt, lastBadStatus, lastErr, lastBody)
 					return
 				}
 				slog.Error("resolver failed", "err", rerr.Error())
@@ -177,6 +179,11 @@ func AnthropicMessagesHandler(
 			}
 
 			if forward.IsRetriable(resp.StatusCode) {
+				// Capture (cap at 8 KiB) before closing so the retry-
+				// exhaustion record carries the upstream's actual
+				// reply — for 429 that's the precise rate-limit message
+				// and remaining-tokens info, otherwise invisible.
+				lastBody, _ = io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 				_ = resp.Body.Close()
 				if tracker != nil {
 					tracker.RecordFailure(account.ID, fmt.Errorf("upstream HTTP %d", resp.StatusCode))
@@ -231,7 +238,7 @@ func AnthropicMessagesHandler(
 		// Loop body returns on every iteration. The only way to fall
 		// out is exhausting maxFailoverAttempts with retriable errors.
 		emitFailoverExhausted(c, lastBadStatus, lastErr)
-		recordExhaustedFailure(c, &req, lastDriver, lastAccount, buffer, startedAt, lastBadStatus, lastErr)
+		recordExhaustedFailure(c, &req, lastDriver, lastAccount, buffer, startedAt, lastBadStatus, lastErr, lastBody)
 	}
 }
 
@@ -268,8 +275,56 @@ func emitFailoverExhausted(c *gin.Context, status int, lastErr error) {
 	errorJSON(c, httpStatus, "all_upstreams_failed", message)
 }
 
+// recordNoUpstreamRejection persists a row when the resolver rejects
+// the request before any upstream call — typically because the only
+// available account is in circuit-open state. Without this, 503s
+// from circuit-breaker tripping are invisible to message_requests
+// and only show up in the log stream, making post-mortem analysis
+// of outage windows harder than it needs to be.
+//
+// provider_name / account_name are NOT NULL in the schema; we use
+// "-" as a synthetic placeholder so the row carries the same client
+// identity (key, ip, ua) as a normal request would.
+func recordNoUpstreamRejection(
+	c *gin.Context,
+	req *ir.UnifiedRequest,
+	buffer *repository.WriteBuffer,
+	startedAt time.Time,
+) {
+	if buffer == nil {
+		return
+	}
+	duration := time.Since(startedAt).Milliseconds()
+	rec := repository.MessageRequest{
+		CreatedAt:    startedAt,
+		Method:       c.Request.Method,
+		Path:         c.Request.URL.Path,
+		Model:        req.Model,
+		Stream:       req.Stream,
+		ProviderName: "-",
+		AccountName:  "-",
+		StatusCode:   intPtr(http.StatusServiceUnavailable),
+		DurationMs:   int64Ptr(duration),
+		ErrorMessage: strPtr("no upstream account available"),
+	}
+	if name := guard.KeyName(c); name != "" {
+		rec.KeyName = strPtr(name)
+	}
+	if ip := guard.ClientIP(c); ip != "" {
+		rec.ClientIP = strPtr(ip)
+	}
+	if ua := guard.UserAgent(c); ua != "" {
+		rec.UserAgent = strPtr(ua)
+	}
+	buffer.Enqueue(rec)
+}
+
 // recordExhaustedFailure logs the final attempt into message_requests
-// when the retry loop runs out of accounts.
+// when the retry loop runs out of accounts. The captured upstream
+// body (e.g. Anthropic's precise rate-limit message for 429) is
+// surfaced via Result.ErrorBody so buildMessageRequest stores it in
+// the error_message column rather than the generic "upstream HTTP N"
+// string.
 func recordExhaustedFailure(
 	c *gin.Context,
 	req *ir.UnifiedRequest,
@@ -279,11 +334,12 @@ func recordExhaustedFailure(
 	startedAt time.Time,
 	status int,
 	err error,
+	body []byte,
 ) {
 	if buffer == nil || account == nil || driver == nil {
 		return
 	}
-	result := forward.Result{StatusCode: status}
+	result := forward.Result{StatusCode: status, ErrorBody: body}
 	rec := buildMessageRequest(c, req, driver, account, &result, err, startedAt)
 	buffer.Enqueue(rec)
 }
