@@ -67,6 +67,11 @@ type MessageRequest struct {
 	// UserAgent is the raw User-Agent header from the inbound
 	// request. Nil when the client did not send one.
 	UserAgent *string
+
+	// SessionID is the value of the x-claude-code-session-id header
+	// when present. Anchors a row to one Claude Code CLI session so
+	// real-user counting works even behind shared NAT.
+	SessionID *string
 }
 
 // MessageRequestRepo provides batched persistence for MessageRequest
@@ -92,7 +97,7 @@ func (r *MessageRequestRepo) InsertBatch(ctx context.Context, batch []MessageReq
 		return nil
 	}
 
-	const colsPerRow = 22
+	const colsPerRow = 23
 	var sb strings.Builder
 	sb.Grow(512 + len(batch)*64)
 	sb.WriteString(`INSERT INTO message_requests (
@@ -100,7 +105,7 @@ func (r *MessageRequestRepo) InsertBatch(ctx context.Context, batch []MessageReq
         status_code, duration_ms, ttfb_ms, error_message,
         input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
         provider_name, account_name, upstream_request_id, cost_usd, cost_breakdown,
-        client_ip, user_agent
+        client_ip, user_agent, session_id
     ) VALUES `)
 
 	args := make([]any, 0, len(batch)*colsPerRow)
@@ -132,7 +137,7 @@ func (r *MessageRequestRepo) InsertBatch(ctx context.Context, batch []MessageReq
 			m.StatusCode, m.DurationMs, m.TtfbMs, m.ErrorMessage,
 			m.InputTokens, m.OutputTokens, m.CacheCreationInputTokens, m.CacheReadInputTokens,
 			m.ProviderName, m.AccountName, m.UpstreamRequestID, m.CostUSD, breakdownJSON,
-			m.ClientIP, m.UserAgent,
+			m.ClientIP, m.UserAgent, m.SessionID,
 		)
 	}
 

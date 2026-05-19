@@ -348,6 +348,9 @@ func recordNoUpstreamRejection(
 	if ua := guard.UserAgent(c); ua != "" {
 		rec.UserAgent = strPtr(ua)
 	}
+	if sid := sessionIDFromRequest(c, req); sid != "" {
+		rec.SessionID = strPtr(sid)
+	}
 	buffer.Enqueue(rec)
 }
 
@@ -441,6 +444,9 @@ func buildMessageRequest(
 	if ua := guard.UserAgent(c); ua != "" {
 		rec.UserAgent = strPtr(ua)
 	}
+	if sid := sessionIDFromRequest(c, req); sid != "" {
+		rec.SessionID = strPtr(sid)
+	}
 	if result.Usage.ActualModel != "" && result.Usage.ActualModel != req.Model {
 		rec.ActualModel = strPtr(result.Usage.ActualModel)
 	}
@@ -454,6 +460,22 @@ func buildMessageRequest(
 		rec.ErrorMessage = strPtr(msg)
 	}
 	return rec
+}
+
+// sessionIDFromRequest pulls the Claude Code session correlation id
+// from the inbound request. The header is already collected into
+// req.ClientMetadata by the handler entry — read from there to keep
+// one source of truth — but fall back to the raw header so the
+// no-upstream path (which never gets to set ClientMetadata for
+// every code path) still attributes correctly.
+func sessionIDFromRequest(c *gin.Context, req *ir.UnifiedRequest) string {
+	const header = "x-claude-code-session-id"
+	if req != nil {
+		if v, ok := req.ClientMetadata[header]; ok && v != "" {
+			return v
+		}
+	}
+	return c.GetHeader(header)
 }
 
 // errorMessageFor picks the most informative error string for a
