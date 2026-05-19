@@ -24,6 +24,7 @@ import (
 
 	"github.com/jami1024/omnihub/internal/ir"
 	"github.com/jami1024/omnihub/internal/repository"
+	"github.com/jami1024/omnihub/internal/service/blockedip"
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
 	"github.com/jami1024/omnihub/internal/service/health"
@@ -90,6 +91,7 @@ func AnthropicMessagesHandler(
 	buffer *repository.WriteBuffer,
 	prices pricing.Table,
 	limiter *limits.Limiter,
+	blockedIPs *blockedip.Pool,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		startedAt := time.Now()
@@ -250,6 +252,13 @@ func AnthropicMessagesHandler(
 					}
 				}
 			}
+
+			// Charge the per-IP TPM bucket for the fresh-input tokens
+			// this request actually consumed. The middleware admitted
+			// the request based on the pre-existing budget; this is
+			// the matching post-flight deduction so the next request
+			// from the same IP sees up-to-date capacity.
+			chargeIPTokenBudget(c, blockedIPs, &result)
 
 			if buffer != nil {
 				rec := buildMessageRequest(c, &req, driver, account, &result, writeErr, startedAt)
@@ -460,6 +469,26 @@ func buildMessageRequest(
 		rec.ErrorMessage = strPtr(msg)
 	}
 	return rec
+}
+
+// chargeIPTokenBudget deducts the fresh-input tokens of the just-
+// completed request from the per-IP TPM bucket. No-op when no
+// policy / no TPM cap applies. "Fresh input" = input + cache_create
+// — matching what Anthropic itself counts against ITPM. cache_read
+// tokens are excluded so heavy cache reuse doesn't burn the budget.
+func chargeIPTokenBudget(c *gin.Context, pool *blockedip.Pool, result *forward.Result) {
+	if pool == nil || result == nil {
+		return
+	}
+	policy := guard.IPPolicy(c)
+	if policy == nil || policy.TPMLimit <= 0 {
+		return
+	}
+	fresh := result.Usage.InputTokens + result.Usage.CacheCreationInputTokens
+	if fresh <= 0 {
+		return
+	}
+	pool.TPMBucket().Charge(c.ClientIP(), policy.TPMLimit, fresh)
 }
 
 // sessionIDFromRequest pulls the Claude Code session correlation id

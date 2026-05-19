@@ -23,6 +23,7 @@ import (
 	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/account"
 	"github.com/jami1024/omnihub/internal/service/apikey"
+	"github.com/jami1024/omnihub/internal/service/blockedip"
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
 	"github.com/jami1024/omnihub/internal/service/health"
@@ -47,10 +48,11 @@ var (
 // degradation: no pool / buffer means log-only mode and the gateway
 // will not mount /v1/messages.
 var (
-	pool        *pgxpool.Pool
-	writeBuffer *repository.WriteBuffer
-	accountPool *account.Pool
-	apiKeyPool  *apikey.Pool
+	pool          *pgxpool.Pool
+	writeBuffer   *repository.WriteBuffer
+	accountPool   *account.Pool
+	apiKeyPool    *apikey.Pool
+	blockedIPPool *blockedip.Pool
 )
 
 const accountPoolRefreshInterval = 30 * time.Second
@@ -130,6 +132,10 @@ func runGateway() {
 	}
 	if err := setupApiKeyPool(rootCtx); err != nil {
 		slog.Error("api_keys pool init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := setupBlockedIPPool(rootCtx); err != nil {
+		slog.Error("blocked_ips pool init failed", "err", err)
 		os.Exit(1)
 	}
 
@@ -302,10 +308,15 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 		slog.Info("client UA gate enabled", "allowed_prefixes", clientGate.Prefixes())
 	}
 
-	limiter := buildLimiter()
+	limiter, rpmCache := buildLimiter()
 
-	gw := r.Group("/", clientGate.Middleware(), auth.Middleware(), guard.RequestLog())
-	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices, limiter))
+	gw := r.Group("/",
+		guard.IPBlockMiddleware(blockedIPPool, rpmCache),
+		clientGate.Middleware(),
+		auth.Middleware(),
+		guard.RequestLog(),
+	)
+	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool))
 
 	stickyDesc := "off"
 	if sessions != nil {
@@ -347,6 +358,28 @@ func configureTrustedProxies(r *gin.Engine) error {
 		}
 	}
 	return r.SetTrustedProxies(entries)
+}
+
+// setupBlockedIPPool wires the in-memory IP blocklist against the
+// DB. A nil DB pool degrades to a no-op (the middleware then skips
+// the check) so log-only / dev runs keep working without the
+// migration applied.
+func setupBlockedIPPool(ctx context.Context) error {
+	if pool == nil {
+		return nil
+	}
+	repo := repository.NewBlockedIPRepo(pool)
+	blockedIPPool = blockedip.NewPool(repo)
+	if err := blockedIPPool.Start(ctx, accountPoolRefreshInterval); err != nil {
+		return err
+	}
+	blockedip.NewListener(pool, "", blockedIPPool.Refresh).Start(ctx)
+	slog.Info("blocked_ips pool ready",
+		"size", blockedIPPool.Size(),
+		"refresh_interval", accountPoolRefreshInterval,
+		"notify_channel", blockedip.DefaultNotifyChannel,
+	)
+	return nil
 }
 
 // setupApiKeyPool wires the in-memory api_keys pool against the DB
@@ -501,15 +534,16 @@ func loadHealthConfig() health.Config {
 // keep hot keys off the DB. Tuneable via OMNIHUB_LIMIT_REFRESH_TTL.
 const spendCacheTTL = 5 * time.Second
 
-// buildLimiter wires the per-key limits service. The RPM cache is
-// always built (it's pure in-memory and free when no key carries an
-// rpm_limit); the spend cache requires a DB-backed SpendSource and
-// stays nil in log-only mode, which makes the daily-USD path a no-op
-// at call sites.
-func buildLimiter() *limits.Limiter {
+// buildLimiter wires the per-key limits service. Returns the
+// Limiter and the shared RPMCache so the IP guard middleware can
+// keep its own buckets in the same cache (namespaced by "ip:" key
+// prefix). The spend cache requires a DB-backed SpendSource and
+// stays nil in log-only mode, which makes the daily-USD path a
+// no-op at call sites.
+func buildLimiter() (*limits.Limiter, *limits.RPMCache) {
 	rpm := limits.NewRPMCache()
 	if pool == nil {
-		return limits.New(nil, rpm)
+		return limits.New(nil, rpm), rpm
 	}
 	src := repository.NewMessageRequestRepo(pool)
 	cache := limits.NewSpendCache(src, spendCacheTTL)
@@ -518,7 +552,7 @@ func buildLimiter() *limits.Limiter {
 		"daily_window", "24h rolling",
 		"rpm_enforcement", "in-process token bucket",
 	)
-	return limits.New(cache, rpm)
+	return limits.New(cache, rpm), rpm
 }
 
 // buildDriverRegistry registers every built-in driver. Adding a new
