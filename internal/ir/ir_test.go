@@ -230,6 +230,61 @@ func canonicalize(t *testing.T, data []byte) []byte {
 	return out
 }
 
+func TestTextBlockEmitsTextEvenWhenEmpty(t *testing.T) {
+	// Anthropic rejects text blocks where the "text" key is absent
+	// even if the value is an empty string — this happens in practice
+	// when a tool_result wraps an empty-string text response.
+	cases := []struct {
+		name  string
+		block ir.ContentBlock
+		want  string
+	}{
+		{
+			name:  "non-empty text",
+			block: ir.ContentBlock{Type: ir.BlockText, Text: "hello"},
+			want:  `{"type":"text","text":"hello"}`,
+		},
+		{
+			name:  "empty text still emits key",
+			block: ir.ContentBlock{Type: ir.BlockText, Text: ""},
+			want:  `{"type":"text","text":""}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := json.Marshal(tc.block)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("marshal:\n  want %s\n  got  %s", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestToolResultPreservesEmptyTextInnerBlock(t *testing.T) {
+	// End-to-end: a tool_result containing an empty-string text block
+	// must serialize with the inner text field present, otherwise
+	// Anthropic returns "messages.N.content.M.tool_result.content.0
+	// .text.text: Field required".
+	block := ir.ContentBlock{
+		Type:      ir.BlockToolResult,
+		ToolUseID: "toolu_01",
+		ResultContent: ir.ToolResultContent{
+			{Type: ir.BlockText, Text: ""},
+		},
+	}
+	got, err := json.Marshal(block)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"type":"tool_result","tool_use_id":"toolu_01","content":[{"type":"text","text":""}]}`
+	if string(got) != want {
+		t.Errorf("marshal:\n  want %s\n  got  %s", want, got)
+	}
+}
+
 func TestThinkingBlockEmitsRequiredFields(t *testing.T) {
 	cases := []struct {
 		name  string

@@ -98,12 +98,24 @@ type ContentBlock struct {
 // MarshalJSON emits a wire-shape suited to the block's Type. The flat
 // struct uses `omitempty` so empty values stay off the wire for most
 // variants, but Anthropic's Messages API treats certain fields as
-// required for thinking / redacted_thinking blocks even when their
-// value is empty — replaying an assistant turn whose thinking text
-// was empty otherwise produces a 400 "Field required" error. This
-// method bypasses omitempty for those required fields.
+// required even when their value is empty:
+//
+//   - text block: `text` must be present (e.g. a tool_result containing
+//     an empty-string text response otherwise becomes
+//     "messages.N.content.M.text.text: Field required")
+//   - thinking block: `thinking` and `signature`
+//   - redacted_thinking block: `data`
+//
+// Replaying any of these with omitempty stripped triggers a 400 from
+// the upstream. This method bypasses omitempty for those fields.
 func (b ContentBlock) MarshalJSON() ([]byte, error) {
 	switch b.Type {
+	case BlockText:
+		return json.Marshal(struct {
+			Type         BlockType     `json:"type"`
+			Text         string        `json:"text"`
+			CacheControl *CacheControl `json:"cache_control,omitempty"`
+		}{b.Type, b.Text, b.CacheControl})
 	case BlockThinking:
 		return json.Marshal(struct {
 			Type         BlockType     `json:"type"`
