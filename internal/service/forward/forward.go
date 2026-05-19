@@ -459,3 +459,30 @@ func copySafeHeaders(dst http.ResponseWriter, src *http.Response) {
 func IsRetriable(status int) bool {
 	return status >= 500 || status == http.StatusTooManyRequests
 }
+
+// IsThinkingSignatureError reports whether an upstream 400 body
+// matches Anthropic's "invalid signature in thinking block" pattern.
+//
+// Background: when a thinking-enabled assistant turn is replayed and
+// the embedded signature can no longer be validated by the upstream
+// (e.g. cross-account replay, modified content, rotated key), the
+// upstream returns 400 with a message like:
+//
+//	"messages.N.content.M: Invalid `signature` in `thinking` block"
+//
+// Detecting this lets the caller rectify the request via
+// ir.RectifyThinkingBlocks and retry the same account before
+// committing the failure to the client.
+func IsThinkingSignatureError(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	// Match the substring rather than parsing JSON — the surrounding
+	// envelope ({"type":"error","error":{...}}) is stable but the
+	// exact path (messages.N.content.M) varies, and we want to stay
+	// resilient to minor wording tweaks. Both "signature" and
+	// "thinking" must appear together so unrelated 400s (tool
+	// schema, prompt-too-long, ...) don't trip the rectifier.
+	return bytes.Contains(body, []byte("signature")) &&
+		bytes.Contains(body, []byte("thinking"))
+}

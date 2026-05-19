@@ -302,6 +302,42 @@ func TestForwardErrorAugmentsToolName(t *testing.T) {
 	}
 }
 
+func TestIsThinkingSignatureError(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			name: "anthropic signature error",
+			body: `{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0: Invalid ` + "`signature`" + ` in ` + "`thinking`" + ` block"}}`,
+			want: true,
+		},
+		{
+			name: "prompt too long is not signature",
+			body: `{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 207925 tokens > 200000 maximum"}}`,
+			want: false,
+		},
+		{
+			name: "tool schema error is not signature",
+			body: `{"type":"error","error":{"type":"invalid_request_error","message":"tools.0.custom.input_schema: Input does not match the expected shape."}}`,
+			want: false,
+		},
+		{
+			name: "empty body",
+			body: "",
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := forward.IsThinkingSignatureError([]byte(tc.body)); got != tc.want {
+				t.Errorf("want %v, got %v for body %s", tc.want, got, tc.body)
+			}
+		})
+	}
+}
+
 func TestForwardErrorAugmentationSkippedWhenNoMatch(t *testing.T) {
 	// Non-tool error message: augmentation must be a no-op so other
 	// error categories aren't mangled.

@@ -10,6 +10,7 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -136,12 +137,13 @@ func AnthropicMessagesHandler(
 
 		// Retry loop: at most maxFailoverAttempts distinct accounts.
 		var (
-			attempted     []int64
-			lastDriver    provider.Driver
-			lastAccount   *provider.Account
-			lastErr       error
-			lastBadStatus int
-			lastBody      []byte
+			attempted          []int64
+			lastDriver         provider.Driver
+			lastAccount        *provider.Account
+			lastErr            error
+			lastBadStatus      int
+			lastBody           []byte
+			signatureRectified bool
 		)
 
 		for attempt := 0; attempt < maxFailoverAttempts; attempt++ {
@@ -194,6 +196,36 @@ func AnthropicMessagesHandler(
 				lastDriver, lastAccount, lastBadStatus = driver, account, resp.StatusCode
 				lastErr = fmt.Errorf("upstream HTTP %d", resp.StatusCode)
 				continue
+			}
+
+			// Thinking-signature rectifier: when the upstream rejects
+			// the request because a replayed thinking block carries
+			// an unverifiable signature, downgrade the offending
+			// blocks to plain text and retry the SAME account before
+			// committing the failure. Runs at most once per request.
+			if resp.StatusCode == 400 && !signatureRectified {
+				peek, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+				_ = resp.Body.Close()
+				if forward.IsThinkingSignatureError(peek) {
+					rectified := ir.RectifyThinkingBlocks(&req)
+					slog.Info("thinking signature mismatch; retrying with rectified request",
+						"account", account.Name)
+					retryResp, retrySentAt, retryErr := forwarder.Dispatch(c.Request.Context(), rectified, driver, account)
+					if retryErr != nil {
+						slog.Warn("rectified retry failed at transport; surfacing original error",
+							"account", account.Name, "err", retryErr.Error())
+						resp.Body = io.NopCloser(bytes.NewReader(peek))
+					} else {
+						req = *rectified
+						resp = retryResp
+						sentAt = retrySentAt
+						signatureRectified = true
+					}
+				} else {
+					// Not a signature mismatch — replay the buffered
+					// body to WriteResponse unchanged.
+					resp.Body = io.NopCloser(bytes.NewReader(peek))
+				}
 			}
 
 			// Commit: this response is what the client gets.
