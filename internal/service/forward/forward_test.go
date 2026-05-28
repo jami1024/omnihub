@@ -13,6 +13,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/anthropic"
+	"github.com/jami1024/omnihub/internal/service/usage"
 )
 
 // upstreamServer mocks api.anthropic.com for both streaming and
@@ -52,6 +53,7 @@ func TestForwardNonStreamingHappyPath(t *testing.T) {
 		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 100},
 		anthropic.New(),
 		anthropicAccount(srv.URL),
+		usage.Anthropic,
 	)
 	if err != nil {
 		t.Fatalf("Forward: %v", err)
@@ -95,6 +97,7 @@ func TestForwardStreamingFlushesEachEvent(t *testing.T) {
 		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 100, Stream: true},
 		anthropic.New(),
 		anthropicAccount(srv.URL),
+		usage.Anthropic,
 	)
 	if err != nil {
 		t.Fatalf("Forward: %v", err)
@@ -172,6 +175,7 @@ func TestForwardStreamingDrainsAfterClientDisconnect(t *testing.T) {
 		&ir.UnifiedRequest{Model: "claude-haiku-4-5", MaxTokens: 100, Stream: true},
 		anthropic.New(),
 		anthropicAccount(srv.URL),
+		usage.Anthropic,
 	)
 
 	// The write failure must surface so the handler can log it.
@@ -213,6 +217,7 @@ func TestForwardErrorResponsePassthrough(t *testing.T) {
 		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 100},
 		anthropic.New(),
 		anthropicAccount(srv.URL),
+		usage.Anthropic,
 	)
 	if err != nil {
 		t.Fatalf("Forward: %v", err)
@@ -249,6 +254,7 @@ func TestForwardErrorBodyCappedForLargeUpstream(t *testing.T) {
 		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 100},
 		anthropic.New(),
 		anthropicAccount(srv.URL),
+		usage.Anthropic,
 	)
 	if err != nil {
 		t.Fatalf("Forward: %v", err)
@@ -282,7 +288,7 @@ func TestForwardErrorAugmentsToolName(t *testing.T) {
 	f := forward.New(srv.Client())
 	rec := httptest.NewRecorder()
 
-	result, err := f.Forward(context.Background(), rec, req, anthropic.New(), anthropicAccount(srv.URL))
+	result, err := f.Forward(context.Background(), rec, req, anthropic.New(), anthropicAccount(srv.URL), usage.Anthropic)
 	if err != nil {
 		t.Fatalf("Forward: %v", err)
 	}
@@ -357,7 +363,7 @@ func TestForwardErrorAugmentationSkippedWhenNoMatch(t *testing.T) {
 	f := forward.New(srv.Client())
 	rec := httptest.NewRecorder()
 
-	if _, err := f.Forward(context.Background(), rec, req, anthropic.New(), anthropicAccount(srv.URL)); err != nil {
+	if _, err := f.Forward(context.Background(), rec, req, anthropic.New(), anthropicAccount(srv.URL), usage.Anthropic); err != nil {
 		t.Fatalf("Forward: %v", err)
 	}
 	if rec.Body.String() != original {

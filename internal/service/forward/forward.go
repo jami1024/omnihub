@@ -162,11 +162,15 @@ func (f *Forwarder) Dispatch(
 // to extract token usage. For non-streaming requests the body is
 // read fully, usage is parsed, then the bytes are written to the
 // client. Always closes resp.Body.
+//
+// parser selects how usage is extracted from the response, matching the
+// upstream's wire format (Anthropic vs OpenAI).
 func (f *Forwarder) WriteResponse(
 	w http.ResponseWriter,
 	resp *http.Response,
 	req *ir.UnifiedRequest,
 	requestSentAt time.Time,
+	parser usage.Parser,
 ) (Result, error) {
 	defer resp.Body.Close()
 
@@ -178,12 +182,12 @@ func (f *Forwarder) WriteResponse(
 		return result, err
 	}
 	if req.Stream {
-		ttfb, u, err := forwardSSE(w, resp, requestSentAt)
+		ttfb, u, err := forwardSSE(w, resp, requestSentAt, parser)
 		result.TTFB = ttfb
 		result.Usage = u
 		return result, err
 	}
-	u, err := forwardBody(w, resp)
+	u, err := forwardBody(w, resp, parser)
 	result.Usage = u
 	return result, err
 }
@@ -198,12 +202,13 @@ func (f *Forwarder) Forward(
 	req *ir.UnifiedRequest,
 	driver provider.Driver,
 	account *provider.Account,
+	parser usage.Parser,
 ) (Result, error) {
 	resp, sentAt, err := f.Dispatch(ctx, req, driver, account)
 	if err != nil {
 		return Result{}, err
 	}
-	return f.WriteResponse(w, resp, req, sentAt)
+	return f.WriteResponse(w, resp, req, sentAt, parser)
 }
 
 // forwardErrorBody copies an upstream error response to the client
@@ -316,18 +321,17 @@ func parseToolIndex(msg string) (int, bool) {
 	return n, true
 }
 
-
 // forwardBody reads the entire non-streaming response, extracts usage,
 // and copies the body to the client. Reading the body fully (rather
 // than io.Copy) lets us parse usage before writing — at the cost of
 // holding the response in memory briefly, which is fine for chat
 // responses (typically < 100 KB).
-func forwardBody(w http.ResponseWriter, resp *http.Response) (usage.Usage, error) {
+func forwardBody(w http.ResponseWriter, resp *http.Response, parser usage.Parser) (usage.Usage, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return usage.Usage{}, fmt.Errorf("read upstream body: %w", err)
 	}
-	u := usage.FromAnthropicJSON(body)
+	u := parser.FromJSON(body)
 
 	copySafeHeaders(w, resp)
 	if w.Header().Get("Content-Type") == "" {
@@ -346,6 +350,7 @@ func forwardSSE(
 	w http.ResponseWriter,
 	resp *http.Response,
 	requestSentAt time.Time,
+	parser usage.Parser,
 ) (time.Duration, usage.Usage, error) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -360,7 +365,7 @@ func forwardSSE(
 	w.WriteHeader(resp.StatusCode)
 
 	reader := bufio.NewReaderSize(resp.Body, 64*1024)
-	sniffer := usage.NewSSESniffer()
+	sniffer := parser.NewSniffer()
 	var ttfb time.Duration
 
 	for {
@@ -416,7 +421,7 @@ const drainMaxBytes = 256 * 1024
 // blocks on the upstream socket, but once Close fires the next read
 // returns immediately with an error. Without the timer a stalled
 // upstream would pin one goroutine until the TCP keepalive expired.
-func drainSSE(reader *bufio.Reader, sniffer *usage.SSESniffer, body io.Closer) {
+func drainSSE(reader *bufio.Reader, sniffer usage.Sniffer, body io.Closer) {
 	timer := time.AfterFunc(drainTimeout, func() { _ = body.Close() })
 	defer timer.Stop()
 

@@ -33,6 +33,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/resolver"
 	"github.com/jami1024/omnihub/internal/service/session"
+	"github.com/jami1024/omnihub/internal/service/usage"
 )
 
 // anthropicCompatibleProviders is the allow-list for the Anthropic
@@ -231,7 +232,7 @@ func AnthropicMessagesHandler(
 			}
 
 			// Commit: this response is what the client gets.
-			result, writeErr := forwarder.WriteResponse(c.Writer, resp, &req, sentAt)
+			result, writeErr := forwarder.WriteResponse(c.Writer, resp, &req, sentAt, usage.Anthropic)
 			recordHealthAfterWrite(tracker, account.ID, result, writeErr)
 
 			c.Set(guard.CtxKeyUsage, result.Usage)
