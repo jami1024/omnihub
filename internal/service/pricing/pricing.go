@@ -72,15 +72,24 @@ func (b Breakdown) ApplyMultiplier(m float64) Breakdown {
 // against the "claude-haiku-4-5" row.
 type Table map[string]Price
 
-// Default returns the built-in Anthropic price list, sourced from
-// https://platform.claude.com/docs/en/about-claude/pricing as of
-// 2026-05. Direct Anthropic and Claude Platform on AWS share rates.
+// Default returns the built-in price list. Anthropic prices are sourced
+// from https://platform.claude.com/docs/en/about-claude/pricing
+// (2026-05); direct Anthropic and Claude Platform on AWS share rates.
+// OpenAI prices come from OpenAI's API pricing page; DeepSeek from
+// api-docs.deepseek.com.
 //
-// Cache rates follow the canonical Anthropic ratios off input
-// (5m = 1.25×, 1h = 2.0×, read = 0.10×); they are listed explicitly
-// here so an upstream sync can override them per model.
+// Cache rates follow each vendor's own ratios:
+//
+//   - Anthropic: 5m = 1.25×, 1h = 2.0×, read = 0.10× of input.
+//   - OpenAI: cached input = 0.50× of input; no cache-creation cost.
+//   - DeepSeek V4 Flash: cache hit = 0.02× of input.
 //
 // All values are USD per token (multiply the $/MTok rate by 1e-6).
+//
+// Coverage gap: GPT-5 / GPT-4.1 / o-series prices are deliberately not
+// in this table — public sources disagree by 2-7× for these. Add them
+// here once a verified source is available, or import a LiteLLM JSON
+// snapshot.
 func Default() Table {
 	return Table{
 		// Haiku 4.5 — $1.00 / $5.00 / MTok
@@ -108,6 +117,22 @@ func Default() Table {
 		"claude-opus-4-5": opusCurrentPrice(),
 		"claude-opus-4-6": opusCurrentPrice(),
 		"claude-opus-4-7": opusCurrentPrice(),
+
+		// OpenAI GPT-4o — $2.50 / $10.00 / MTok, cached input $1.25
+		// (50% off). Prices stable since 2024-10 prompt-caching launch.
+		"gpt-4o": gpt4oPrice(),
+
+		// OpenAI GPT-4o-mini — $0.15 / $0.60 / MTok, cached input $0.075.
+		"gpt-4o-mini": gpt4oMiniPrice(),
+
+		// DeepSeek V4 Flash — $0.14 / $0.28 / MTok, cache hit $0.0028
+		// (98% off, the cheapest cache rate in the market). Both legacy
+		// names "deepseek-chat" (non-thinking) and "deepseek-reasoner"
+		// (thinking) point at the same V4 Flash tier; deprecation of the
+		// legacy names is scheduled for 2026-07-24 but they still bill.
+		"deepseek-chat":     deepseekV4FlashPrice(),
+		"deepseek-reasoner": deepseekV4FlashPrice(),
+		"deepseek-v4-flash": deepseekV4FlashPrice(),
 	}
 }
 
@@ -138,6 +163,38 @@ func opusLegacyPrice() Price {
 		CacheCreationInputTokenCost:         18.75e-6,
 		CacheCreationInputTokenCostAbove1Hr: 30.00e-6,
 		CacheReadInputTokenCost:             1.50e-6,
+	}
+}
+
+// gpt4oPrice returns the rates for OpenAI GPT-4o. OpenAI has no
+// cache-creation cost (prompt caching kicks in automatically and the
+// write itself is free); CacheCreation fields stay zero. The OpenAI
+// usage sniffer doesn't surface CacheCreationInputTokens either, so
+// the Anthropic-style fallback in Calculate is dormant on this path.
+func gpt4oPrice() Price {
+	return Price{
+		InputCostPerToken:       2.50e-6,
+		OutputCostPerToken:      10.00e-6,
+		CacheReadInputTokenCost: 1.25e-6,
+	}
+}
+
+func gpt4oMiniPrice() Price {
+	return Price{
+		InputCostPerToken:       0.15e-6,
+		OutputCostPerToken:      0.60e-6,
+		CacheReadInputTokenCost: 0.075e-6,
+	}
+}
+
+// deepseekV4FlashPrice returns the rates for DeepSeek V4 Flash. The
+// cache-hit rate is 0.02× of input — the cheapest in the market.
+// DeepSeek has no cache-creation cost.
+func deepseekV4FlashPrice() Price {
+	return Price{
+		InputCostPerToken:       0.14e-6,
+		OutputCostPerToken:      0.28e-6,
+		CacheReadInputTokenCost: 0.0028e-6,
 	}
 }
 

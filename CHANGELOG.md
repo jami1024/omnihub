@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OpenAI / DeepSeek pricing in the default price table. The previous
+  commit landed the OpenAI entry but left these requests recording
+  `cost = NULL` because no model in the table matched. This adds
+  GPT-4o (`gpt-4o` $2.50 / $10 / MTok, cached input $1.25 — 50% off),
+  GPT-4o-mini (`gpt-4o-mini` $0.15 / $0.60, cached $0.075), and
+  DeepSeek V4 Flash under all three current names (`deepseek-chat`,
+  `deepseek-reasoner`, `deepseek-v4-flash` — $0.14 / $0.28, cache hit
+  $0.0028, a 98% discount). Cache rates are listed explicitly per entry
+  so the Anthropic-style 10% fallback in `Calculate` does not silently
+  misbill on the OpenAI path (50% off) or DeepSeek path (98% off).
+  Coverage gap recorded in `pricing.go` for transparency: GPT-5 /
+  GPT-4.1 / o-series are deliberately omitted because public sources
+  currently disagree by 2-7× on those rates — add them when a verified
+  source lands or import a LiteLLM snapshot. Locked-in tests assert
+  longest-prefix wins on `gpt-4o-mini-2024-07-18` (17× cheaper than
+  GPT-4o), the OpenAI cached-input ratio (50% vs Anthropic's 10%
+  fallback), and the DeepSeek 98% cache-hit discount.
+
 - OpenAI-compatible gateway: a new `POST /v1/chat/completions`
   endpoint plus an `openai` provider driver, the gateway's first
   second protocol. Inbound OpenAI requests are parsed into the

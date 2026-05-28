@@ -171,6 +171,105 @@ func TestCacheRateFallbackFromInput(t *testing.T) {
 	}
 }
 
+// TestGPT4oPricing locks in the $2.50 / $10 / MTok rate for GPT-4o.
+// Stable since the 2024-10 prompt-caching launch; a future "everything
+// is GPT-5 now" refactor that drops or moves this entry trips here.
+func TestGPT4oPricing(t *testing.T) {
+	tbl := pricing.Default()
+	got, ok := tbl.Calculate("gpt-4o", usage.Usage{
+		InputTokens:  1_000_000,
+		OutputTokens: 500_000,
+	})
+	if !ok {
+		t.Fatalf("expected price for gpt-4o")
+	}
+	// 1M × $2.50 + 0.5M × $10 = $7.50
+	if !approxEqual(got.Total, 7.50) {
+		t.Errorf("gpt-4o total: want 7.50, got %g", got.Total)
+	}
+}
+
+func TestGPT4oMiniPricing(t *testing.T) {
+	tbl := pricing.Default()
+	got, ok := tbl.Calculate("gpt-4o-mini", usage.Usage{
+		InputTokens:  1_000_000,
+		OutputTokens: 500_000,
+	})
+	if !ok {
+		t.Fatalf("expected price for gpt-4o-mini")
+	}
+	// 1M × $0.15 + 0.5M × $0.60 = $0.45
+	if !approxEqual(got.Total, 0.45) {
+		t.Errorf("gpt-4o-mini total: want 0.45, got %g", got.Total)
+	}
+}
+
+// TestGPT4oMiniPrefixBeatsGPT4o makes sure a versioned mini model id
+// hits the mini rate, not the 17× more expensive base rate. Anthropic
+// lookups already exercise longest-prefix, but the OpenAI naming
+// (sibling models sharing a prefix) makes this regression matter.
+func TestGPT4oMiniPrefixBeatsGPT4o(t *testing.T) {
+	tbl := pricing.Default()
+	got, ok := tbl.Calculate("gpt-4o-mini-2024-07-18", usage.Usage{
+		InputTokens: 1_000_000,
+	})
+	if !ok {
+		t.Fatalf("expected versioned mini id to match")
+	}
+	if !approxEqual(got.Total, 0.15) {
+		t.Errorf("versioned mini should hit $0.15 (mini tier), got %g", got.Total)
+	}
+}
+
+// TestGPT4oCachedReadUsesOpenAIRatio verifies the cached_input price is
+// 50% off (OpenAI's ratio), not 10% off (Anthropic's). The fallback in
+// Calculate would silently misbill at the Anthropic ratio if the entry
+// forgot to set CacheReadInputTokenCost explicitly.
+func TestGPT4oCachedReadUsesOpenAIRatio(t *testing.T) {
+	tbl := pricing.Default()
+	got, _ := tbl.Calculate("gpt-4o", usage.Usage{
+		CacheReadInputTokens: 1_000_000,
+	})
+	if !approxEqual(got.Total, 1.25) {
+		t.Errorf("gpt-4o cached read should be $1.25/MTok (50%% off), got %g", got.Total)
+	}
+}
+
+// TestDeepSeekV4FlashAliases verifies both deprecated legacy names and
+// the new "v4-flash" id resolve to the same V4 Flash tier. The
+// deprecation lands 2026-07-24; until then all three still bill.
+func TestDeepSeekV4FlashAliases(t *testing.T) {
+	tbl := pricing.Default()
+	for _, model := range []string{"deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash"} {
+		t.Run(model, func(t *testing.T) {
+			got, ok := tbl.Calculate(model, usage.Usage{
+				InputTokens:  1_000_000,
+				OutputTokens: 1_000_000,
+			})
+			if !ok {
+				t.Fatalf("expected price entry for %s", model)
+			}
+			// 1M × $0.14 + 1M × $0.28 = $0.42
+			if !approxEqual(got.Total, 0.42) {
+				t.Errorf("%s total: want 0.42, got %g", model, got.Total)
+			}
+		})
+	}
+}
+
+// TestDeepSeekCacheHitMatches98Off locks in the 98% cache-hit discount
+// (the market-leading cache rate, 50× cheaper than the same call without
+// cache hit).
+func TestDeepSeekCacheHitMatches98Off(t *testing.T) {
+	tbl := pricing.Default()
+	got, _ := tbl.Calculate("deepseek-chat", usage.Usage{
+		CacheReadInputTokens: 1_000_000,
+	})
+	if !approxEqual(got.Total, 0.0028) {
+		t.Errorf("deepseek cache hit: want 0.0028 (98%% off), got %g", got.Total)
+	}
+}
+
 func TestApplyMultiplier(t *testing.T) {
 	base := pricing.Breakdown{
 		Input:           1.00,
