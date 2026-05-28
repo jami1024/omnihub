@@ -104,6 +104,31 @@ docker exec -it omnihub-prod-gateway \
 
 The cleartext key is printed once — store it.
 
+### OpenAI-compatible endpoint
+
+Alongside `POST /v1/messages` (Anthropic Messages), the gateway exposes
+`POST /v1/chat/completions` (OpenAI Chat Completions). Point any OpenAI
+SDK or tool at the gateway and route to an OpenAI / OpenAI-compatible
+upstream (OpenAI, DeepSeek, Moonshot, vLLM, …):
+
+```bash
+docker exec -it omnihub-prod-gateway \
+  omnihub account add --name=oai --provider=openai --api-key=sk-...
+# or any OpenAI-compatible upstream:
+docker exec -it omnihub-prod-gateway \
+  omnihub account add --name=deepseek --provider=openai \
+                      --api-key=sk-... --base-url=https://api.deepseek.com
+```
+
+```bash
+curl https://${OMNIHUB_DOMAIN}/v1/chat/completions \
+  -H "Authorization: Bearer <virtual-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}'
+```
+
+The same virtual keys, rate limits, and budgets apply to both endpoints.
+
 ## 📐 Architecture (preview)
 
 ```

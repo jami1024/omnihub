@@ -33,6 +33,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/anthropic"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/claudeplatform"
+	"github.com/jami1024/omnihub/internal/service/provider/drivers/openai"
 	"github.com/jami1024/omnihub/internal/service/resolver"
 	"github.com/jami1024/omnihub/internal/service/session"
 )
@@ -318,12 +319,24 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 	)
 	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool))
 
+	// OpenAI Chat Completions endpoint. OpenAI SDK clients are not Claude
+	// CLI, so the Claude-CLI client gate is intentionally omitted here;
+	// IP-block, auth, and request-log still apply. Requests route only to
+	// openai-family accounts — when none exist the resolver returns a
+	// clean 503 no_upstream_available.
+	gwOpenAI := r.Group("/",
+		guard.IPBlockMiddleware(blockedIPPool, rpmCache),
+		auth.Middleware(),
+		guard.RequestLog(),
+	)
+	gwOpenAI.POST("/v1/chat/completions", gateway.OpenAIChatCompletionsHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool))
+
 	stickyDesc := "off"
 	if sessions != nil {
 		stickyDesc = sessionTTL.String()
 	}
 	slog.Info("gateway mounted",
-		"path", "/v1/messages",
+		"paths", []string{"/v1/messages", "/v1/chat/completions"},
 		"account_count", accountPool.Size(),
 		"circuit_failure_threshold", healthCfg.FailureThreshold,
 		"circuit_open_duration", healthCfg.OpenDuration,
@@ -561,6 +574,7 @@ func buildDriverRegistry() *provider.Registry {
 	reg := provider.NewRegistry()
 	reg.MustRegister(anthropic.New())
 	reg.MustRegister(claudeplatform.New())
+	reg.MustRegister(openai.New())
 	return reg
 }
 

@@ -58,11 +58,15 @@ Usage:
 
 'add' flags:
   --name=NAME           (required) unique account name
-  --provider=NAME       (required) driver name: anthropic | claude-platform
+  --provider=NAME       (required) driver name: anthropic | claude-platform | openai
   --api-key=KEY         (required) upstream API key
   --aws-region=REGION   (claude-platform) AWS region
   --workspace-id=ID     (claude-platform) Anthropic workspace ID
+  --organization=ID     (openai, optional) OpenAI-Organization header
+  --project=ID          (openai, optional) OpenAI-Project header
   --base-url=URL        override the driver's default endpoint
+                        (openai: point at any OpenAI-compatible upstream,
+                         e.g. https://api.deepseek.com)
   --weight=N            weighted random selection weight (default 100)
   --priority=N          lower number = preferred tier (default 0)
   --cost-multiplier=F   scales recorded cost (default 1.0)
@@ -84,19 +88,21 @@ func accountAdd(args []string) error {
 	fs := flag.NewFlagSet("account add", flag.ExitOnError)
 	fs.SetOutput(os.Stderr)
 	var (
-		name        = fs.String("name", "", "account name (unique)")
-		drv         = fs.String("provider", "", "driver name")
-		apiKey      = fs.String("api-key", "", "upstream API key")
-		awsRegion   = fs.String("aws-region", "", "AWS region (claude-platform)")
-		workspaceID = fs.String("workspace-id", "", "workspace id (claude-platform)")
-		baseURL     = fs.String("base-url", "", "endpoint override")
-		weight      = fs.Int("weight", 100, "weighted random weight")
-		priority    = fs.Int("priority", 0, "priority tier (lower = preferred)")
-		multiplier  = fs.Float64("cost-multiplier", 1.0, "cost multiplier (1.0 = base)")
-		disabled    = fs.Bool("disabled", false, "create in disabled state")
-		cbFailures  = fs.Int("circuit-failure-threshold", -1, "per-account override; -1 = use global default")
-		cbDuration  = fs.String("circuit-open-duration", "", "per-account override Go duration; empty = use global default")
-		cbHalfOpen  = fs.Int("circuit-half-open-success", -1, "per-account override; -1 = use global default")
+		name         = fs.String("name", "", "account name (unique)")
+		drv          = fs.String("provider", "", "driver name")
+		apiKey       = fs.String("api-key", "", "upstream API key")
+		awsRegion    = fs.String("aws-region", "", "AWS region (claude-platform)")
+		workspaceID  = fs.String("workspace-id", "", "workspace id (claude-platform)")
+		organization = fs.String("organization", "", "OpenAI-Organization header (openai, optional)")
+		project      = fs.String("project", "", "OpenAI-Project header (openai, optional)")
+		baseURL      = fs.String("base-url", "", "endpoint override")
+		weight       = fs.Int("weight", 100, "weighted random weight")
+		priority     = fs.Int("priority", 0, "priority tier (lower = preferred)")
+		multiplier   = fs.Float64("cost-multiplier", 1.0, "cost multiplier (1.0 = base)")
+		disabled     = fs.Bool("disabled", false, "create in disabled state")
+		cbFailures   = fs.Int("circuit-failure-threshold", -1, "per-account override; -1 = use global default")
+		cbDuration   = fs.String("circuit-open-duration", "", "per-account override Go duration; empty = use global default")
+		cbHalfOpen   = fs.Int("circuit-half-open-success", -1, "per-account override; -1 = use global default")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -113,6 +119,12 @@ func accountAdd(args []string) error {
 	}
 	if *workspaceID != "" {
 		creds["workspace_id"] = *workspaceID
+	}
+	if *organization != "" {
+		creds["organization"] = *organization
+	}
+	if *project != "" {
+		creds["project"] = *project
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

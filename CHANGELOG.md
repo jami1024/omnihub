@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OpenAI-compatible gateway: a new `POST /v1/chat/completions`
+  endpoint plus an `openai` provider driver, the gateway's first
+  second protocol. Inbound OpenAI requests are parsed into the
+  internal representation (`internal/protocol/openai`), routed to
+  `openai`-family accounts, and forwarded to OpenAI or any
+  OpenAI-compatible upstream (DeepSeek, Moonshot, vLLM, …). On this
+  matched-pair path the upstream response is streamed back to the
+  client verbatim; a protocol-aware usage extractor
+  (`usage.OpenAI`) reads token counts from the OpenAI response shape.
+  The driver injects `stream_options.include_usage=true` on
+  streaming requests because OpenAI otherwise omits `usage` from the
+  stream, which would zero out billing. The OpenAI route deliberately
+  skips the Claude-CLI client gate (OpenAI SDK clients are not Claude
+  CLI) while keeping IP-block, virtual-key auth, rate limits, and the
+  daily-USD cap. Add an account with
+  `omnihub account add --provider=openai --api-key=sk-... [--base-url=...]`.
+  Note: OpenAI model prices are not yet in the pricing table, so
+  these requests record a NULL cost until prices land. Cross-protocol
+  routing (one protocol's inbound to another's upstream) is out of
+  scope by design — every entry remains matched-pair pass-through.
+
 ### Fixed (pricing)
 
 - Opus 4.5 and 4.6 were misfiled in the legacy $15/$75 per-MTok tier;
