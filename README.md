@@ -129,16 +129,27 @@ curl https://${OMNIHUB_DOMAIN}/v1/chat/completions \
 
 The same virtual keys, rate limits, and budgets apply to both endpoints.
 
-### Web admin UI (M3 — account & key management)
+### Web admin UI
 
 The gateway ships an embedded React admin UI (Vite + Tailwind +
-TanStack Query) reachable at `/admin`. M1 delivered the login skeleton;
-M2 added the **Accounts** page (list/create/edit/delete upstream
-provider accounts, credentials write-only); M3 adds the **Keys** page
-for virtual API keys, with the same write-only treatment of secrets —
-keys are generated server-side and the cleartext is shown exactly once,
-right after creation. The dashboard + blocked-IPs + circuit events (M4)
-land in the final milestone.
+TanStack Query + recharts) reachable at `/admin`. It is the full
+operator console, built across four milestones:
+
+- **Dashboard** — usage and spend over the last 7/14/30/90 days:
+  headline totals, a daily spend/requests time series, and a per-model
+  cost breakdown.
+- **Accounts** — list/create/edit/delete upstream provider accounts.
+  Credentials are write-only: the browser only ever learns which
+  credential keys are set, never their values.
+- **Keys** — virtual API keys. Generated server-side; the cleartext is
+  shown exactly once, right after creation, then only its hash is stored.
+- **Blocked IPs** — hard blocks (403) and per-IP rate caps (429),
+  enforced before auth.
+- **Health** — live circuit-breaker state per account with a reset
+  control, plus a feed of recent state transitions.
+
+All writes hot-reload the gateway's in-memory pools through the tables'
+NOTIFY triggers, so changes take effect within milliseconds.
 
 Set a JWT signing secret and create the first admin (any UTF-8 string
 will do; rotate by changing the env value and re-issuing tokens):

@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Dashboard, blocked-IP management, and circuit-breaker health in the
+  admin UI (M4 — the final milestone of the four-part web admin work).
+  - **Usage dashboard**: a read-only `/admin/api/usage?days=N` endpoint
+    aggregating message_requests into headline totals (requests, spend,
+    tokens, errors), a gap-filled daily series, and a per-model
+    breakdown for the trailing N days (default 7, capped at 90). Rendered
+    with recharts (spend area chart, daily-request bars, spend-by-model),
+    code-split via React.lazy so the chart library doesn't weigh down the
+    rest of the SPA.
+  - **Blocked IPs**: full CRUD over `/admin/api/blocked-ips`. A row with
+    no caps is a hard block (403); any cap makes it a soft limit (429).
+    Writes hot-reload through the blocked_ips NOTIFY trigger.
+  - **Circuit breakers**: a Health page showing each account's live
+    breaker state (closed / open / half-open), failure count, and
+    cooldown, polled every 10s, with a reset control and a feed of recent
+    transitions from account_health_events. The in-memory health Tracker
+    is wired into the admin routes (`GET /admin/api/circuit`,
+    `/circuit/events`, `POST /admin/api/accounts/:id/reset-breaker`).
 - Virtual key management in the admin UI (M3 of the four-milestone web
   admin work).
   - New `/admin/api/keys` endpoints behind the AdminAuthenticator: list,
