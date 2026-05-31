@@ -4,6 +4,7 @@ import { LoginPage } from './pages/Login'
 import { DashboardPage } from './pages/Dashboard'
 import { AccountsPage } from './pages/Accounts'
 import { KeysPage } from './pages/Keys'
+import { BlockedIPsPage } from './pages/BlockedIPs'
 
 export default function App() {
   return (
@@ -30,6 +31,14 @@ export default function App() {
         element={
           <Protected>
             <KeysPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/blocked-ips"
+        element={
+          <Protected>
+            <BlockedIPsPage />
           </Protected>
         }
       />

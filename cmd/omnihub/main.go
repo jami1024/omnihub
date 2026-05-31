@@ -254,6 +254,7 @@ func mountAdminRoutes(r *gin.Engine) {
 	adminUserRepo := repository.NewAdminUserRepo(pool)
 	accountRepo := repository.NewAccountRepo(pool)
 	apiKeyRepo := repository.NewApiKeyRepo(pool)
+	blockedIPRepo := repository.NewBlockedIPRepo(pool)
 	adminAuth := guard.NewAdminAuthenticator(issuer)
 
 	api := r.Group("/admin/api")
@@ -277,6 +278,14 @@ func mountAdminRoutes(r *gin.Engine) {
 	authed.POST("/keys", adminhandler.CreateKeyHandler(apiKeyRepo))
 	authed.PATCH("/keys/:id", adminhandler.UpdateKeyHandler(apiKeyRepo))
 	authed.DELETE("/keys/:id", adminhandler.DeleteKeyHandler(apiKeyRepo))
+
+	// M4 — blocked-IP management. Writes flow through the blocked_ips
+	// NOTIFY trigger (migration 0011), so the in-memory policy pool
+	// refreshes within milliseconds. Rows are keyed by IP.
+	authed.GET("/blocked-ips", adminhandler.ListBlockedIPsHandler(blockedIPRepo))
+	authed.POST("/blocked-ips", adminhandler.CreateBlockedIPHandler(blockedIPRepo))
+	authed.PATCH("/blocked-ips/:ip", adminhandler.UpdateBlockedIPHandler(blockedIPRepo))
+	authed.DELETE("/blocked-ips/:ip", adminhandler.DeleteBlockedIPHandler(blockedIPRepo))
 
 	if web.Available() {
 		spa := web.SPAHandler("/admin")
