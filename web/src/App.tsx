@@ -1,10 +1,17 @@
+import { Suspense, lazy } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import { LoginPage } from './pages/Login'
-import { DashboardPage } from './pages/Dashboard'
 import { AccountsPage } from './pages/Accounts'
 import { KeysPage } from './pages/Keys'
 import { BlockedIPsPage } from './pages/BlockedIPs'
+
+// The Dashboard pulls in recharts (~180 kB gzip). Lazy-load it so the
+// charting library lands in its own chunk and never weighs down login
+// or the management pages.
+const DashboardPage = lazy(() =>
+  import('./pages/Dashboard').then((m) => ({ default: m.DashboardPage })),
+)
 
 export default function App() {
   return (
@@ -14,7 +21,9 @@ export default function App() {
         path="/"
         element={
           <Protected>
-            <DashboardPage />
+            <Suspense fallback={<PageLoading />}>
+              <DashboardPage />
+            </Suspense>
           </Protected>
         }
       />
@@ -44,6 +53,12 @@ export default function App() {
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+  )
+}
+
+function PageLoading() {
+  return (
+    <div className="flex h-screen items-center justify-center text-zinc-500">Loading…</div>
   )
 }
 

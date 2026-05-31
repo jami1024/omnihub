@@ -255,6 +255,7 @@ func mountAdminRoutes(r *gin.Engine) {
 	accountRepo := repository.NewAccountRepo(pool)
 	apiKeyRepo := repository.NewApiKeyRepo(pool)
 	blockedIPRepo := repository.NewBlockedIPRepo(pool)
+	messageRepo := repository.NewMessageRequestRepo(pool)
 	adminAuth := guard.NewAdminAuthenticator(issuer)
 
 	api := r.Group("/admin/api")
@@ -286,6 +287,9 @@ func mountAdminRoutes(r *gin.Engine) {
 	authed.POST("/blocked-ips", adminhandler.CreateBlockedIPHandler(blockedIPRepo))
 	authed.PATCH("/blocked-ips/:ip", adminhandler.UpdateBlockedIPHandler(blockedIPRepo))
 	authed.DELETE("/blocked-ips/:ip", adminhandler.DeleteBlockedIPHandler(blockedIPRepo))
+
+	// M4 — usage dashboard. Read-only aggregation over message_requests.
+	authed.GET("/usage", adminhandler.UsageHandler(messageRepo))
 
 	if web.Available() {
 		spa := web.SPAHandler("/admin")
