@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/jami1024/omnihub/internal/service/provider"
@@ -31,6 +32,18 @@ func NewAccountRepo(pool *pgxpool.Pool) *AccountRepo {
 
 // ErrAccountNotFound is returned when a single-row lookup misses.
 var ErrAccountNotFound = errors.New("account not found")
+
+// ErrAccountNameTaken is returned when an insert or rename collides
+// with the UNIQUE(name) constraint. Callers map it to a 409 so the
+// admin UI can flag the field rather than surfacing a raw DB error.
+var ErrAccountNameTaken = errors.New("account name already in use")
+
+// isUniqueViolation reports whether err is a Postgres unique-constraint
+// violation (SQLSTATE 23505).
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
 
 // ListEnabled returns every row with enabled = TRUE. Disabled accounts
 // are excluded so the resolver sees only routable upstreams.
@@ -237,10 +250,135 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
 	).Scan(&id)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return 0, ErrAccountNameTaken
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, ErrAccountNotFound
 		}
 		return 0, fmt.Errorf("insert account %q: %w", p.Name, err)
 	}
 	return id, nil
+}
+
+// GetByID fetches a single account by primary key, returning the row,
+// its enabled flag, and ErrAccountNotFound when no row matches.
+func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account, bool, error) {
+	const q = `
+        SELECT id, name, provider, enabled, weight, priority, cost_multiplier,
+               COALESCE(base_url, ''), credentials,
+               circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success
+          FROM accounts
+         WHERE id = $1`
+	var (
+		a                provider.Account
+		enabled          bool
+		credentialsRaw   []byte
+		multiplier       float64
+		failureThreshold *int
+		openDurationMs   *int64
+		halfOpenSuccess  *int
+	)
+	err := r.pool.QueryRow(ctx, q, id).Scan(
+		&a.ID, &a.Name, &a.Provider, &enabled,
+		&a.Weight, &a.Priority, &multiplier,
+		&a.BaseURL, &credentialsRaw,
+		&failureThreshold, &openDurationMs, &halfOpenSuccess,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, ErrAccountNotFound
+		}
+		return nil, false, fmt.Errorf("query account %d: %w", id, err)
+	}
+	a.CostMultiplier = multiplier
+	applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
+	if err := decodeCredentials(&a, credentialsRaw); err != nil {
+		return nil, false, err
+	}
+	return &a, enabled, nil
+}
+
+// UpdateParams carries the full set of mutable account columns. The
+// admin API submits every metadata field (a PUT-style replace), so the
+// repository performs no per-field defaulting. Credentials are the one
+// exception: a nil map leaves the stored credentials untouched (the
+// admin UI never reads secrets back, so an edit that doesn't re-enter
+// them must not wipe them). Circuit overrides follow the Insert rule —
+// nil writes NULL ("use the env-driven global default").
+type UpdateParams struct {
+	Name           string
+	Provider       string
+	Enabled        bool
+	Weight         int
+	Priority       int
+	CostMultiplier float64
+	BaseURL        string
+	Credentials    map[string]string
+
+	CircuitFailureThreshold *int
+	CircuitOpenDuration     *time.Duration
+	CircuitHalfOpenSuccess  *int
+}
+
+// Update replaces the mutable columns of the account identified by id.
+// Returns ErrAccountNotFound when no row matches and ErrAccountNameTaken
+// when the new name collides with another account.
+func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) error {
+	// nil credentials → pass SQL NULL so COALESCE keeps the existing
+	// JSONB. A non-nil (possibly empty) map is marshalled and replaces it.
+	var credentialsJSON []byte
+	if p.Credentials != nil {
+		b, err := json.Marshal(p.Credentials)
+		if err != nil {
+			return fmt.Errorf("encode credentials: %w", err)
+		}
+		credentialsJSON = b
+	}
+
+	var openDurationMs *int64
+	if p.CircuitOpenDuration != nil {
+		ms := p.CircuitOpenDuration.Milliseconds()
+		openDurationMs = &ms
+	}
+
+	const q = `
+        UPDATE accounts SET
+            name = $1, provider = $2, enabled = $3, weight = $4, priority = $5,
+            cost_multiplier = $6, base_url = NULLIF($7, ''),
+            credentials = COALESCE($8, credentials),
+            circuit_failure_threshold = $9, circuit_open_duration_ms = $10,
+            circuit_half_open_success = $11, updated_at = NOW()
+         WHERE id = $12`
+
+	tag, err := r.pool.Exec(ctx, q,
+		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
+		p.CostMultiplier, p.BaseURL, credentialsJSON,
+		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
+		id,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrAccountNameTaken
+		}
+		return fmt.Errorf("update account %d: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrAccountNotFound
+	}
+	return nil
+}
+
+// DeleteByID hard-deletes the account with the given primary key. The
+// admin API addresses accounts by id (a stable handle that survives
+// renames); the CLI's Delete-by-name stays for backward compatibility.
+func (r *AccountRepo) DeleteByID(ctx context.Context, id int64) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM accounts WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete account %d: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrAccountNotFound
+	}
+	return nil
 }

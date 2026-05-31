@@ -14,6 +14,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/jami1024/omnihub/internal/service/guard"
 )
 
 // writeError emits the canonical admin-API error envelope.
@@ -35,4 +37,14 @@ func writeBadRequest(c *gin.Context, msg string) {
 // writeInternal is a convenience for 500 with an "internal_error" code.
 func writeInternal(c *gin.Context, msg string) {
 	writeError(c, http.StatusInternalServerError, "internal_error", msg)
+}
+
+// adminActor returns the authenticated admin's username for audit log
+// lines, or "unknown" when the context carries no identity (e.g. a unit
+// test that exercises a handler without the AdminAuthenticator).
+func adminActor(c *gin.Context) string {
+	if u := guard.AdminUser(c); u != "" {
+		return u
+	}
+	return "unknown"
 }

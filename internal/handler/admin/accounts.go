@@ -1,0 +1,289 @@
+package admin
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/jami1024/omnihub/internal/repository"
+	"github.com/jami1024/omnihub/internal/service/provider"
+)
+
+// accountStore is the slice of repository.AccountRepo the account
+// handlers depend on. Narrowing it to an interface lets the unit tests
+// stand in a fake without a live Postgres connection.
+type accountStore interface {
+	ListAll(ctx context.Context) ([]*provider.Account, []bool, error)
+	GetByID(ctx context.Context, id int64) (*provider.Account, bool, error)
+	Insert(ctx context.Context, p repository.InsertParams) (int64, error)
+	Update(ctx context.Context, id int64, p repository.UpdateParams) error
+	DeleteByID(ctx context.Context, id int64) error
+}
+
+// accountDTO is the JSON shape returned to the SPA. It deliberately
+// omits credential VALUES — only the key names ride along
+// (credential_keys), so the browser learns which secrets are
+// configured ("api_key", "aws_region") without ever receiving them.
+// Credentials are write-only across the whole admin API.
+type accountDTO struct {
+	ID                      int64    `json:"id"`
+	Name                    string   `json:"name"`
+	Provider                string   `json:"provider"`
+	Enabled                 bool     `json:"enabled"`
+	Weight                  int      `json:"weight"`
+	Priority                int      `json:"priority"`
+	CostMultiplier          float64  `json:"cost_multiplier"`
+	BaseURL                 string   `json:"base_url"`
+	CredentialKeys          []string `json:"credential_keys"`
+	CircuitFailureThreshold *int     `json:"circuit_failure_threshold"`
+	CircuitOpenDurationMs   *int64   `json:"circuit_open_duration_ms"`
+	CircuitHalfOpenSuccess  *int     `json:"circuit_half_open_success"`
+}
+
+// toDTO projects a provider.Account (+ its enabled flag) onto the
+// redacted wire shape.
+func toDTO(a *provider.Account, enabled bool) accountDTO {
+	keys := make([]string, 0, len(a.Credentials))
+	for k := range a.Credentials {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys) // stable order so the UI doesn't reshuffle per request
+
+	var openMs *int64
+	if a.CircuitOpenDuration != nil {
+		ms := a.CircuitOpenDuration.Milliseconds()
+		openMs = &ms
+	}
+	return accountDTO{
+		ID:                      a.ID,
+		Name:                    a.Name,
+		Provider:                a.Provider,
+		Enabled:                 enabled,
+		Weight:                  a.Weight,
+		Priority:                a.Priority,
+		CostMultiplier:          a.CostMultiplier,
+		BaseURL:                 a.BaseURL,
+		CredentialKeys:          keys,
+		CircuitFailureThreshold: a.CircuitFailureThreshold,
+		CircuitOpenDurationMs:   openMs,
+		CircuitHalfOpenSuccess:  a.CircuitHalfOpenSuccess,
+	}
+}
+
+// accountInput is the create/update request body. Numeric defaults are
+// applied in the create path only; update is a full replace and the SPA
+// always re-submits every field. Credentials are optional on update
+// (omit to keep the stored secret) and required on create.
+type accountInput struct {
+	Name           string            `json:"name"`
+	Provider       string            `json:"provider"`
+	Enabled        *bool             `json:"enabled"`
+	Weight         *int              `json:"weight"`
+	Priority       *int              `json:"priority"`
+	CostMultiplier *float64          `json:"cost_multiplier"`
+	BaseURL        string            `json:"base_url"`
+	Credentials    map[string]string `json:"credentials"`
+
+	CircuitFailureThreshold *int   `json:"circuit_failure_threshold"`
+	CircuitOpenDurationMs   *int64 `json:"circuit_open_duration_ms"`
+	CircuitHalfOpenSuccess  *int   `json:"circuit_half_open_success"`
+}
+
+// circuitDuration converts the millisecond wire value into the
+// *time.Duration the repository expects.
+func (in *accountInput) circuitDuration() *time.Duration {
+	if in.CircuitOpenDurationMs == nil {
+		return nil
+	}
+	d := time.Duration(*in.CircuitOpenDurationMs) * time.Millisecond
+	return &d
+}
+
+// ListAccountsHandler returns GET /admin/api/accounts → {"accounts":[…]}.
+func ListAccountsHandler(store accountStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		accounts, enabled, err := store.ListAll(c.Request.Context())
+		if err != nil {
+			slog.Error("admin: list accounts failed", "err", err.Error())
+			writeInternal(c, "could not list accounts")
+			return
+		}
+		out := make([]accountDTO, len(accounts))
+		for i, a := range accounts {
+			out[i] = toDTO(a, enabled[i])
+		}
+		c.JSON(http.StatusOK, gin.H{"accounts": out})
+	}
+}
+
+// CreateAccountHandler handles POST /admin/api/accounts. Returns 201
+// with the created account (credentials redacted).
+func CreateAccountHandler(store accountStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var in accountInput
+		if err := c.ShouldBindJSON(&in); err != nil {
+			writeBadRequest(c, "invalid JSON: "+err.Error())
+			return
+		}
+		in.Name = strings.TrimSpace(in.Name)
+		in.Provider = strings.TrimSpace(in.Provider)
+		if in.Name == "" || in.Provider == "" {
+			writeBadRequest(c, "name and provider are required")
+			return
+		}
+		if len(in.Credentials) == 0 {
+			writeBadRequest(c, "credentials are required (at least api_key)")
+			return
+		}
+
+		params := repository.InsertParams{
+			Name:                    in.Name,
+			Provider:                in.Provider,
+			Enabled:                 valueOr(in.Enabled, true),
+			Weight:                  valueOr(in.Weight, 100),
+			Priority:                valueOr(in.Priority, 0),
+			CostMultiplier:          valueOr(in.CostMultiplier, 1.0),
+			BaseURL:                 strings.TrimSpace(in.BaseURL),
+			Credentials:             in.Credentials,
+			CircuitFailureThreshold: in.CircuitFailureThreshold,
+			CircuitOpenDuration:     in.circuitDuration(),
+			CircuitHalfOpenSuccess:  in.CircuitHalfOpenSuccess,
+		}
+
+		id, err := store.Insert(c.Request.Context(), params)
+		if err != nil {
+			if errors.Is(err, repository.ErrAccountNameTaken) {
+				writeError(c, http.StatusConflict, "name_taken",
+					"an account named "+in.Name+" already exists")
+				return
+			}
+			slog.Error("admin: create account failed", "err", err.Error())
+			writeInternal(c, "could not create account")
+			return
+		}
+
+		acct, enabled, err := store.GetByID(c.Request.Context(), id)
+		if err != nil {
+			// The row exists; a read-back failure is purely cosmetic.
+			slog.Error("admin: read-back after create failed", "id", id, "err", err.Error())
+			c.JSON(http.StatusCreated, gin.H{"id": id})
+			return
+		}
+		slog.Info("admin: account created", "id", id, "name", in.Name, "admin", adminActor(c))
+		c.JSON(http.StatusCreated, toDTO(acct, enabled))
+	}
+}
+
+// UpdateAccountHandler handles PATCH /admin/api/accounts/:id. The body
+// is a full metadata replace; omitting credentials keeps the stored
+// secret untouched.
+func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseIDParam(c)
+		if !ok {
+			return
+		}
+		var in accountInput
+		if err := c.ShouldBindJSON(&in); err != nil {
+			writeBadRequest(c, "invalid JSON: "+err.Error())
+			return
+		}
+		in.Name = strings.TrimSpace(in.Name)
+		in.Provider = strings.TrimSpace(in.Provider)
+		if in.Name == "" || in.Provider == "" {
+			writeBadRequest(c, "name and provider are required")
+			return
+		}
+		// An empty credentials object would wipe the secret; treat the
+		// "didn't touch it" case (nil) as keep, but reject an explicit
+		// empty map so the operator can't blank credentials by accident.
+		if in.Credentials != nil && len(in.Credentials) == 0 {
+			writeBadRequest(c, "credentials cannot be empty; omit the field to keep the existing secret")
+			return
+		}
+
+		params := repository.UpdateParams{
+			Name:                    in.Name,
+			Provider:                in.Provider,
+			Enabled:                 valueOr(in.Enabled, true),
+			Weight:                  valueOr(in.Weight, 100),
+			Priority:                valueOr(in.Priority, 0),
+			CostMultiplier:          valueOr(in.CostMultiplier, 1.0),
+			BaseURL:                 strings.TrimSpace(in.BaseURL),
+			Credentials:             in.Credentials,
+			CircuitFailureThreshold: in.CircuitFailureThreshold,
+			CircuitOpenDuration:     in.circuitDuration(),
+			CircuitHalfOpenSuccess:  in.CircuitHalfOpenSuccess,
+		}
+
+		if err := store.Update(c.Request.Context(), id, params); err != nil {
+			switch {
+			case errors.Is(err, repository.ErrAccountNotFound):
+				writeError(c, http.StatusNotFound, "not_found", "account not found")
+			case errors.Is(err, repository.ErrAccountNameTaken):
+				writeError(c, http.StatusConflict, "name_taken",
+					"an account named "+in.Name+" already exists")
+			default:
+				slog.Error("admin: update account failed", "id", id, "err", err.Error())
+				writeInternal(c, "could not update account")
+			}
+			return
+		}
+
+		acct, enabled, err := store.GetByID(c.Request.Context(), id)
+		if err != nil {
+			slog.Error("admin: read-back after update failed", "id", id, "err", err.Error())
+			writeInternal(c, "account updated but could not be re-read")
+			return
+		}
+		slog.Info("admin: account updated", "id", id, "name", in.Name, "admin", adminActor(c))
+		c.JSON(http.StatusOK, toDTO(acct, enabled))
+	}
+}
+
+// DeleteAccountHandler handles DELETE /admin/api/accounts/:id → 204.
+func DeleteAccountHandler(store accountStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseIDParam(c)
+		if !ok {
+			return
+		}
+		if err := store.DeleteByID(c.Request.Context(), id); err != nil {
+			if errors.Is(err, repository.ErrAccountNotFound) {
+				writeError(c, http.StatusNotFound, "not_found", "account not found")
+				return
+			}
+			slog.Error("admin: delete account failed", "id", id, "err", err.Error())
+			writeInternal(c, "could not delete account")
+			return
+		}
+		slog.Info("admin: account deleted", "id", id, "admin", adminActor(c))
+		c.Status(http.StatusNoContent)
+	}
+}
+
+// parseIDParam reads the :id path segment as an int64, writing a 400 and
+// returning ok=false on a malformed value.
+func parseIDParam(c *gin.Context) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeBadRequest(c, "invalid account id")
+		return 0, false
+	}
+	return id, true
+}
+
+// valueOr dereferences p, falling back to def when p is nil.
+func valueOr[T any](p *T, def T) T {
+	if p == nil {
+		return def
+	}
+	return *p
+}

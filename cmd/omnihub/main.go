@@ -252,6 +252,7 @@ func mountAdminRoutes(r *gin.Engine) {
 
 	issuer := admin.NewIssuer([]byte(secret), 24*time.Hour)
 	adminUserRepo := repository.NewAdminUserRepo(pool)
+	accountRepo := repository.NewAccountRepo(pool)
 	adminAuth := guard.NewAdminAuthenticator(issuer)
 
 	api := r.Group("/admin/api")
@@ -259,6 +260,14 @@ func mountAdminRoutes(r *gin.Engine) {
 
 	authed := api.Group("", adminAuth.Middleware())
 	authed.GET("/me", adminhandler.MeHandler())
+
+	// M2 — account management. Writes flow through the accounts table's
+	// NOTIFY trigger (migration 0006), so the in-memory account pool
+	// refreshes within milliseconds of any create/update/delete.
+	authed.GET("/accounts", adminhandler.ListAccountsHandler(accountRepo))
+	authed.POST("/accounts", adminhandler.CreateAccountHandler(accountRepo))
+	authed.PATCH("/accounts/:id", adminhandler.UpdateAccountHandler(accountRepo))
+	authed.DELETE("/accounts/:id", adminhandler.DeleteAccountHandler(accountRepo))
 
 	if web.Available() {
 		spa := web.SPAHandler("/admin")
