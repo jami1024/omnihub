@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Account management in the admin UI (M2 of the four-milestone web admin
+  work). Builds on the M1 skeleton with a full CRUD surface for upstream
+  provider accounts.
+  - New `/admin/api/accounts` endpoints behind the AdminAuthenticator:
+    list, create, update (PUT-style replace), and delete-by-id. Writes
+    flow through the accounts `NOTIFY` trigger (migration `0006`), so the
+    in-memory account pool refreshes within milliseconds.
+  - Credentials are write-only end to end: the API returns only the
+    configured key NAMES (`credential_keys`), never secret values, and an
+    edit that omits credentials keeps the stored secret untouched
+    (`COALESCE` in the `UPDATE`). The `UNIQUE(name)` collision maps to a
+    `409 name_taken` so the UI can flag the field.
+  - New React Accounts page (table + create/edit modal +
+    delete-with-confirm) wired through TanStack Query, plus a shared
+    Layout with section nav. Also fixes the M1 frontend build: adds
+    `@types/node` for `vite.config.ts` and stops `tsc -b` from emitting
+    stray config artifacts into the tree.
 - Embedded React admin UI scaffolding (M1 of the four-milestone web
   admin work). This commit ships the skeleton — login, auth, and the
   `/admin/api/*` plumbing — that the next milestones (M2 accounts, M3
