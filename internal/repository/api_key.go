@@ -27,6 +27,13 @@ func NewApiKeyRepo(pool *pgxpool.Pool) *ApiKeyRepo {
 // ErrApiKeyNotFound is returned when a single-row lookup misses.
 var ErrApiKeyNotFound = errors.New("api key not found")
 
+// ErrApiKeyNameTaken is returned when an insert or rename collides with
+// the UNIQUE(name) constraint. The admin API maps it to a 409 so the UI
+// can flag the field. (The key_hash UNIQUE constraint can also raise
+// 23505, but admin-created keys are generated from 32 random bytes, so
+// a hash collision is not a realistic outcome of normal use.)
+var ErrApiKeyNameTaken = errors.New("api key name already in use")
+
 // ListEnabled returns every enabled key ready for the in-memory
 // pool. Disabled keys are excluded so the auth guard cannot
 // accidentally authenticate someone whose key was revoked.
@@ -141,12 +148,115 @@ func (r *ApiKeyRepo) Insert(ctx context.Context, p ApiKeyInsertParams) (int64, e
 		p.DailyUSDLimit, p.RPMLimit, allowedJSON,
 	).Scan(&id)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return 0, ErrApiKeyNameTaken
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, ErrApiKeyNotFound
 		}
 		return 0, fmt.Errorf("insert api_key %q: %w", p.Name, err)
 	}
 	return id, nil
+}
+
+// GetByID fetches a single key by primary key, with its enabled flag and
+// metadata. The cleartext value and hash are not part of the admin
+// surface, so callers project only what the UI may see.
+func (r *ApiKeyRepo) GetByID(ctx context.Context, id int64) (*apikey.Key, error) {
+	const q = `
+        SELECT id, name, key_hash, COALESCE(label, ''), enabled,
+               daily_usd_limit, rpm_limit, allowed_models
+          FROM api_keys
+         WHERE id = $1`
+	var (
+		k           apikey.Key
+		enabled     bool
+		allowedJSON []byte
+		dailyLimit  *float64
+		rpmLimit    *int
+	)
+	err := r.pool.QueryRow(ctx, q, id).Scan(
+		&k.ID, &k.Name, &k.Hash, &k.Label, &enabled,
+		&dailyLimit, &rpmLimit, &allowedJSON,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrApiKeyNotFound
+		}
+		return nil, fmt.Errorf("query api_key %d: %w", id, err)
+	}
+	k.Enabled = enabled
+	k.DailyUSDLimit = dailyLimit
+	k.RPMLimit = rpmLimit
+	if err := decodeAllowedModels(&k, allowedJSON); err != nil {
+		return nil, err
+	}
+	return &k, nil
+}
+
+// ApiKeyUpdateParams carries the mutable metadata of a key. The key
+// value (and thus key_hash) is deliberately immutable — rotating a
+// secret is a delete + create, never an in-place edit — so it is absent
+// here. Nil limit pointers write NULL ("no limit"); a nil/empty
+// AllowedModels writes NULL ("all models").
+type ApiKeyUpdateParams struct {
+	Name          string
+	Label         string
+	Enabled       bool
+	DailyUSDLimit *float64
+	RPMLimit      *int
+	AllowedModels []string
+}
+
+// UpdateMeta replaces the mutable columns of the key identified by id.
+// Returns ErrApiKeyNotFound when no row matches and ErrApiKeyNameTaken
+// when the new name collides with another key.
+func (r *ApiKeyRepo) UpdateMeta(ctx context.Context, id int64, p ApiKeyUpdateParams) error {
+	var allowedJSON []byte
+	if len(p.AllowedModels) > 0 {
+		b, err := json.Marshal(p.AllowedModels)
+		if err != nil {
+			return fmt.Errorf("encode allowed_models: %w", err)
+		}
+		allowedJSON = b
+	}
+
+	const q = `
+        UPDATE api_keys SET
+            name = $1, label = NULLIF($2, ''), enabled = $3,
+            daily_usd_limit = $4, rpm_limit = $5, allowed_models = $6,
+            updated_at = NOW()
+         WHERE id = $7`
+
+	tag, err := r.pool.Exec(ctx, q,
+		p.Name, p.Label, p.Enabled,
+		p.DailyUSDLimit, p.RPMLimit, allowedJSON,
+		id,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrApiKeyNameTaken
+		}
+		return fmt.Errorf("update api_key %d: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrApiKeyNotFound
+	}
+	return nil
+}
+
+// DeleteByID hard-deletes the key with the given primary key. The admin
+// API addresses keys by id (stable across renames); the CLI's
+// Delete-by-name stays for backward compatibility.
+func (r *ApiKeyRepo) DeleteByID(ctx context.Context, id int64) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM api_keys WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete api_key %d: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrApiKeyNotFound
+	}
+	return nil
 }
 
 // SetEnabled toggles the enabled flag on the named key.

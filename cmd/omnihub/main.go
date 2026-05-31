@@ -253,6 +253,7 @@ func mountAdminRoutes(r *gin.Engine) {
 	issuer := admin.NewIssuer([]byte(secret), 24*time.Hour)
 	adminUserRepo := repository.NewAdminUserRepo(pool)
 	accountRepo := repository.NewAccountRepo(pool)
+	apiKeyRepo := repository.NewApiKeyRepo(pool)
 	adminAuth := guard.NewAdminAuthenticator(issuer)
 
 	api := r.Group("/admin/api")
@@ -268,6 +269,14 @@ func mountAdminRoutes(r *gin.Engine) {
 	authed.POST("/accounts", adminhandler.CreateAccountHandler(accountRepo))
 	authed.PATCH("/accounts/:id", adminhandler.UpdateAccountHandler(accountRepo))
 	authed.DELETE("/accounts/:id", adminhandler.DeleteAccountHandler(accountRepo))
+
+	// M3 — virtual key management. Writes flow through the api_keys
+	// NOTIFY trigger (migration 0008), so the in-memory key pool refreshes
+	// within milliseconds. The cleartext key is returned only on create.
+	authed.GET("/keys", adminhandler.ListKeysHandler(apiKeyRepo))
+	authed.POST("/keys", adminhandler.CreateKeyHandler(apiKeyRepo))
+	authed.PATCH("/keys/:id", adminhandler.UpdateKeyHandler(apiKeyRepo))
+	authed.DELETE("/keys/:id", adminhandler.DeleteKeyHandler(apiKeyRepo))
 
 	if web.Available() {
 		spa := web.SPAHandler("/admin")
