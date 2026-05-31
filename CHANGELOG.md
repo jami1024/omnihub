@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Virtual key management in the admin UI (M3 of the four-milestone web
+  admin work).
+  - New `/admin/api/keys` endpoints behind the AdminAuthenticator: list,
+    create, update (metadata replace), and delete-by-id. Writes flow
+    through the api_keys `NOTIFY` trigger (migration `0008`), so the
+    in-memory key pool refreshes within milliseconds.
+  - Keys are generated server-side from 32 random bytes; the cleartext is
+    returned exactly once in the create response and is unrecoverable
+    afterwards (only its sha256 hash is stored, never the value). The key
+    value is immutable — editing touches metadata only, so rotating a
+    secret is a delete + create. The `UNIQUE(name)` collision maps to a
+    `409 name_taken`.
+  - New React Keys page (table + create/edit modal + delete-with-confirm)
+    with a one-time cleartext reveal dialog (copy-to-clipboard) after
+    create. The shared Modal and table primitives were factored out of
+    the Accounts page so both pages reuse them.
 - Account management in the admin UI (M2 of the four-milestone web admin
   work). Builds on the M1 skeleton with a full CRUD surface for upstream
   provider accounts.

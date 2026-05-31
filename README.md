@@ -129,15 +129,16 @@ curl https://${OMNIHUB_DOMAIN}/v1/chat/completions \
 
 The same virtual keys, rate limits, and budgets apply to both endpoints.
 
-### Web admin UI (M2 — account management)
+### Web admin UI (M3 — account & key management)
 
 The gateway ships an embedded React admin UI (Vite + Tailwind +
 TanStack Query) reachable at `/admin`. M1 delivered the login skeleton;
-M2 adds the **Accounts** page — list, create, edit, and delete upstream
-provider accounts, with credentials handled write-only (the browser
-only ever learns which credential keys are set, never their values).
-Key management (M3) and the dashboard + blocked-IPs + circuit events
-(M4) land in the next milestones.
+M2 added the **Accounts** page (list/create/edit/delete upstream
+provider accounts, credentials write-only); M3 adds the **Keys** page
+for virtual API keys, with the same write-only treatment of secrets —
+keys are generated server-side and the cleartext is shown exactly once,
+right after creation. The dashboard + blocked-IPs + circuit events (M4)
+land in the final milestone.
 
 Set a JWT signing secret and create the first admin (any UTF-8 string
 will do; rotate by changing the env value and re-issuing tokens):
