@@ -3,6 +3,7 @@ import { useAuth } from './lib/auth'
 import { LoginPage } from './pages/Login'
 import { DashboardPage } from './pages/Dashboard'
 import { AccountsPage } from './pages/Accounts'
+import { KeysPage } from './pages/Keys'
 
 export default function App() {
   return (
@@ -21,6 +22,14 @@ export default function App() {
         element={
           <Protected>
             <AccountsPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/keys"
+        element={
+          <Protected>
+            <KeysPage />
           </Protected>
         }
       />

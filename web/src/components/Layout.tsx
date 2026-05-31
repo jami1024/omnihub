@@ -14,6 +14,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <nav className="flex items-center gap-1 text-sm">
             <NavItem to="/">Dashboard</NavItem>
             <NavItem to="/accounts">Accounts</NavItem>
+            <NavItem to="/keys">Keys</NavItem>
           </nav>
         </div>
         <div className="flex items-center gap-3 text-sm text-zinc-500">

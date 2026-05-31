@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Layout } from '../components/Layout'
+import { Modal } from '../components/Modal'
+import { StatusBadge, Td, Th } from '../components/Table'
 import { AccountForm } from '../components/AccountForm'
 import { ApiError } from '../lib/api'
 import {
@@ -154,46 +156,3 @@ export function AccountsPage() {
   )
 }
 
-function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string
-  onClose: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-10 flex items-start justify-center overflow-y-auto bg-black/40 p-6"
-      onClick={onClose}
-    >
-      <div
-        className="mt-10 w-full max-w-2xl rounded-lg border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="mb-4 text-lg font-semibold">{title}</h3>
-        {children}
-      </div>
-    </div>
-  )
-}
-
-function StatusBadge({ enabled }: { enabled: boolean }) {
-  return enabled ? (
-    <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/40 dark:text-green-400">
-      Enabled
-    </span>
-  ) : (
-    <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800">
-      Disabled
-    </span>
-  )
-}
-
-function Th({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <th className={`px-4 py-2 font-medium ${className}`}>{children}</th>
-}
-function Td({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <td className={`px-4 py-2.5 ${className}`}>{children}</td>
-}
