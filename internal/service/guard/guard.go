@@ -31,6 +31,9 @@ const (
 	CtxKeyUserAgent = "omnihub.user_agent"  // string — User-Agent header verbatim
 	CtxKeyAPIKeyID  = "omnihub.api_key_id"  // int64 — DB primary key for the auth'd virtual key
 	CtxKeyAPIKey    = "omnihub.api_key"     // *apikey.Key — full record (limits, allowed_models, ...)
+
+	CtxKeyAdminID   = "omnihub.admin_id"   // int64 — admin_users.id (web UI auth)
+	CtxKeyAdminUser = "omnihub.admin_user" // string — admin username for audit logs
 )
 
 // KeyName returns the virtual API key label set by the Auth guard, or
@@ -112,3 +115,20 @@ func APIKey(c *gin.Context) *apikey.Key {
 	}
 	return k
 }
+
+// AdminID returns the admin_users.id set by AdminAuthenticator, or 0
+// when the request did not pass admin auth.
+func AdminID(c *gin.Context) int64 {
+	v, ok := c.Get(CtxKeyAdminID)
+	if !ok {
+		return 0
+	}
+	id, ok := v.(int64)
+	if !ok {
+		return 0
+	}
+	return id
+}
+
+// AdminUser returns the username carried in the admin JWT.
+func AdminUser(c *gin.Context) string { return c.GetString(CtxKeyAdminUser) }

@@ -19,9 +19,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/jami1024/omnihub/internal/db"
+	adminhandler "github.com/jami1024/omnihub/internal/handler/admin"
 	"github.com/jami1024/omnihub/internal/handler/gateway"
 	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/account"
+	"github.com/jami1024/omnihub/internal/service/admin"
 	"github.com/jami1024/omnihub/internal/service/apikey"
 	"github.com/jami1024/omnihub/internal/service/blockedip"
 	"github.com/jami1024/omnihub/internal/service/forward"
@@ -36,6 +38,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/openai"
 	"github.com/jami1024/omnihub/internal/service/resolver"
 	"github.com/jami1024/omnihub/internal/service/session"
+	"github.com/jami1024/omnihub/internal/web"
 )
 
 // Build info populated by the linker via -ldflags (see Makefile).
@@ -71,6 +74,9 @@ func main() {
 			return
 		case "key":
 			runKeyCommand(os.Args[2:])
+			return
+		case "admin":
+			runAdminCommand(os.Args[2:])
 			return
 		case "help", "-h", "--help":
 			printUsage(os.Stdout)
@@ -212,8 +218,62 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 	r.GET("/version", handleVersion)
 
 	mountGatewayRoutes(r, registry)
+	mountAdminRoutes(r)
 
 	return r
+}
+
+// mountAdminRoutes wires the web admin UI: /admin/api/* JSON endpoints
+// (login + auth-guarded data routes) plus the embedded React SPA served
+// from the same binary under /admin/*.
+//
+// The admin surface is gated on two env-driven preconditions:
+//
+//   - OMNIHUB_ADMIN_JWT_SECRET must be set. Without a secret the issuer
+//     would sign with no key, so we refuse to mount instead of crashing
+//     later. Operators see a single startup warn and the gateway keeps
+//     serving /v1/messages normally.
+//   - A database must be configured (the admin_users table is the source
+//     of truth for login). Log-only deployments skip the admin UI.
+//
+// The SPA is served via gin's NoRoute fallback rather than a wildcard
+// route because /admin/api/* already lives under /admin/ and gin
+// disallows a catch-all sharing a prefix with concrete routes.
+func mountAdminRoutes(r *gin.Engine) {
+	secret := os.Getenv("OMNIHUB_ADMIN_JWT_SECRET")
+	if secret == "" {
+		slog.Warn("/admin disabled: OMNIHUB_ADMIN_JWT_SECRET not set; the web UI will not authenticate")
+		return
+	}
+	if pool == nil {
+		slog.Warn("/admin disabled: no database configured (set OMNIHUB_DATABASE_URL)")
+		return
+	}
+
+	issuer := admin.NewIssuer([]byte(secret), 24*time.Hour)
+	adminUserRepo := repository.NewAdminUserRepo(pool)
+	adminAuth := guard.NewAdminAuthenticator(issuer)
+
+	api := r.Group("/admin/api")
+	api.POST("/login", adminhandler.LoginHandler(adminUserRepo, issuer))
+
+	authed := api.Group("", adminAuth.Middleware())
+	authed.GET("/me", adminhandler.MeHandler())
+
+	if web.Available() {
+		spa := web.SPAHandler("/admin")
+		r.NoRoute(func(c *gin.Context) {
+			if strings.HasPrefix(c.Request.URL.Path, "/admin") {
+				spa(c)
+				return
+			}
+			c.AbortWithStatus(http.StatusNotFound)
+		})
+		slog.Info("admin UI mounted", "path", "/admin", "api_paths", []string{"/admin/api/login", "/admin/api/me"})
+	} else {
+		slog.Info("admin API mounted (devui build, SPA served by external Vite dev server)",
+			"api_paths", []string{"/admin/api/login", "/admin/api/me"})
+	}
 }
 
 // mountGatewayRoutes wires the LLM forwarding endpoints onto r.

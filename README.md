@@ -129,6 +129,39 @@ curl https://${OMNIHUB_DOMAIN}/v1/chat/completions \
 
 The same virtual keys, rate limits, and budgets apply to both endpoints.
 
+### Web admin UI (M1 — login skeleton)
+
+The gateway ships an embedded React admin UI (Vite + Tailwind +
+TanStack Query) reachable at `/admin`. M1 is the login skeleton —
+account / key / dashboard pages land in the next milestones — but the
+auth path is end-to-end functional now.
+
+Set a JWT signing secret and create the first admin (any UTF-8 string
+will do; rotate by changing the env value and re-issuing tokens):
+
+```bash
+export OMNIHUB_ADMIN_JWT_SECRET="$(openssl rand -hex 32)"
+
+docker exec -it omnihub-prod-gateway \
+  omnihub admin add --username=root      # prompts for the password
+```
+
+Browse to `https://${OMNIHUB_DOMAIN}/admin`, log in, and you land on
+the protected layout (currently a placeholder). The token is a 24h
+HS256 JWT stored in `localStorage`; signing out clears it.
+
+Without `OMNIHUB_ADMIN_JWT_SECRET`, `/admin` is not mounted and the
+gateway logs a single warning at startup — `/v1/messages` and
+`/v1/chat/completions` keep serving traffic regardless.
+
+Local development of the React app (with hot reload):
+
+```bash
+make web-dev                              # Vite dev on :5173, proxies /admin/api → :8080
+go run ./cmd/omnihub                      # backend on :8080 in another terminal
+# now open http://localhost:5173/admin/
+```
+
 ## 📐 Architecture (preview)
 
 ```

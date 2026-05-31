@@ -9,6 +9,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Embedded React admin UI scaffolding (M1 of the four-milestone web
+  admin work). This commit ships the skeleton — login, auth, and the
+  `/admin/api/*` plumbing — that the next milestones (M2 accounts, M3
+  keys, M4 dashboard + blocked-IPs + circuit events) build on top of.
+  - New `admin_users` table (migration `0012_admin_users.sql`) with
+    bcrypt-hashed passwords. Deliberately distinct from `api_keys`
+    (which authenticates gateway traffic) — admin login is a separate
+    identity surface with its own CRUD path. No NOTIFY trigger here
+    because login does a live DB lookup; volume is low enough that
+    the cache-coherency machinery isn't worth its weight.
+  - New `omnihub admin add/list/enable/disable/passwd/delete` CLI
+    subcommand mirroring `omnihub key`, with hidden-echo password
+    prompts (`golang.org/x/term`) and a `--password` flag for
+    scripted bootstrap.
+  - New `internal/service/admin` package (User struct, bcrypt
+    wrappers, and a small stdlib-only HS256 JWT issuer/verifier with
+    explicit `alg=HS256` enforcement — `alg=none` downgrade attempts
+    fail with `invalid_token`). Default token TTL is 24h.
+  - New `internal/service/guard/admin_auth.go` AdminAuthenticator
+    middleware that reads `Authorization: Bearer <jwt>`, sets
+    `CtxKeyAdminID` + `CtxKeyAdminUser`, and returns the canonical
+    `{error:{message,type,code}}` envelope on failure (the same shape
+    the admin API uses everywhere).
+  - New `/admin/api/login` (open) and `/admin/api/me`
+    (AdminAuthenticator-guarded) endpoints under
+    `internal/handler/admin`. Wrong-password / disabled / unknown-user
+    failures all return the same `invalid_credentials` envelope so
+    attackers can't enumerate admin usernames.
+  - New `internal/web` package with build-tag-gated `go:embed`:
+    `embed_on.go` (default) bundles the React build; `embed_off.go`
+    (`-tags devui`) exposes an empty FS so Vite's dev server takes
+    over while iterating. The `SPAHandler` is mounted as gin's
+    `NoRoute` fallback because `/admin/api/*` already lives under
+    `/admin/` and gin disallows a catch-all sharing a prefix with
+    concrete routes.
+  - New `web/` directory with the Vite + React 18 + TypeScript +
+    Tailwind + TanStack Query + react-router-dom v7 frontend. Vite's
+    `outDir` points at `internal/web/dist` so `go build` picks the
+    bundle up directly. `base: '/admin/'` ensures all asset URLs are
+    prefixed correctly when served from a subpath.
+  - Dockerfile gains a `FROM node:22-alpine AS frontend` stage that
+    runs `npm install && npm run build`; the Go stage `COPY`s the
+    bundle into `internal/web/dist` before `go build`. Makefile gains
+    `web-install`, `web-build`, `web-dev`, `web-typecheck` targets;
+    `make build` now runs the frontend stage first (skip with
+    `WEB_BUILD=0` for fast Go-only iteration).
+  - The admin mount is gated on two env preconditions: a non-empty
+    `OMNIHUB_ADMIN_JWT_SECRET` (otherwise the issuer would sign with
+    no key) and a configured database. Operators see a single startup
+    warn line and the gateway keeps serving `/v1/messages` normally.
+
 - OpenAI / DeepSeek pricing in the default price table. The previous
   commit landed the OpenAI entry but left these requests recording
   `cost = NULL` because no model in the table matched. This adds
