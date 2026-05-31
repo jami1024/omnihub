@@ -58,9 +58,6 @@ func (r *AccountHealthEventRepo) Insert(ctx context.Context, ev AccountHealthEve
 // ListRecent returns the most-recent N transitions for accountID,
 // newest first. Used by admin tooling ("why did this account flap?").
 func (r *AccountHealthEventRepo) ListRecent(ctx context.Context, accountID int64, limit int) ([]AccountHealthEvent, error) {
-	if limit <= 0 {
-		limit = 50
-	}
 	rows, err := r.pool.Query(ctx, `
         SELECT created_at, account_id, account_name,
                from_state, to_state, failure_count, reason
@@ -68,13 +65,48 @@ func (r *AccountHealthEventRepo) ListRecent(ctx context.Context, accountID int64
         WHERE account_id = $1
         ORDER BY created_at DESC
         LIMIT $2`,
-		accountID, limit,
+		accountID, clampEventLimit(limit),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("account_health_events list: %w", err)
 	}
-	defer rows.Close()
+	return scanHealthEvents(rows)
+}
 
+// ListRecentAll returns the most-recent N transitions across every
+// account, newest first — the global flap feed for the admin dashboard.
+func (r *AccountHealthEventRepo) ListRecentAll(ctx context.Context, limit int) ([]AccountHealthEvent, error) {
+	rows, err := r.pool.Query(ctx, `
+        SELECT created_at, account_id, account_name,
+               from_state, to_state, failure_count, reason
+        FROM account_health_events
+        ORDER BY created_at DESC
+        LIMIT $1`,
+		clampEventLimit(limit),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("account_health_events list all: %w", err)
+	}
+	return scanHealthEvents(rows)
+}
+
+func clampEventLimit(limit int) int {
+	if limit <= 0 {
+		return 50
+	}
+	if limit > 500 {
+		return 500
+	}
+	return limit
+}
+
+func scanHealthEvents(rows interface {
+	Next() bool
+	Scan(...any) error
+	Err() error
+	Close()
+}) ([]AccountHealthEvent, error) {
+	defer rows.Close()
 	var out []AccountHealthEvent
 	for rows.Next() {
 		var ev AccountHealthEvent

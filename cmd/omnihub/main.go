@@ -217,8 +217,13 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 	r.GET("/readyz", handleReady)
 	r.GET("/version", handleVersion)
 
-	mountGatewayRoutes(r, registry)
-	mountAdminRoutes(r)
+	// mountGatewayRoutes builds the in-memory circuit-breaker Tracker;
+	// hand it to the admin routes so the dashboard can read live breaker
+	// state and reset it. It is nil when the gateway is disabled (no
+	// accounts / no DB), and the admin circuit handlers treat nil as
+	// "circuit data unavailable".
+	tracker := mountGatewayRoutes(r, registry)
+	mountAdminRoutes(r, tracker)
 
 	return r
 }
@@ -239,7 +244,7 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 // The SPA is served via gin's NoRoute fallback rather than a wildcard
 // route because /admin/api/* already lives under /admin/ and gin
 // disallows a catch-all sharing a prefix with concrete routes.
-func mountAdminRoutes(r *gin.Engine) {
+func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker) {
 	secret := os.Getenv("OMNIHUB_ADMIN_JWT_SECRET")
 	if secret == "" {
 		slog.Warn("/admin disabled: OMNIHUB_ADMIN_JWT_SECRET not set; the web UI will not authenticate")
@@ -256,7 +261,17 @@ func mountAdminRoutes(r *gin.Engine) {
 	apiKeyRepo := repository.NewApiKeyRepo(pool)
 	blockedIPRepo := repository.NewBlockedIPRepo(pool)
 	messageRepo := repository.NewMessageRequestRepo(pool)
+	healthEventRepo := repository.NewAccountHealthEventRepo(pool)
 	adminAuth := guard.NewAdminAuthenticator(issuer)
+
+	// A nil *health.Tracker (gateway disabled) must reach the handlers as
+	// a nil interface, not a non-nil interface wrapping a nil pointer —
+	// otherwise the handlers' nil check wouldn't fire and Snapshot/Reset
+	// would panic. Only assign when the tracker actually exists.
+	var circuitTracker adminhandler.CircuitTracker
+	if tracker != nil {
+		circuitTracker = tracker
+	}
 
 	api := r.Group("/admin/api")
 	api.POST("/login", adminhandler.LoginHandler(adminUserRepo, issuer))
@@ -291,6 +306,12 @@ func mountAdminRoutes(r *gin.Engine) {
 	// M4 — usage dashboard. Read-only aggregation over message_requests.
 	authed.GET("/usage", adminhandler.UsageHandler(messageRepo))
 
+	// M4 — circuit-breaker health. Live state comes from the in-memory
+	// tracker; the transition feed is read from account_health_events.
+	authed.GET("/circuit", adminhandler.CircuitStatusHandler(circuitTracker, accountRepo))
+	authed.GET("/circuit/events", adminhandler.CircuitEventsHandler(healthEventRepo))
+	authed.POST("/accounts/:id/reset-breaker", adminhandler.ResetBreakerHandler(circuitTracker))
+
 	if web.Available() {
 		spa := web.SPAHandler("/admin")
 		r.NoRoute(func(c *gin.Context) {
@@ -317,10 +338,10 @@ func mountAdminRoutes(r *gin.Engine) {
 // The operator is expected to add at least one row to the accounts
 // table before the gateway can serve traffic. See the README for the
 // SQL snippets; a CLI / admin API will follow.
-func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
+func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Tracker {
 	if accountPool == nil {
 		slog.Error("/v1/messages disabled: no database configured; set OMNIHUB_DATABASE_URL and add accounts to the accounts table")
-		return
+		return nil
 	}
 	if accountPool.Size() == 0 {
 		slog.Error("/v1/messages disabled: accounts table is empty. " +
@@ -332,7 +353,7 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 			"  INSERT INTO accounts (name, provider, credentials) VALUES (\n" +
 			"      'my-cp', 'claude-platform',\n" +
 			"      '{\"api_key\":\"sk-aws-...\",\"aws_region\":\"us-east-1\",\"workspace_id\":\"ws_...\"}'::jsonb);")
-		return
+		return nil
 	}
 
 	var auth *guard.Authenticator
@@ -434,6 +455,7 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) {
 		"circuit_half_open_success", healthCfg.HalfOpenSuccessThreshold,
 		"session_stickiness", stickyDesc,
 	)
+	return tracker
 }
 
 // configureTrustedProxies reads OMNIHUB_TRUSTED_PROXIES (comma-
