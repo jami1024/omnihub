@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import { LoginPage } from './pages/Login'
 import { DashboardPage } from './pages/Dashboard'
+import { AccountsPage } from './pages/Accounts'
 
 export default function App() {
   return (
@@ -12,6 +13,14 @@ export default function App() {
         element={
           <Protected>
             <DashboardPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/accounts"
+        element={
+          <Protected>
+            <AccountsPage />
           </Protected>
         }
       />
