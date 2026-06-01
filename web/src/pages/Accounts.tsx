@@ -60,33 +60,33 @@ export function AccountsPage() {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h2 className="text-xl font-semibold">Accounts</h2>
-            <p className="text-sm text-zinc-500">Upstream provider accounts the gateway routes through.</p>
+            <p className="text-sm text-muted">Upstream provider accounts the gateway routes through.</p>
           </div>
           <button
             onClick={openNew}
-            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            className="btn btn-primary"
           >
             New account
           </button>
         </div>
 
-        {isLoading && <p className="text-sm text-zinc-500">Loading…</p>}
+        {isLoading && <p className="text-sm text-muted">Loading…</p>}
         {error && (
-          <p className="text-sm text-red-600 dark:text-red-400">
+          <p className="text-sm text-danger">
             {error instanceof ApiError ? error.message : 'Could not load accounts.'}
           </p>
         )}
 
         {accounts && accounts.length === 0 && (
-          <div className="rounded-lg border border-dashed border-zinc-300 p-10 text-center text-sm text-zinc-500 dark:border-zinc-700">
+          <div className="rounded-xl border border-dashed border-line-strong p-10 text-center text-sm text-muted">
             No accounts yet. Create one to start routing traffic.
           </div>
         )}
 
         {accounts && accounts.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+          <div className="overflow-x-auto rounded-xl border border-line bg-surface">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-zinc-200 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900">
+              <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-muted">
                 <tr>
                   <Th>Name</Th>
                   <Th>Provider</Th>
@@ -98,31 +98,31 @@ export function AccountsPage() {
                   <Th className="text-right">Actions</Th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              <tbody className="divide-y divide-line">
                 {accounts.map((a) => (
-                  <tr key={a.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50">
+                  <tr key={a.id} className="hover:bg-surface-2">
                     <Td className="font-medium">{a.name}</Td>
-                    <Td className="text-zinc-500">{a.provider}</Td>
+                    <Td className="text-muted">{a.provider}</Td>
                     <Td>
                       <StatusBadge enabled={a.enabled} />
                     </Td>
                     <Td className="text-right tabular-nums">{a.weight}</Td>
                     <Td className="text-right tabular-nums">{a.priority}</Td>
                     <Td className="text-right tabular-nums">{a.cost_multiplier}</Td>
-                    <Td className="text-zinc-500">
+                    <Td className="text-muted">
                       {a.credential_keys.length > 0 ? a.credential_keys.join(', ') : '—'}
                     </Td>
                     <Td className="text-right">
                       <button
                         onClick={() => openEdit(a)}
-                        className="mr-3 text-zinc-600 hover:underline dark:text-zinc-300"
+                        className="mr-3 text-muted hover:text-ink hover:underline"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => handleDelete(a)}
                         disabled={del.isPending}
-                        className="text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
+                        className="btn-danger hover:underline disabled:opacity-50"
                       >
                         Delete
                       </button>
@@ -135,7 +135,7 @@ export function AccountsPage() {
         )}
 
         {del.error && (
-          <p className="mt-3 text-sm text-red-600 dark:text-red-400">
+          <p className="mt-3 text-sm text-danger">
             {del.error instanceof ApiError ? del.error.message : 'Delete failed.'}
           </p>
         )}

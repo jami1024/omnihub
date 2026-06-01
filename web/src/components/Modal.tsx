@@ -1,6 +1,8 @@
-// Modal is the shared centered dialog used by the management pages:
-// a dimmed backdrop that closes on click, with the panel stopping
-// propagation so clicks inside don't dismiss it.
+import { useEffect } from 'react'
+
+// Modal is the shared centered dialog used by the management pages: a
+// dimmed, lightly blurred backdrop that closes on click or Esc, with the
+// panel stopping propagation so clicks inside don't dismiss it.
 export function Modal({
   title,
   onClose,
@@ -10,16 +12,27 @@ export function Modal({
   onClose: () => void
   children: React.ReactNode
 }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   return (
     <div
-      className="fixed inset-0 z-10 flex items-start justify-center overflow-y-auto bg-black/40 p-6"
+      className="animate-overlay-in fixed inset-0 z-30 flex items-start justify-center overflow-y-auto bg-black/40 p-6 backdrop-blur-sm"
       onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
     >
       <div
-        className="mt-10 w-full max-w-2xl rounded-lg border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
+        className="animate-modal-in mt-[8vh] w-full max-w-2xl rounded-xl border border-line bg-surface p-6 shadow-panel"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-4 text-lg font-semibold">{title}</h3>
+        <h3 className="mb-4 text-lg font-semibold tracking-tight">{title}</h3>
         {children}
       </div>
     </div>

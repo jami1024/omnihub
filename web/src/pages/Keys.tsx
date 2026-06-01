@@ -69,33 +69,33 @@ export function KeysPage() {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h2 className="text-xl font-semibold">API keys</h2>
-            <p className="text-sm text-zinc-500">Virtual keys clients use to authenticate to the gateway.</p>
+            <p className="text-sm text-muted">Virtual keys clients use to authenticate to the gateway.</p>
           </div>
           <button
             onClick={openNew}
-            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            className="btn btn-primary"
           >
             New key
           </button>
         </div>
 
-        {isLoading && <p className="text-sm text-zinc-500">Loading…</p>}
+        {isLoading && <p className="text-sm text-muted">Loading…</p>}
         {error && (
-          <p className="text-sm text-red-600 dark:text-red-400">
+          <p className="text-sm text-danger">
             {error instanceof ApiError ? error.message : 'Could not load keys.'}
           </p>
         )}
 
         {keys && keys.length === 0 && (
-          <div className="rounded-lg border border-dashed border-zinc-300 p-10 text-center text-sm text-zinc-500 dark:border-zinc-700">
+          <div className="rounded-xl border border-dashed border-line-strong p-10 text-center text-sm text-muted">
             No keys yet. Create one to let a client authenticate.
           </div>
         )}
 
         {keys && keys.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+          <div className="overflow-x-auto rounded-xl border border-line bg-surface">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-zinc-200 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900">
+              <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-muted">
                 <tr>
                   <Th>Name</Th>
                   <Th>Label</Th>
@@ -106,11 +106,11 @@ export function KeysPage() {
                   <Th className="text-right">Actions</Th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              <tbody className="divide-y divide-line">
                 {keys.map((k) => (
-                  <tr key={k.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50">
+                  <tr key={k.id} className="hover:bg-surface-2">
                     <Td className="font-medium">{k.name}</Td>
-                    <Td className="text-zinc-500">{k.label || '—'}</Td>
+                    <Td className="text-muted">{k.label || '—'}</Td>
                     <Td>
                       <StatusBadge enabled={k.enabled} />
                     </Td>
@@ -118,20 +118,20 @@ export function KeysPage() {
                       {k.daily_usd_limit == null ? '—' : k.daily_usd_limit.toFixed(2)}
                     </Td>
                     <Td className="text-right tabular-nums">{k.rpm_limit ?? '—'}</Td>
-                    <Td className="text-zinc-500">
+                    <Td className="text-muted">
                       {k.allowed_models.length > 0 ? k.allowed_models.join(', ') : 'all'}
                     </Td>
                     <Td className="text-right">
                       <button
                         onClick={() => openEdit(k)}
-                        className="mr-3 text-zinc-600 hover:underline dark:text-zinc-300"
+                        className="mr-3 text-muted hover:text-ink hover:underline"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => handleDelete(k)}
                         disabled={del.isPending}
-                        className="text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
+                        className="btn-danger hover:underline disabled:opacity-50"
                       >
                         Delete
                       </button>
@@ -144,7 +144,7 @@ export function KeysPage() {
         )}
 
         {del.error && (
-          <p className="mt-3 text-sm text-red-600 dark:text-red-400">
+          <p className="mt-3 text-sm text-danger">
             {del.error instanceof ApiError ? del.error.message : 'Delete failed.'}
           </p>
         )}
@@ -179,16 +179,16 @@ function RevealKey({ result, onClose }: { result: CreateKeyResult; onClose: () =
   }
   return (
     <Modal title={`Key "${result.name}" created`} onClose={onClose}>
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="text-sm text-muted">
         Copy this key now — it is shown only once and cannot be retrieved again.
       </p>
       <div className="mt-3 flex items-center gap-2">
-        <code className="flex-1 break-all rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 font-mono text-sm dark:border-zinc-700 dark:bg-zinc-950">
+        <code className="flex-1 break-all rounded-lg border border-line bg-surface-2 px-3 py-2 font-mono text-sm">
           {result.key}
         </code>
         <button
           onClick={copy}
-          className="shrink-0 rounded-md border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          className="btn btn-secondary shrink-0"
         >
           {copied ? 'Copied' : 'Copy'}
         </button>
@@ -196,7 +196,7 @@ function RevealKey({ result, onClose }: { result: CreateKeyResult; onClose: () =
       <div className="mt-5 flex justify-end">
         <button
           onClick={onClose}
-          className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="btn btn-primary"
         >
           Done
         </button>

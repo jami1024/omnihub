@@ -76,7 +76,7 @@ export default function App() {
 
 function PageLoading() {
   return (
-    <div className="flex h-screen items-center justify-center text-zinc-500">Loading…</div>
+    <div className="flex h-screen items-center justify-center text-muted">Loading…</div>
   )
 }
 
@@ -84,7 +84,7 @@ function Protected({ children }: { children: React.ReactNode }) {
   const { me, loading } = useAuth()
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center text-zinc-500">
+      <div className="flex h-screen items-center justify-center text-muted">
         Loading…
       </div>
     )

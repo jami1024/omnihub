@@ -1,8 +1,39 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        bg: 'var(--bg)',
+        surface: 'var(--surface)',
+        'surface-2': 'var(--surface-2)',
+        line: 'var(--border)',
+        'line-strong': 'var(--border-strong)',
+        ink: 'var(--ink)',
+        muted: 'var(--muted)',
+        brand: 'var(--brand)',
+        'brand-ink': 'var(--brand-ink)',
+        'brand-subtle': 'var(--brand-subtle)',
+        success: 'var(--success)',
+        'success-bg': 'var(--success-bg)',
+        warning: 'var(--warning)',
+        'warning-bg': 'var(--warning-bg)',
+        danger: 'var(--danger)',
+        'danger-bg': 'var(--danger-bg)',
+      },
+      fontFamily: {
+        sans: ['Inter Variable', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+      },
+      borderRadius: {
+        lg: '0.5rem',
+        xl: '0.75rem',
+      },
+      boxShadow: {
+        panel: 'var(--shadow)',
+      },
+    },
   },
   plugins: [],
 }

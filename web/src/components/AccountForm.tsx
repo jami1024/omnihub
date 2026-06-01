@@ -21,7 +21,7 @@ export interface AccountFormProps {
 }
 
 const FIELD =
-  'w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950'
+  'field'
 
 export function AccountForm({
   account,
@@ -159,7 +159,7 @@ export function AccountForm({
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium">Credentials</legend>
         {isEdit && account!.credential_keys.length > 0 && (
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-muted">
             Currently set: {account!.credential_keys.join(', ')}. Re-enter only to change them;
             leave blank to keep.
           </p>
@@ -182,7 +182,7 @@ export function AccountForm({
             <button
               type="button"
               onClick={() => removeCred(i)}
-              className="rounded-md border border-zinc-300 px-2 text-sm text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+              className="btn btn-secondary px-2"
             >
               ✕
             </button>
@@ -191,14 +191,14 @@ export function AccountForm({
         <button
           type="button"
           onClick={addCred}
-          className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+          className="text-sm text-muted hover:text-ink"
         >
           + add credential
         </button>
       </fieldset>
 
-      <details className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
-        <summary className="cursor-pointer text-sm text-zinc-500">
+      <details className="rounded-lg border border-line p-3">
+        <summary className="cursor-pointer text-sm text-muted">
           Circuit-breaker overrides (optional)
         </summary>
         <div className="mt-3 grid grid-cols-3 gap-4">
@@ -233,21 +233,21 @@ export function AccountForm({
       </details>
 
       {(localErr || error) && (
-        <p className="text-sm text-red-600 dark:text-red-400">{localErr ?? error}</p>
+        <p className="text-sm text-danger">{localErr ?? error}</p>
       )}
 
       <div className="flex justify-end gap-2">
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          className="btn btn-secondary"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={submitting}
-          className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="btn btn-primary"
         >
           {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create account'}
         </button>
@@ -259,7 +259,7 @@ export function AccountForm({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block space-y-1">
-      <span className="text-sm text-zinc-600 dark:text-zinc-400">{label}</span>
+      <span className="text-sm text-muted">{label}</span>
       {children}
     </label>
   )

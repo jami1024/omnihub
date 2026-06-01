@@ -69,7 +69,7 @@ export function PricesPage() {
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h2 className="text-xl font-semibold">Model prices</h2>
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-muted">
               USD per million tokens. Synced from LiteLLM; manual rows override and survive re-sync.
             </p>
           </div>
@@ -77,7 +77,7 @@ export function PricesPage() {
             <button
               onClick={handleSync}
               disabled={sync.isPending}
-              className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+              className="btn btn-secondary"
             >
               {sync.isPending ? 'Syncing…' : 'Sync from LiteLLM'}
             </button>
@@ -86,34 +86,34 @@ export function PricesPage() {
                 setFormErr(null)
                 setEditing('new')
               }}
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+              className="btn btn-primary"
             >
               Add price
             </button>
           </div>
         </div>
 
-        {syncMsg && <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">{syncMsg}</p>}
+        {syncMsg && <p className="mb-3 text-sm text-muted">{syncMsg}</p>}
 
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter by model…"
-          className="mb-4 w-full max-w-sm rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          className="field mb-4 max-w-sm"
         />
 
-        {isLoading && <p className="text-sm text-zinc-500">Loading…</p>}
+        {isLoading && <p className="text-sm text-muted">Loading…</p>}
         {error && (
-          <p className="text-sm text-red-600 dark:text-red-400">
+          <p className="text-sm text-danger">
             {error instanceof ApiError ? error.message : 'Could not load prices.'}
           </p>
         )}
 
         {prices && (
           <>
-            <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+            <div className="overflow-x-auto rounded-xl border border-line bg-surface">
               <table className="w-full text-left text-sm">
-                <thead className="border-b border-zinc-200 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900">
+                <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-muted">
                   <tr>
                     <Th>Model</Th>
                     <Th>Source</Th>
@@ -123,9 +123,9 @@ export function PricesPage() {
                     <Th className="text-right">Actions</Th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                <tbody className="divide-y divide-line">
                   {shown.map((p) => (
-                    <tr key={p.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50">
+                    <tr key={p.id} className="hover:bg-surface-2">
                       <Td className="font-mono text-xs">{p.model}</Td>
                       <Td>
                         <SourceBadge source={p.source} />
@@ -141,14 +141,14 @@ export function PricesPage() {
                             setFormErr(null)
                             setEditing(p)
                           }}
-                          className="mr-3 text-zinc-600 hover:underline dark:text-zinc-300"
+                          className="mr-3 text-muted hover:text-ink hover:underline"
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => handleDelete(p)}
                           disabled={del.isPending}
-                          className="text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
+                          className="btn-danger hover:underline disabled:opacity-50"
                         >
                           Delete
                         </button>
@@ -158,7 +158,7 @@ export function PricesPage() {
                 </tbody>
               </table>
             </div>
-            <p className="mt-3 text-xs text-zinc-500">
+            <p className="mt-3 text-xs text-muted">
               Showing {shown.length} of {filtered.length}
               {filtered.length !== (prices?.length ?? 0) && ` (filtered from ${prices.length})`}
               {filtered.length > CAP && ` — refine the filter to see the rest`}.
@@ -167,7 +167,7 @@ export function PricesPage() {
         )}
 
         {del.error && (
-          <p className="mt-3 text-sm text-red-600 dark:text-red-400">
+          <p className="mt-3 text-sm text-danger">
             {del.error instanceof ApiError ? del.error.message : 'Delete failed.'}
           </p>
         )}
@@ -194,8 +194,8 @@ function SourceBadge({ source }: { source: string }) {
     <span
       className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
         manual
-          ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300'
-          : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800'
+          ? 'bg-brand-subtle text-brand'
+          : 'surface-2 text-muted'
       }`}
     >
       {source}

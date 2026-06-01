@@ -14,7 +14,7 @@ export interface KeyFormProps {
 }
 
 const FIELD =
-  'w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950'
+  'field'
 
 export function KeyForm({ apiKey, submitting, error, onCancel, onSubmit }: KeyFormProps) {
   const isEdit = apiKey != null
@@ -112,28 +112,28 @@ export function KeyForm({ apiKey, submitting, error, onCancel, onSubmit }: KeyFo
       </label>
 
       {!isEdit && (
-        <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+        <p className="rounded-md bg-warning-bg px-3 py-2 text-xs text-warning">
           The key is generated on the server and shown to you once after creation.
           Store it somewhere safe — it cannot be retrieved again.
         </p>
       )}
 
       {(localErr || error) && (
-        <p className="text-sm text-red-600 dark:text-red-400">{localErr ?? error}</p>
+        <p className="text-sm text-danger">{localErr ?? error}</p>
       )}
 
       <div className="flex justify-end gap-2">
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          className="btn btn-secondary"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={submitting}
-          className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="btn btn-primary"
         >
           {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create key'}
         </button>
@@ -145,7 +145,7 @@ export function KeyForm({ apiKey, submitting, error, onCancel, onSubmit }: KeyFo
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block space-y-1">
-      <span className="text-sm text-zinc-600 dark:text-zinc-400">{label}</span>
+      <span className="text-sm text-muted">{label}</span>
       {children}
     </label>
   )

@@ -1,19 +1,235 @@
+@import '@fontsource-variable/inter/wght.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ── Design tokens (OKLCH) ─────────────────────────────────────────
+   Restrained product palette: cool neutrals + one indigo accent.
+   Semantic state colors stay distinct from the brand. See DESIGN.md. */
 :root {
-  color-scheme: light dark;
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
+  --bg: oklch(1 0 0);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.985 0.003 277);
+  --border: oklch(0.922 0.004 277);
+  --border-strong: oklch(0.87 0.006 277);
+  --ink: oklch(0.23 0.02 277);
+  --muted: oklch(0.55 0.02 277);
+  --brand: oklch(0.55 0.16 277);
+  --brand-hover: oklch(0.5 0.16 277);
+  --brand-ink: oklch(0.99 0 0);
+  --brand-subtle: oklch(0.96 0.02 277);
+
+  --success: oklch(0.52 0.13 150);
+  --success-bg: oklch(0.95 0.04 150);
+  --warning: oklch(0.55 0.12 75);
+  --warning-bg: oklch(0.95 0.05 85);
+  --danger: oklch(0.55 0.2 25);
+  --danger-bg: oklch(0.96 0.03 25);
+
+  --ring: oklch(0.55 0.16 277 / 0.55);
+  --shadow: 0 1px 2px oklch(0.2 0.02 277 / 0.06), 0 8px 24px oklch(0.2 0.02 277 / 0.08);
+
+  color-scheme: light;
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-feature-settings: 'cv11', 'ss01';
 }
 
-body {
-  @apply bg-zinc-50 text-zinc-900 antialiased;
+.dark {
+  --bg: oklch(0.17 0.012 277);
+  --surface: oklch(0.205 0.013 277);
+  --surface-2: oklch(0.235 0.013 277);
+  --border: oklch(0.3 0.012 277);
+  --border-strong: oklch(0.36 0.014 277);
+  --ink: oklch(0.96 0.005 277);
+  --muted: oklch(0.7 0.015 277);
+  --brand: oklch(0.67 0.15 277);
+  --brand-hover: oklch(0.72 0.15 277);
+  --brand-ink: oklch(0.17 0.01 277);
+  --brand-subtle: oklch(0.28 0.04 277);
+
+  --success: oklch(0.72 0.15 150);
+  --success-bg: oklch(0.3 0.06 150);
+  --warning: oklch(0.78 0.13 80);
+  --warning-bg: oklch(0.32 0.06 80);
+  --danger: oklch(0.7 0.17 25);
+  --danger-bg: oklch(0.32 0.08 25);
+
+  --ring: oklch(0.67 0.15 277 / 0.6);
+  --shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 12px 32px oklch(0 0 0 / 0.45);
+
+  color-scheme: dark;
 }
 
-@media (prefers-color-scheme: dark) {
-  body {
-    @apply bg-zinc-950 text-zinc-100;
+@layer base {
+  * {
+    border-color: var(--border);
   }
+  body {
+    @apply antialiased;
+    background-color: var(--bg);
+    color: var(--ink);
+  }
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.011em;
+    text-wrap: balance;
+  }
+  /* Visible keyboard focus everywhere; pointer clicks stay quiet. */
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: var(--brand-subtle);
+    color: var(--ink);
+  }
+  ::placeholder {
+    color: var(--muted);
+    opacity: 0.7;
+  }
+  /* Quiet, theme-aware scrollbars. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 9999px;
+    border: 2px solid var(--bg);
+  }
+}
+
+/* ── Component vocabulary ──────────────────────────────────────────
+   One button, one input, one card, one badge — used on every page. */
+@layer components {
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-1.5 rounded-lg px-3 py-1.5
+      text-sm font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    background: var(--brand);
+    color: var(--brand-ink);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--brand-hover);
+  }
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid var(--border-strong);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
+  .btn-ghost {
+    color: var(--muted);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    color: var(--ink);
+    background: var(--surface-2);
+  }
+  .btn-danger {
+    color: var(--danger);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: var(--danger-bg);
+  }
+
+  .field {
+    @apply w-full rounded-lg px-3 py-1.5 text-sm transition-shadow duration-150;
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid var(--border-strong);
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px var(--ring);
+  }
+  .field:read-only {
+    background: var(--surface-2);
+    color: var(--muted);
+  }
+
+  .card {
+    @apply rounded-xl;
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+  }
+  .badge-neutral {
+    background: var(--surface-2);
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .badge-brand {
+    background: var(--brand-subtle);
+    color: var(--brand);
+  }
+  .badge-success {
+    background: var(--success-bg);
+    color: var(--success);
+  }
+  .badge-warning {
+    background: var(--warning-bg);
+    color: var(--warning);
+  }
+  .badge-danger {
+    background: var(--danger-bg);
+    color: var(--danger);
+  }
+
+  /* Shared helpers so pages stop hard-coding zinc. */
+  .surface-2 {
+    background: var(--surface-2);
+  }
+  .text-muted {
+    color: var(--muted);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-modal-in {
+  animation: modal-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-overlay-in {
+  animation: overlay-in 140ms ease-out;
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Area,
   AreaChart,
@@ -18,9 +18,37 @@ import { useUsage, type ModelUsage } from '../lib/usage'
 
 const WINDOWS = [7, 14, 30, 90]
 
+// recharts colors are SVG attributes, not CSS, so they can't read the
+// theme tokens directly. Resolve them from the live CSS variables and
+// re-resolve when the theme class flips.
+function useChartColors() {
+  const read = () => {
+    const cs = getComputedStyle(document.documentElement)
+    return {
+      brand: cs.getPropertyValue('--brand').trim() || '#6366f1',
+      grid: cs.getPropertyValue('--border').trim() || '#e4e4e7',
+      axis: cs.getPropertyValue('--muted').trim() || '#a1a1aa',
+    }
+  }
+  const [colors, setColors] = useState(read)
+  useEffect(() => {
+    const update = () => setColors(read())
+    const obs = new MutationObserver(update)
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    const mq = matchMedia('(prefers-color-scheme: dark)')
+    mq.addEventListener('change', update)
+    return () => {
+      obs.disconnect()
+      mq.removeEventListener('change', update)
+    }
+  }, [])
+  return colors
+}
+
 export function DashboardPage() {
   const [days, setDays] = useState(7)
   const { data, isLoading, error } = useUsage(days)
+  const cc = useChartColors()
 
   return (
     <Layout>
@@ -28,17 +56,17 @@ export function DashboardPage() {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h2 className="text-xl font-semibold">Dashboard</h2>
-            <p className="text-sm text-zinc-500">Usage and spend across the gateway.</p>
+            <p className="text-sm text-muted">Usage and spend across the gateway.</p>
           </div>
-          <div className="flex gap-1 rounded-md border border-zinc-200 p-0.5 text-sm dark:border-zinc-800">
+          <div className="flex gap-1 rounded-md border border-line p-0.5 text-sm dark:border-line">
             {WINDOWS.map((w) => (
               <button
                 key={w}
                 onClick={() => setDays(w)}
                 className={`rounded px-2.5 py-1 ${
                   days === w
-                    ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                    : 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    ? 'bg-brand text-brand-ink'
+                    : 'text-muted hover:bg-surface-2 hover:text-ink'
                 }`}
               >
                 {w}d
@@ -47,9 +75,9 @@ export function DashboardPage() {
           </div>
         </div>
 
-        {isLoading && <p className="text-sm text-zinc-500">Loading…</p>}
+        {isLoading && <p className="text-sm text-muted">Loading…</p>}
         {error && (
-          <p className="text-sm text-red-600 dark:text-red-400">
+          <p className="text-sm text-danger">
             {error instanceof ApiError ? error.message : 'Could not load usage.'}
           </p>
         )}
@@ -66,7 +94,7 @@ export function DashboardPage() {
               <Stat
                 label="Errors"
                 value={fmtInt(data.summary.errors)}
-                accent={data.summary.errors > 0 ? 'text-red-600 dark:text-red-400' : undefined}
+                accent={data.summary.errors > 0 ? 'text-danger' : undefined}
               />
             </div>
 
@@ -75,18 +103,18 @@ export function DashboardPage() {
                 <AreaChart data={data.daily} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="spend" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6366f1" stopOpacity={0.4} />
-                      <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                      <stop offset="0%" stopColor={cc.brand} stopOpacity={0.4} />
+                      <stop offset="100%" stopColor={cc.brand} stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" vertical={false} />
-                  <XAxis dataKey="day" tickFormatter={fmtDay} fontSize={11} stroke="#a1a1aa" />
-                  <YAxis tickFormatter={(v) => `$${v}`} fontSize={11} stroke="#a1a1aa" width={48} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={cc.grid} vertical={false} />
+                  <XAxis dataKey="day" tickFormatter={fmtDay} fontSize={11} stroke={cc.axis} />
+                  <YAxis tickFormatter={(v) => `$${v}`} fontSize={11} stroke={cc.axis} width={48} />
                   <Tooltip
                     formatter={(v: number) => [fmtUSD(v), 'Spend']}
                     labelFormatter={(l) => fmtDay(l as string)}
                   />
-                  <Area type="monotone" dataKey="cost_usd" stroke="#6366f1" fill="url(#spend)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="cost_usd" stroke={cc.brand} fill="url(#spend)" strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             </Card>
@@ -94,21 +122,21 @@ export function DashboardPage() {
             <Card title="Daily requests">
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={data.daily} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" vertical={false} />
-                  <XAxis dataKey="day" tickFormatter={fmtDay} fontSize={11} stroke="#a1a1aa" />
-                  <YAxis fontSize={11} stroke="#a1a1aa" width={48} allowDecimals={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={cc.grid} vertical={false} />
+                  <XAxis dataKey="day" tickFormatter={fmtDay} fontSize={11} stroke={cc.axis} />
+                  <YAxis fontSize={11} stroke={cc.axis} width={48} allowDecimals={false} />
                   <Tooltip
                     formatter={(v: number) => [fmtInt(v), 'Requests']}
                     labelFormatter={(l) => fmtDay(l as string)}
                   />
-                  <Bar dataKey="requests" fill="#6366f1" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="requests" fill={cc.brand} radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </Card>
 
             <Card title="Spend by model">
               {data.by_model.length === 0 ? (
-                <p className="py-8 text-center text-sm text-zinc-500">No traffic in this window.</p>
+                <p className="py-8 text-center text-sm text-muted">No traffic in this window.</p>
               ) : (
                 <ModelBreakdown models={data.by_model} />
               )}
@@ -121,26 +149,27 @@ export function DashboardPage() {
 }
 
 function ModelBreakdown({ models }: { models: ModelUsage[] }) {
+  const cc = useChartColors()
   // Top 8 by cost for the chart; the table below lists them all.
   const top = models.slice(0, 8)
   return (
     <div className="space-y-4">
       <ResponsiveContainer width="100%" height={Math.max(120, top.length * 34)}>
         <BarChart data={top} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
-          <XAxis type="number" tickFormatter={(v) => `$${v}`} fontSize={11} stroke="#a1a1aa" />
-          <YAxis type="category" dataKey="model" width={150} fontSize={11} stroke="#a1a1aa" />
+          <XAxis type="number" tickFormatter={(v) => `$${v}`} fontSize={11} stroke={cc.axis} />
+          <YAxis type="category" dataKey="model" width={150} fontSize={11} stroke={cc.axis} />
           <Tooltip formatter={(v: number) => [fmtUSD(v), 'Spend']} />
           <Bar dataKey="cost_usd" radius={[0, 2, 2, 0]}>
             {top.map((_, i) => (
-              <Cell key={i} fill="#6366f1" />
+              <Cell key={i} fill={cc.brand} />
             ))}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
 
-      <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+      <div className="overflow-x-auto rounded-xl border border-line bg-surface">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-zinc-200 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900">
+          <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-muted">
             <tr>
               <Th>Model</Th>
               <Th className="text-right">Requests</Th>
@@ -149,7 +178,7 @@ function ModelBreakdown({ models }: { models: ModelUsage[] }) {
               <Th className="text-right">Out</Th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          <tbody className="divide-y divide-line">
             {models.map((m) => (
               <tr key={m.model}>
                 <Td className="font-mono text-xs">{m.model}</Td>
@@ -168,8 +197,8 @@ function ModelBreakdown({ models }: { models: ModelUsage[] }) {
 
 function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
+    <div className="card p-4">
+      <div className="text-xs uppercase tracking-wide text-muted">{label}</div>
       <div className={`mt-1 text-2xl font-semibold tabular-nums ${accent ?? ''}`}>{value}</div>
     </div>
   )
@@ -177,8 +206,8 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <h3 className="mb-3 text-sm font-medium text-zinc-600 dark:text-zinc-400">{title}</h3>
+    <section className="card p-4">
+      <h3 className="mb-3 text-sm font-medium text-muted">{title}</h3>
       {children}
     </section>
   )

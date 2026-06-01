@@ -15,7 +15,7 @@ export interface BlockedIPFormProps {
 }
 
 const FIELD =
-  'w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950'
+  'field'
 
 export function BlockedIPForm({ entry, submitting, error, onCancel, onSubmit }: BlockedIPFormProps) {
   const isEdit = entry != null
@@ -103,8 +103,8 @@ export function BlockedIPForm({ entry, submitting, error, onCancel, onSubmit }: 
       <p
         className={`rounded-md px-3 py-2 text-xs ${
           isHardBlock
-            ? 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
-            : 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+            ? 'bg-danger-bg text-danger'
+            : 'bg-warning-bg text-warning'
         }`}
       >
         {isHardBlock
@@ -113,21 +113,21 @@ export function BlockedIPForm({ entry, submitting, error, onCancel, onSubmit }: 
       </p>
 
       {(localErr || error) && (
-        <p className="text-sm text-red-600 dark:text-red-400">{localErr ?? error}</p>
+        <p className="text-sm text-danger">{localErr ?? error}</p>
       )}
 
       <div className="flex justify-end gap-2">
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          className="btn btn-secondary"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={submitting}
-          className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="btn btn-primary"
         >
           {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Block IP'}
         </button>
@@ -139,7 +139,7 @@ export function BlockedIPForm({ entry, submitting, error, onCancel, onSubmit }: 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block space-y-1">
-      <span className="text-sm text-zinc-600 dark:text-zinc-400">{label}</span>
+      <span className="text-sm text-muted">{label}</span>
       {children}
     </label>
   )

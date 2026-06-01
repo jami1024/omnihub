@@ -15,7 +15,7 @@ export interface PriceFormProps {
 }
 
 const FIELD =
-  'w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950'
+  'field'
 
 export function PriceForm({ price, submitting, error, onCancel, onSubmit }: PriceFormProps) {
   const isEdit = price != null
@@ -65,7 +65,7 @@ export function PriceForm({ price, submitting, error, onCancel, onSubmit }: Pric
         />
       </Field>
 
-      <p className="text-xs text-zinc-500">All costs are USD per 1,000,000 tokens.</p>
+      <p className="text-xs text-muted">All costs are USD per 1,000,000 tokens.</p>
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Input">
@@ -76,8 +76,8 @@ export function PriceForm({ price, submitting, error, onCancel, onSubmit }: Pric
         </Field>
       </div>
 
-      <details className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
-        <summary className="cursor-pointer text-sm text-zinc-500">Cache rates (optional)</summary>
+      <details className="rounded-lg border border-line p-3">
+        <summary className="cursor-pointer text-sm text-muted">Cache rates (optional)</summary>
         <div className="mt-3 grid grid-cols-3 gap-4">
           <Field label="Cache write 5m">
             <Money value={cacheWrite5m} onChange={setCacheWrite5m} />
@@ -89,28 +89,28 @@ export function PriceForm({ price, submitting, error, onCancel, onSubmit }: Pric
             <Money value={cacheRead} onChange={setCacheRead} />
           </Field>
         </div>
-        <p className="mt-2 text-xs text-zinc-500">
+        <p className="mt-2 text-xs text-muted">
           Leave a cache rate blank/0 and the engine falls back to Anthropic ratios off the input
           price (5m 1.25×, 1h 2×, read 0.10×).
         </p>
       </details>
 
       {(localErr || error) && (
-        <p className="text-sm text-red-600 dark:text-red-400">{localErr ?? error}</p>
+        <p className="text-sm text-danger">{localErr ?? error}</p>
       )}
 
       <div className="flex justify-end gap-2">
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          className="btn btn-secondary"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={submitting}
-          className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="btn btn-primary"
         >
           {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Add price'}
         </button>
@@ -122,7 +122,7 @@ export function PriceForm({ price, submitting, error, onCancel, onSubmit }: Pric
 function Money({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <div className="relative">
-      <span className="pointer-events-none absolute left-2 top-1.5 text-sm text-zinc-400">$</span>
+      <span className="pointer-events-none absolute left-2 top-1.5 text-sm text-muted">$</span>
       <input
         className={FIELD + ' pl-5'}
         type="number"
@@ -139,7 +139,7 @@ function Money({ value, onChange }: { value: string; onChange: (v: string) => vo
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block space-y-1">
-      <span className="text-sm text-zinc-600 dark:text-zinc-400">{label}</span>
+      <span className="text-sm text-muted">{label}</span>
       {children}
     </label>
   )
