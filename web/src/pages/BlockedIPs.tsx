@@ -46,7 +46,7 @@ export function BlockedIPsPage() {
 
   return (
     <Layout>
-      <main className="mx-auto max-w-6xl px-6 py-10">
+      <main className="mx-auto max-w-7xl px-6 py-8">
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h2 className="text-xl font-semibold">Blocked IPs</h2>

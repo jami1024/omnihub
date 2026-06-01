@@ -65,7 +65,7 @@ export function PricesPage() {
 
   return (
     <Layout>
-      <main className="mx-auto max-w-6xl px-6 py-10">
+      <main className="mx-auto max-w-7xl px-6 py-8">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h2 className="text-xl font-semibold">Model prices</h2>

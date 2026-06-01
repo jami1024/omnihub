@@ -21,7 +21,7 @@ export function HealthPage() {
 
   return (
     <Layout>
-      <main className="mx-auto max-w-6xl px-6 py-10">
+      <main className="mx-auto max-w-7xl px-6 py-8">
         <div className="mb-6">
           <h2 className="text-xl font-semibold">Circuit breakers</h2>
           <p className="text-sm text-muted">
