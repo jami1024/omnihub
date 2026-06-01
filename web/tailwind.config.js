@@ -23,12 +23,12 @@ export default {
         'danger-bg': 'var(--danger-bg)',
       },
       fontFamily: {
-        sans: ['Inter Variable', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        sans: ['Geist Variable', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['Geist Mono Variable', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
       borderRadius: {
-        lg: '0.5rem',
-        xl: '0.75rem',
+        lg: '0.625rem',
+        xl: '0.85rem',
       },
       boxShadow: {
         panel: 'var(--shadow)',

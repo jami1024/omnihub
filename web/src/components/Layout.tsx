@@ -3,10 +3,10 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { getTheme, nextTheme, setTheme, type Theme } from '../lib/theme'
 
-// Layout is the shared app shell: a dark sidebar (in both themes) with
-// the brand, icon nav, and the account/theme footer, plus the scrolling
-// content area. The dark rail frames the page and gives the console its
-// structure. On narrow screens it collapses to a top bar.
+// Layout is the shared app shell: a themed left sidebar (light in light
+// mode, dark in dark, per shadcn) with the brand, icon nav, and the
+// account/theme footer, plus the scrolling content area. On narrow
+// screens it collapses to a top bar.
 const NAV = [
   { to: '/', label: 'Dashboard', icon: IconGrid },
   { to: '/accounts', label: 'Accounts', icon: IconServer },
@@ -30,8 +30,8 @@ function Sidebar() {
   const { me, logout } = useAuth()
   return (
     <aside
-      className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r lg:flex"
-      style={{ background: 'var(--sidebar)', borderColor: 'oklch(1 0 0 / 0.08)' }}
+      className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line lg:flex"
+      style={{ background: 'var(--sidebar)' }}
     >
       <div className="flex items-center gap-2.5 px-5 py-4">
         <BrandMark />
@@ -44,7 +44,7 @@ function Sidebar() {
           <RailItem key={n.to} {...n} />
         ))}
       </nav>
-      <div className="border-t px-3 py-3" style={{ borderColor: 'oklch(1 0 0 / 0.08)' }}>
+      <div className="border-t border-line px-3 py-3">
         <div className="mb-2 flex items-center justify-between px-2">
           <span className="truncate text-sm" style={{ color: 'var(--sidebar-ink)' }}>
             {me?.username}
@@ -55,7 +55,7 @@ function Sidebar() {
           onClick={logout}
           className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors"
           style={{ color: 'var(--sidebar-muted)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'oklch(1 0 0 / 0.06)')}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--sidebar-hover)')}
           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
         >
           <IconLogout />
@@ -71,26 +71,31 @@ function RailItem({ to, label, icon: Icon }: (typeof NAV)[number]) {
     <NavLink to={to} end={to === '/'} className="group block">
       {({ isActive }) => (
         <span
-          className="relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors"
+          className="relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
           style={{
-            color: isActive ? 'var(--sidebar-ink)' : 'var(--sidebar-muted)',
-            background: isActive ? 'oklch(1 0 0 / 0.08)' : 'transparent',
-            boxShadow: isActive ? '0 0 0 1px oklch(1 0 0 / 0.06), 0 8px 20px -10px var(--glow)' : 'none',
+            color: isActive ? 'var(--brand)' : 'var(--sidebar-muted)',
+            background: isActive ? 'var(--brand-subtle)' : 'transparent',
           }}
           onMouseEnter={(e) => {
-            if (!isActive) e.currentTarget.style.background = 'oklch(1 0 0 / 0.04)'
+            if (!isActive) {
+              e.currentTarget.style.background = 'var(--sidebar-hover)'
+              e.currentTarget.style.color = 'var(--sidebar-ink)'
+            }
           }}
           onMouseLeave={(e) => {
-            if (!isActive) e.currentTarget.style.background = 'transparent'
+            if (!isActive) {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = 'var(--sidebar-muted)'
+            }
           }}
         >
           {isActive && (
             <span
               className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full"
-              style={{ background: 'linear-gradient(var(--brand), var(--brand-2))' }}
+              style={{ background: 'var(--brand)' }}
             />
           )}
-          <span style={{ color: isActive ? 'var(--brand)' : 'inherit' }} className="shrink-0">
+          <span className="shrink-0">
             <Icon />
           </span>
           {label}
@@ -118,13 +123,11 @@ function MobileBar() {
             key={n.to}
             to={n.to}
             end={n.to === '/'}
-            className={({ isActive }) =>
-              `whitespace-nowrap rounded-lg px-2.5 py-1 text-sm ${isActive ? 'text-ink' : ''}`
-            }
+            className="whitespace-nowrap rounded-lg px-2.5 py-1 text-sm font-medium"
             style={({ isActive }) =>
               ({
-                color: isActive ? 'var(--sidebar-ink)' : 'var(--sidebar-muted)',
-                background: isActive ? 'oklch(1 0 0 / 0.08)' : 'transparent',
+                color: isActive ? 'var(--brand)' : 'var(--sidebar-muted)',
+                background: isActive ? 'var(--brand-subtle)' : 'transparent',
               }) as React.CSSProperties
             }
           >
@@ -143,7 +146,10 @@ function BrandMark() {
   return (
     <span
       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-      style={{ background: 'linear-gradient(135deg, var(--brand), var(--brand-2))', boxShadow: '0 4px 12px -4px var(--glow)' }}
+      style={{
+        background: 'linear-gradient(135deg, var(--brand), var(--brand-2))',
+        boxShadow: '0 4px 12px -4px var(--glow)',
+      }}
     >
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
         <circle cx="12" cy="12" r="2.6" fill="white" />
@@ -171,7 +177,7 @@ function ThemeToggle() {
       className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors"
       style={{ color: 'var(--sidebar-muted)' }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'oklch(1 0 0 / 0.08)'
+        e.currentTarget.style.background = 'var(--sidebar-hover)'
         e.currentTarget.style.color = 'var(--sidebar-ink)'
       }}
       onMouseLeave={(e) => {
@@ -186,7 +192,7 @@ function ThemeToggle() {
   )
 }
 
-/* ── Icons (16px line) ─────────────────────────────────────────── */
+/* ── Icons (18px line) ─────────────────────────────────────────── */
 const ic = { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
 function IconGrid() { return (<svg {...ic}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>) }
 function IconServer() { return (<svg {...ic}><rect x="3" y="4" width="18" height="7" rx="2" /><rect x="3" y="13" width="18" height="7" rx="2" /><path d="M7 7.5h.01M7 16.5h.01" /></svg>) }
