@@ -13,11 +13,20 @@ import (
 // Claims is the JSON payload of the admin JWT. Field names follow the
 // RFC 7519 short names so any standard JWT debugger renders the token.
 type Claims struct {
-	Sub string `json:"sub"` // username
-	UID int64  `json:"uid"` // admin_users.id
-	Iat int64  `json:"iat"` // issued-at (unix seconds)
-	Exp int64  `json:"exp"` // expiry  (unix seconds)
+	Sub  string `json:"sub"`           // username
+	UID  int64  `json:"uid"`           // admin_users.id (or users.id for kind=user)
+	Kind string `json:"knd,omitempty"` // "" / "admin" = admin console; "user" = end-user portal
+	Iat  int64  `json:"iat"`           // issued-at (unix seconds)
+	Exp  int64  `json:"exp"`           // expiry  (unix seconds)
 }
+
+// KindAdmin and KindUser distinguish the two token audiences signed with
+// the same secret, so an end-user token can never authenticate against
+// the admin console and vice versa.
+const (
+	KindAdmin = "admin"
+	KindUser  = "user"
+)
 
 // Issuer mints and verifies HS256 JWTs for the admin UI. Implemented
 // directly against stdlib (hmac + base64) so the gateway does not pull
@@ -49,9 +58,16 @@ func (i *Issuer) TTL() time.Duration { return i.ttl }
 // Time is the token's expiry (so the handler can echo it back to the
 // client without recomputing).
 func (i *Issuer) Issue(username string, uid int64) (string, time.Time, error) {
+	return i.IssueKind(username, uid, KindAdmin)
+}
+
+// IssueKind mints a token for a specific audience (admin console vs the
+// end-user portal). The kind is embedded as a claim and enforced by the
+// matching authenticator.
+func (i *Issuer) IssueKind(username string, uid int64, kind string) (string, time.Time, error) {
 	now := time.Now()
 	exp := now.Add(i.ttl)
-	token, err := i.encode(Claims{Sub: username, UID: uid, Iat: now.Unix(), Exp: exp.Unix()})
+	token, err := i.encode(Claims{Sub: username, UID: uid, Kind: kind, Iat: now.Unix(), Exp: exp.Unix()})
 	if err != nil {
 		return "", time.Time{}, err
 	}

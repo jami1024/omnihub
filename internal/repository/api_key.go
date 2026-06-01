@@ -112,7 +112,8 @@ func (r *ApiKeyRepo) CountAll(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// ApiKeyInsertParams carries everything Insert needs.
+// ApiKeyInsertParams carries everything Insert needs. UserID is the
+// owning portal user; nil means an admin/system key (no portal owner).
 type ApiKeyInsertParams struct {
 	Name          string
 	Hash          string
@@ -121,6 +122,7 @@ type ApiKeyInsertParams struct {
 	DailyUSDLimit *float64
 	RPMLimit      *int
 	AllowedModels []string
+	UserID        *int64
 }
 
 // Insert creates a new api_keys row.
@@ -137,15 +139,15 @@ func (r *ApiKeyRepo) Insert(ctx context.Context, p ApiKeyInsertParams) (int64, e
 	const q = `
         INSERT INTO api_keys (
             name, key_hash, label, enabled,
-            daily_usd_limit, rpm_limit, allowed_models
+            daily_usd_limit, rpm_limit, allowed_models, user_id
         )
-        VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7)
+        VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8)
         RETURNING id`
 
 	var id int64
 	err := r.pool.QueryRow(ctx, q,
 		p.Name, p.Hash, p.Label, p.Enabled,
-		p.DailyUSDLimit, p.RPMLimit, allowedJSON,
+		p.DailyUSDLimit, p.RPMLimit, allowedJSON, p.UserID,
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -157,6 +159,55 @@ func (r *ApiKeyRepo) Insert(ctx context.Context, p ApiKeyInsertParams) (int64, e
 		return 0, fmt.Errorf("insert api_key %q: %w", p.Name, err)
 	}
 	return id, nil
+}
+
+// ListByUser returns every key owned by a portal user, newest id first.
+func (r *ApiKeyRepo) ListByUser(ctx context.Context, userID int64) ([]*apikey.Key, error) {
+	const q = `
+        SELECT id, name, key_hash, COALESCE(label, ''), enabled,
+               daily_usd_limit, rpm_limit, allowed_models
+          FROM api_keys
+         WHERE user_id = $1
+         ORDER BY id DESC`
+	rows, err := r.pool.Query(ctx, q, userID)
+	if err != nil {
+		return nil, fmt.Errorf("query api_keys for user %d: %w", userID, err)
+	}
+	defer rows.Close()
+	var out []*apikey.Key
+	for rows.Next() {
+		var (
+			k           apikey.Key
+			enabled     bool
+			allowedJSON []byte
+			dailyLimit  *float64
+			rpmLimit    *int
+		)
+		if err := rows.Scan(&k.ID, &k.Name, &k.Hash, &k.Label, &enabled,
+			&dailyLimit, &rpmLimit, &allowedJSON); err != nil {
+			return nil, fmt.Errorf("scan api_key: %w", err)
+		}
+		k.Enabled, k.DailyUSDLimit, k.RPMLimit = enabled, dailyLimit, rpmLimit
+		if err := decodeAllowedModels(&k, allowedJSON); err != nil {
+			return nil, err
+		}
+		out = append(out, &k)
+	}
+	return out, rows.Err()
+}
+
+// DeleteByIDOwnedBy hard-deletes a key only when it belongs to userID,
+// so one portal user can never delete another's key. Returns
+// ErrApiKeyNotFound when the id doesn't exist or isn't theirs.
+func (r *ApiKeyRepo) DeleteByIDOwnedBy(ctx context.Context, id, userID int64) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM api_keys WHERE id = $1 AND user_id = $2`, id, userID)
+	if err != nil {
+		return fmt.Errorf("delete api_key %d for user %d: %w", id, userID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrApiKeyNotFound
+	}
+	return nil
 }
 
 // GetByID fetches a single key by primary key, with its enabled flag and

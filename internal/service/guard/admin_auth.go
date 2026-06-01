@@ -54,6 +54,12 @@ func (a *AdminAuthenticator) Middleware() gin.HandlerFunc {
 			}
 			return
 		}
+		// An end-user portal token must never authenticate the console.
+		if claims.Kind == admin.KindUser {
+			abortAdminError(c, http.StatusForbidden, "forbidden",
+				"this token is not valid for the admin console")
+			return
+		}
 		c.Set(CtxKeyAdminID, claims.UID)
 		c.Set(CtxKeyAdminUser, claims.Sub)
 		c.Next()

@@ -20,6 +20,7 @@ import (
 
 	"github.com/jami1024/omnihub/internal/db"
 	adminhandler "github.com/jami1024/omnihub/internal/handler/admin"
+	portalhandler "github.com/jami1024/omnihub/internal/handler/portal"
 	"github.com/jami1024/omnihub/internal/handler/gateway"
 	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/account"
@@ -327,6 +328,21 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker) {
 	authed.PATCH("/prices/:id", adminhandler.UpdatePriceHandler(modelPriceRepo))
 	authed.DELETE("/prices/:id", adminhandler.DeletePriceHandler(modelPriceRepo))
 	authed.POST("/prices/sync", adminhandler.SyncPricesHandler(priceRefresher))
+
+	// M6 — end-user self-service portal at /portal/api/*. Open signup +
+	// login mint a "user"-kind token (rejected by the admin guard); the
+	// rest is scoped to the authenticated user's own keys and usage.
+	userRepo := repository.NewUserRepo(pool)
+	userAuth := guard.NewUserAuthenticator(issuer)
+	papi := r.Group("/portal/api")
+	papi.POST("/signup", portalhandler.SignupHandler(userRepo, issuer))
+	papi.POST("/login", portalhandler.LoginHandler(userRepo, issuer))
+	puser := papi.Group("", userAuth.Middleware())
+	puser.GET("/me", portalhandler.MeHandler(userRepo))
+	puser.GET("/keys", portalhandler.ListKeysHandler(apiKeyRepo, messageRepo))
+	puser.POST("/keys", portalhandler.CreateKeyHandler(apiKeyRepo))
+	puser.DELETE("/keys/:id", portalhandler.DeleteKeyHandler(apiKeyRepo))
+	puser.GET("/usage", portalhandler.UsageHandler(messageRepo, apiKeyRepo))
 
 	if web.Available() {
 		spa := web.SPAHandler("/admin")
