@@ -3,3 +3,4 @@ dist/
 .vite/
 *.tsbuildinfo
 shot.mjs
+pshot.mjs

@@ -12,7 +12,7 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false)
 
   if (me) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/admin" replace />
   }
 
   async function onSubmit(e: FormEvent) {
@@ -21,7 +21,7 @@ export function LoginPage() {
     setBusy(true)
     try {
       await login(username, password)
-      navigate('/', { replace: true })
+      navigate('/admin', { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message)

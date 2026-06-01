@@ -345,15 +345,22 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker) {
 	puser.GET("/usage", portalhandler.UsageHandler(messageRepo, apiKeyRepo))
 
 	if web.Available() {
-		spa := web.SPAHandler("/admin")
+		// One bundle, served from the root, backs both surfaces: the admin
+		// console at /admin/* and the end-user portal at /portal/*, with
+		// shared assets at /assets/*. The SPA handler serves a real file
+		// when one matches and otherwise falls back to index.html so the
+		// client router handles deep links.
+		spa := web.SPAHandler("")
 		r.NoRoute(func(c *gin.Context) {
-			if strings.HasPrefix(c.Request.URL.Path, "/admin") {
+			p := c.Request.URL.Path
+			if strings.HasPrefix(p, "/admin") || strings.HasPrefix(p, "/portal") ||
+				strings.HasPrefix(p, "/assets") || p == "/" {
 				spa(c)
 				return
 			}
 			c.AbortWithStatus(http.StatusNotFound)
 		})
-		slog.Info("admin UI mounted", "path", "/admin", "api_paths", []string{"/admin/api/login", "/admin/api/me"})
+		slog.Info("web UI mounted", "console", "/admin", "portal", "/portal")
 	} else {
 		slog.Info("admin API mounted (devui build, SPA served by external Vite dev server)",
 			"api_paths", []string{"/admin/api/login", "/admin/api/me"})

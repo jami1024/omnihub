@@ -10,7 +10,9 @@ import path from 'node:path'
 // /admin/, so the SPA can be served from that subpath without rewriting
 // asset references at runtime.
 export default defineConfig({
-  base: '/admin/',
+  // Served at root so the one bundle works under both /admin/* (console)
+  // and /portal/* (user portal); assets live at /assets/*.
+  base: '/',
   plugins: [react()],
   resolve: {
     alias: {

@@ -8,12 +8,12 @@ import { getTheme, nextTheme, setTheme, type Theme } from '../lib/theme'
 // max-w-7xl, and right-side theme + identity controls. Pages render
 // their own <main> inside {children}.
 const NAV = [
-  { to: '/', label: 'Dashboard' },
-  { to: '/accounts', label: 'Accounts' },
-  { to: '/keys', label: 'Keys' },
-  { to: '/blocked-ips', label: 'Blocked IPs' },
-  { to: '/health', label: 'Health' },
-  { to: '/prices', label: 'Prices' },
+  { to: '/admin', label: 'Dashboard' },
+  { to: '/admin/accounts', label: 'Accounts' },
+  { to: '/admin/keys', label: 'Keys' },
+  { to: '/admin/blocked-ips', label: 'Blocked IPs' },
+  { to: '/admin/health', label: 'Health' },
+  { to: '/admin/prices', label: 'Prices' },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -57,7 +57,7 @@ function PillLink({ to, label }: { to: string; label: string }) {
   return (
     <NavLink
       to={to}
-      end={to === '/'}
+      end={to === '/admin'}
       className="whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium transition-colors"
       style={({ isActive }) =>
         ({
