@@ -6,6 +6,7 @@ import { AccountsPage } from './pages/Accounts'
 import { KeysPage } from './pages/Keys'
 import { BlockedIPsPage } from './pages/BlockedIPs'
 import { HealthPage } from './pages/Health'
+import { PricesPage } from './pages/Prices'
 
 // The Dashboard pulls in recharts (~180 kB gzip). Lazy-load it so the
 // charting library lands in its own chunk and never weighs down login
@@ -57,6 +58,14 @@ export default function App() {
         element={
           <Protected>
             <HealthPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/prices"
+        element={
+          <Protected>
+            <PricesPage />
           </Protected>
         }
       />

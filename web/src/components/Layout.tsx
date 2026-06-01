@@ -17,6 +17,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <NavItem to="/keys">Keys</NavItem>
             <NavItem to="/blocked-ips">Blocked IPs</NavItem>
             <NavItem to="/health">Health</NavItem>
+            <NavItem to="/prices">Prices</NavItem>
           </nav>
         </div>
         <div className="flex items-center gap-3 text-sm text-zinc-500">
