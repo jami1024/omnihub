@@ -4,3 +4,4 @@ dist/
 *.tsbuildinfo
 shot.mjs
 pshot.mjs
+dshot.mjs

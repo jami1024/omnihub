@@ -1,12 +1,13 @@
 # DESIGN.md — OmniHub admin console
 
-> **Direction (current):** aligned with **claude-code-hub** — shadcn
-> "new-york" language: true-neutral surfaces, a **Claude-orange** accent
-> (`oklch(0.705 0.213 47.6)`), **Geist** Sans/Mono, lucide-style line
-> icons, radius `0.65rem`, subtle borders (white/10% in dark), and a
-> themed sidebar (light in light mode, dark in dark) with an orange
-> active state. The OKLCH token values below predate this realignment;
-> the live tokens are in `src/index.css`.
+> **Direction (current):** **Vercel / Geist** — near-monochrome. The
+> accent IS the ink, so the primary button is solid black on white (and
+> white on black in dark), charts are monochrome, and color is reserved
+> for semantic state (success/danger). Geist Sans/Mono, sharp radius
+> (~6–8px), crisp 1px borders (white/10% in dark), a faint dot-grid
+> background for geometric texture, and a top-header pill nav with a
+> grayscale active tint. The OKLCH tables below predate this; the live
+> tokens are in `src/index.css`.
 
 
 Visual system for the embedded React admin. Restrained product palette, cool neutrals, one indigo accent, light + dark first-class. Tokens live as CSS variables in `src/index.css` and are mapped to Tailwind semantic colors in `tailwind.config.js`.

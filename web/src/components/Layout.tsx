@@ -75,18 +75,15 @@ function BrandMark() {
   return (
     <span
       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-      style={{
-        background: 'linear-gradient(135deg, var(--brand), var(--brand-2))',
-        boxShadow: '0 4px 12px -4px var(--glow)',
-      }}
+      style={{ background: 'var(--brand)', color: 'var(--brand-ink)', boxShadow: 'var(--shadow-sm)' }}
     >
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-        <circle cx="12" cy="12" r="2.6" fill="white" />
-        <circle cx="5" cy="6" r="1.8" fill="white" opacity="0.7" />
-        <circle cx="19" cy="6" r="1.8" fill="white" opacity="0.7" />
-        <circle cx="5" cy="18" r="1.8" fill="white" opacity="0.7" />
-        <circle cx="19" cy="18" r="1.8" fill="white" opacity="0.7" />
-        <path d="M12 12 5 6M12 12l7-6M12 12l-7 6M12 12l7 6" stroke="white" strokeWidth="1.2" opacity="0.55" />
+        <circle cx="12" cy="12" r="2.6" fill="currentColor" />
+        <circle cx="5" cy="6" r="1.8" fill="currentColor" opacity="0.7" />
+        <circle cx="19" cy="6" r="1.8" fill="currentColor" opacity="0.7" />
+        <circle cx="5" cy="18" r="1.8" fill="currentColor" opacity="0.7" />
+        <circle cx="19" cy="18" r="1.8" fill="currentColor" opacity="0.7" />
+        <path d="M12 12 5 6M12 12l7-6M12 12l-7 6M12 12l7 6" stroke="currentColor" strokeWidth="1.2" opacity="0.55" />
       </svg>
     </span>
   )

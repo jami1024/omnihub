@@ -39,14 +39,14 @@ export function PortalLoginPage({ initialMode = 'login' }: { initialMode?: 'logi
           <div className="flex items-center gap-2">
             <span
               className="flex h-8 w-8 items-center justify-center rounded-lg"
-              style={{ background: 'linear-gradient(135deg, var(--brand), var(--brand-2))' }}
+              style={{ background: 'var(--brand)', color: 'var(--brand-ink)' }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <circle cx="12" cy="12" r="2.6" fill="white" />
-                <circle cx="5" cy="6" r="1.8" fill="white" opacity="0.7" />
-                <circle cx="19" cy="6" r="1.8" fill="white" opacity="0.7" />
-                <circle cx="5" cy="18" r="1.8" fill="white" opacity="0.7" />
-                <circle cx="19" cy="18" r="1.8" fill="white" opacity="0.7" />
+                <circle cx="12" cy="12" r="2.6" fill="currentColor" />
+                <circle cx="5" cy="6" r="1.8" fill="currentColor" opacity="0.7" />
+                <circle cx="19" cy="6" r="1.8" fill="currentColor" opacity="0.7" />
+                <circle cx="5" cy="18" r="1.8" fill="currentColor" opacity="0.7" />
+                <circle cx="19" cy="18" r="1.8" fill="currentColor" opacity="0.7" />
               </svg>
             </span>
             <span className="text-lg font-semibold tracking-tight">OmniHub</span>

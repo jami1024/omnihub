@@ -27,8 +27,8 @@ export default {
         mono: ['Geist Mono Variable', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
       borderRadius: {
-        lg: '0.625rem',
-        xl: '0.85rem',
+        lg: '0.4rem',
+        xl: '0.6rem',
       },
       boxShadow: {
         panel: 'var(--shadow)',
