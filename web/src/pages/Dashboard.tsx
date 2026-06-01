@@ -197,9 +197,9 @@ function ModelBreakdown({ models }: { models: ModelUsage[] }) {
 
 function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
-    <div className="card p-4">
-      <div className="text-xs uppercase tracking-wide text-muted">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold tabular-nums ${accent ?? ''}`}>{value}</div>
+    <div className="stat">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted">{label}</div>
+      <div className={`mt-1.5 text-2xl font-semibold tabular-nums ${accent ?? ''}`}>{value}</div>
     </div>
   )
 }
