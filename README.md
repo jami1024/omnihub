@@ -165,9 +165,19 @@ operator console, built across four milestones:
   enforced before auth.
 - **Health** — live circuit-breaker state per account with a reset
   control, plus a feed of recent state transitions.
+- **Prices** — model pricing as data. Seeded from LiteLLM's price list
+  and re-syncable with one click; per-model manual overrides survive a
+  re-sync. Drives the `cost_usd` on every request and the dashboard's
+  spend figures.
 
 All writes hot-reload the gateway's in-memory pools through the tables'
 NOTIFY triggers, so changes take effect within milliseconds.
+
+Pricing starts from a built-in default table (Anthropic, GPT-4o,
+DeepSeek) and, on first boot with an empty `model_prices` table, seeds
+~2,160 models from LiteLLM's
+`model_prices_and_context_window.json` (override the source with
+`OMNIHUB_PRICE_SYNC_URL`). Unknown models fall back to a NULL cost.
 
 Set a JWT signing secret and create the first admin (any UTF-8 string
 will do; rotate by changing the env value and re-issuing tokens):

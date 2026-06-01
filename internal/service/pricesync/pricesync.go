@@ -21,7 +21,7 @@ import (
 // DefaultLiteLLMURL is the canonical community price list. Its JSON keys
 // are model names; values carry per-token costs in the same shape as
 // pricing.Price. Overridable via OMNIHUB_PRICE_SYNC_URL.
-const DefaultLiteLLMURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/litellm/model_prices_and_context_window.json"
+const DefaultLiteLLMURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 
 // maxBodyBytes caps the download — the LiteLLM file is ~2 MB; 16 MB
 // leaves generous headroom while refusing a runaway response.

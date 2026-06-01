@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Data-backed model pricing with LiteLLM sync and an admin Prices page
+  (M5). Pricing is no longer a hard-coded Go table.
+  - New `model_prices` table (migration `0013`) overlays the built-in
+    `pricing.Default()` floor. A `pricing.Pool` holds the live table and
+    hot-reloads via the table's `NOTIFY` trigger, so the gateway
+    re-prices within milliseconds of any edit or sync. Gateway handlers
+    now take a `pricing.Calculator` interface.
+  - Prices sync from LiteLLM's `model_prices_and_context_window.json`:
+    an empty table seeds once at startup (async, non-fatal — the
+    built-in defaults price traffic until it lands; ~2,160 models), and
+    `POST /admin/api/prices/sync` re-pulls on demand. A `source` column
+    (`litellm` vs `manual`) ensures a sync never clobbers an operator
+    override — a re-sync reports the manual rows it skipped.
+  - New React Prices page: a filterable, source-badged table with
+    create/edit/delete and a "Sync from LiteLLM" button. Costs are
+    entered/shown as USD per million tokens and stored per-token.
+  - Sync source is overridable via `OMNIHUB_PRICE_SYNC_URL`.
+
 - Dashboard, blocked-IP management, and circuit-breaker health in the
   admin UI (M4 — the final milestone of the four-part web admin work).
   - **Usage dashboard**: a read-only `/admin/api/usage?days=N` endpoint
