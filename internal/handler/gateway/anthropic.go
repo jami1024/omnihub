@@ -90,7 +90,7 @@ func AnthropicMessagesHandler(
 	res resolver.Resolver,
 	tracker *health.Tracker,
 	buffer *repository.WriteBuffer,
-	prices pricing.Table,
+	prices pricing.Calculator,
 	limiter *limits.Limiter,
 	blockedIPs *blockedip.Pool,
 ) gin.HandlerFunc {
@@ -392,7 +392,7 @@ func recordExhaustedFailure(
 // computeCost mirrors the previous handler logic, factored out to
 // keep the retry loop body short.
 func computeCost(
-	prices pricing.Table,
+	prices pricing.Calculator,
 	req *ir.UnifiedRequest,
 	result *forward.Result,
 	account *provider.Account,

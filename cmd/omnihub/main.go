@@ -31,6 +31,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/health"
 	"github.com/jami1024/omnihub/internal/service/healthlog"
 	"github.com/jami1024/omnihub/internal/service/limits"
+	"github.com/jami1024/omnihub/internal/service/pricesync"
 	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/anthropic"
@@ -52,11 +53,13 @@ var (
 // degradation: no pool / buffer means log-only mode and the gateway
 // will not mount /v1/messages.
 var (
-	pool          *pgxpool.Pool
-	writeBuffer   *repository.WriteBuffer
-	accountPool   *account.Pool
-	apiKeyPool    *apikey.Pool
-	blockedIPPool *blockedip.Pool
+	pool           *pgxpool.Pool
+	writeBuffer    *repository.WriteBuffer
+	accountPool    *account.Pool
+	apiKeyPool     *apikey.Pool
+	blockedIPPool  *blockedip.Pool
+	pricePool      *pricing.Pool
+	priceRefresher *pricesync.Refresher
 )
 
 const accountPoolRefreshInterval = 30 * time.Second
@@ -143,6 +146,10 @@ func runGateway() {
 	}
 	if err := setupBlockedIPPool(rootCtx); err != nil {
 		slog.Error("blocked_ips pool init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := setupPricePool(rootCtx); err != nil {
+		slog.Error("model_prices pool init failed", "err", err)
 		os.Exit(1)
 	}
 
@@ -312,6 +319,15 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker) {
 	authed.GET("/circuit/events", adminhandler.CircuitEventsHandler(healthEventRepo))
 	authed.POST("/accounts/:id/reset-breaker", adminhandler.ResetBreakerHandler(circuitTracker))
 
+	// M5 — model pricing. Manual rows + LiteLLM sync; writes hot-reload
+	// the in-memory price pool via the model_prices NOTIFY trigger.
+	modelPriceRepo := repository.NewModelPriceRepo(pool)
+	authed.GET("/prices", adminhandler.ListPricesHandler(modelPriceRepo))
+	authed.POST("/prices", adminhandler.CreatePriceHandler(modelPriceRepo))
+	authed.PATCH("/prices/:id", adminhandler.UpdatePriceHandler(modelPriceRepo))
+	authed.DELETE("/prices/:id", adminhandler.DeletePriceHandler(modelPriceRepo))
+	authed.POST("/prices/sync", adminhandler.SyncPricesHandler(priceRefresher))
+
 	if web.Available() {
 		spa := web.SPAHandler("/admin")
 		r.NoRoute(func(c *gin.Context) {
@@ -412,7 +428,12 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 
 	res := resolver.New(accountPool, registry, tracker, sessions)
 	forwarder := forward.New(nil)
-	prices := pricing.Default()
+	// Hot-reloadable, DB-backed price source (built by setupPricePool).
+	// Falls back to the static defaults if the pool wasn't built.
+	var prices pricing.Calculator = pricePool
+	if pricePool == nil {
+		prices = pricing.Default()
+	}
 
 	clientGate := guard.NewClientGate(os.Getenv("OMNIHUB_ALLOWED_CLIENT_UA_PREFIXES"))
 	if clientGate.IsOpen() {
@@ -542,6 +563,42 @@ func setupApiKeyPool(ctx context.Context) error {
 		"size", apiKeyPool.Size(),
 		"refresh_interval", accountPoolRefreshInterval,
 		"notify_channel", apikey.DefaultNotifyChannel,
+	)
+	return nil
+}
+
+// setupPricePool wires the DB-backed price pool: the built-in
+// pricing.Default() table overlaid with the model_prices rows. On an
+// empty table it seeds once from LiteLLM (async, non-fatal). Writes —
+// the admin UI or a sync pass — refresh the pool via the NOTIFY trigger
+// from migration 0013.
+func setupPricePool(ctx context.Context) error {
+	if pool == nil {
+		// Log-only mode: no DB. Hand the gateway the static defaults so
+		// pricing still works for known models.
+		pricePool = pricing.NewPool(pricing.Default())
+		return nil
+	}
+
+	repo := repository.NewModelPriceRepo(pool)
+	pricePool = pricing.NewPool(pricing.Default())
+	priceRefresher = pricesync.New(repo, pricePool, pricing.Default())
+
+	// Load any existing rows into the pool before serving traffic.
+	if err := priceRefresher.Refresh(ctx); err != nil {
+		return err
+	}
+	pricesync.NewListener(pool, "", priceRefresher.Refresh).Start(ctx)
+
+	// First-boot seed from LiteLLM runs in the background so a slow or
+	// unreachable price source never delays startup; the built-in
+	// defaults price traffic until it lands.
+	syncURL := os.Getenv("OMNIHUB_PRICE_SYNC_URL")
+	go priceRefresher.EnsureSeeded(context.Background(), syncURL)
+
+	slog.Info("model_prices pool ready",
+		"size", pricePool.Size(),
+		"notify_channel", pricesync.DefaultNotifyChannel,
 	)
 	return nil
 }

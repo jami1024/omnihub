@@ -48,7 +48,7 @@ func OpenAIChatCompletionsHandler(
 	res resolver.Resolver,
 	tracker *health.Tracker,
 	buffer *repository.WriteBuffer,
-	prices pricing.Table,
+	prices pricing.Calculator,
 	limiter *limits.Limiter,
 	blockedIPs *blockedip.Pool,
 ) gin.HandlerFunc {
