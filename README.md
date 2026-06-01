@@ -89,6 +89,24 @@ migrations, and provisions the TLS cert. Watch progress with:
 docker compose -f deploy/docker-compose.yaml --env-file deploy/.env logs -f
 ```
 
+#### Behind an existing reverse proxy (nginx, etc.)
+
+If the host already terminates TLS on :80/:443 (an existing nginx, a
+cloud LB, another site), the bundled Caddy would collide with it. Use
+the `deploy/docker-compose.nginx.yaml` override to skip Caddy and publish
+the gateway on the loopback instead, then point your proxy at it:
+
+```bash
+docker compose -f deploy/docker-compose.yaml \
+    -f deploy/docker-compose.nginx.yaml \
+    --env-file deploy/.env up -d --build postgres omnihub   # note: no caddy
+```
+
+The gateway listens on `127.0.0.1:8090`; add an nginx server block that
+`proxy_pass http://127.0.0.1:8090;` for your hostname (issue the cert
+with your own certbot). Keep `OMNIHUB_TRUSTED_PROXIES` covering the proxy
+hop so `X-Forwarded-For` is honoured.
+
 Once `caddy` logs "certificate obtained successfully" the gateway is
 live at `https://${OMNIHUB_DOMAIN}/v1/messages`. Add upstream
 accounts and virtual keys via the CLI inside the container:

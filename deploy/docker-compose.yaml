@@ -60,6 +60,10 @@ services:
       OMNIHUB_LISTEN: ":8080"
       OMNIHUB_DATABASE_URL: "postgres://${POSTGRES_USER:-omnihub}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-omnihub}?sslmode=disable"
       OMNIHUB_API_KEYS: ${OMNIHUB_API_KEYS:?OMNIHUB_API_KEYS must be set in deploy/.env}
+      # JWT signing secret for the /admin web UI. Without it the gateway
+      # refuses to mount /admin (see mountAdminRoutes), so the console is
+      # unreachable. Generate with `openssl rand -hex 32`.
+      OMNIHUB_ADMIN_JWT_SECRET: ${OMNIHUB_ADMIN_JWT_SECRET:?OMNIHUB_ADMIN_JWT_SECRET must be set in deploy/.env}
       # Upstream credentials. Set the block matching your provider.
       OMNIHUB_ANTHROPIC_API_KEY: ${OMNIHUB_ANTHROPIC_API_KEY:-}
       OMNIHUB_CLAUDE_PLATFORM_API_KEY: ${OMNIHUB_CLAUDE_PLATFORM_API_KEY:-}
