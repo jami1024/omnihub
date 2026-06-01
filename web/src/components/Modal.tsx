@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 
 // Modal is the shared centered dialog used by the management pages: a
-// dimmed, lightly blurred backdrop that closes on click or Esc, with the
+// graphite dimmer above app chrome that closes on click or Esc, with the
 // panel stopping propagation so clicks inside don't dismiss it.
 export function Modal({
   title,
@@ -22,7 +22,7 @@ export function Modal({
 
   return (
     <div
-      className="animate-overlay-in fixed inset-0 z-30 flex items-start justify-center overflow-y-auto bg-black/40 p-6 backdrop-blur-sm"
+      className="animate-overlay-in fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[var(--overlay)] p-6"
       onClick={onClose}
       role="dialog"
       aria-modal="true"

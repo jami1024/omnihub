@@ -14,8 +14,8 @@ Precise · quiet · trustworthy. The console should feel like infrastructure: ca
 
 ## References (the specific thing that fits)
 
-- **Linear** — restraint and density done well; cool neutral surfaces, one confident accent, crisp keyboard-grade focus rings.
-- **Vercel dashboard** — near-monochrome calm with a single sharp accent; tables that stay readable at high row counts.
+- **Linear** — restraint and density done well; neutral surfaces, one confident low-saturation accent, crisp keyboard-grade focus rings.
+- **Vercel dashboard** — near-monochrome calm with a single disciplined accent; tables that stay readable at high row counts.
 - **Stripe** — semantic state vocabulary (success/warn/danger) that never competes with the brand accent.
 
 ## Anti-references
@@ -26,7 +26,7 @@ Precise · quiet · trustworthy. The console should feel like infrastructure: ca
 
 ## Strategic principles
 
-1. **The accent means something.** Indigo is reserved for primary actions, the current nav item, focus, and selection. State uses its own green/amber/red so "enabled" never reads as "brand".
+1. **The accent means something.** Slate violet is reserved for primary actions, the current nav item, focus, and selection. State uses its own green/amber/red so "enabled" never reads as "brand".
 2. **Every control has all its states** — default, hover, focus-visible, active, disabled, loading. Half a button is a bug.
 3. **Tables are the product.** They must stay legible dense; the price table renders 2,000+ rows.
 4. **Consistency over surprise.** Same button, same input, same badge, same modal across all seven pages.

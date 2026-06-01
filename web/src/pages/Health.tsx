@@ -1,4 +1,5 @@
 import { Layout } from '../components/Layout'
+import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { Td, Th } from '../components/Table'
 import { ApiError } from '../lib/api'
 import {
@@ -13,6 +14,10 @@ export function HealthPage() {
   const { data: circuit, isLoading, error } = useCircuit()
   const { data: events } = useCircuitEvents(50)
   const reset = useResetBreaker()
+  const accounts = circuit?.accounts ?? []
+  const closedCount = accounts.filter((s) => s.state === 'closed').length
+  const openCount = accounts.filter((s) => s.state === 'open').length
+  const halfOpenCount = accounts.filter((s) => s.state === 'half-open').length
 
   function handleReset(s: CircuitStatus) {
     if (!confirm(`Force account "${s.account_name}" back to closed?`)) return
@@ -21,25 +26,38 @@ export function HealthPage() {
 
   return (
     <Layout>
-      <main className="mx-auto max-w-7xl px-6 py-8">
-        <div className="mb-6">
-          <h2 className="text-xl font-semibold">Circuit breakers</h2>
-          <p className="text-sm text-muted">
-            Live per-account breaker state and the recent transition feed. Refreshes every 10s.
-          </p>
-        </div>
+      <main className="mx-auto w-full max-w-7xl px-6 py-8">
+        <PageHeader
+          eyebrow="HEALTH"
+          context="Circuit breaker state"
+          title="Circuit breakers"
+          description="Watch per-account breaker state and recent transitions. The live table refreshes every 10 seconds."
+        />
 
-        {isLoading && <p className="text-sm text-muted">Loading…</p>}
+        <MetricStrip
+          metrics={[
+            { label: 'Accounts', value: accounts.length },
+            { label: 'Closed', value: closedCount },
+            { label: 'Half-open', value: halfOpenCount, tone: halfOpenCount > 0 ? 'warning' : undefined },
+            { label: 'Open', value: openCount, tone: openCount > 0 ? 'danger' : undefined },
+          ]}
+        />
+
+        <div className="mt-6" />
+
+        {isLoading && <LoadingTable />}
         {error && (
-          <p className="text-sm text-danger">
+          <ErrorNotice>
             {error instanceof ApiError ? error.message : 'Could not load circuit state.'}
-          </p>
+          </ErrorNotice>
         )}
 
         {circuit && !circuit.available && (
-          <div className="rounded-xl border border-dashed border-line-strong p-10 text-center text-sm text-muted">
-            The gateway isn't running (no accounts configured), so there's no live breaker state.
-          </div>
+          <EmptyState
+            eyebrow="No live breaker state"
+            title="Configure an upstream account before monitoring health."
+            description="Circuit breaker state appears once the gateway has at least one routable account to watch."
+          />
         )}
 
         {circuit?.available && (
@@ -58,7 +76,7 @@ export function HealthPage() {
                 </thead>
                 <tbody className="divide-y divide-line">
                   {circuit.accounts.map((s) => (
-                    <tr key={s.account_id} className="hover:bg-surface-2">
+                    <tr key={s.account_id} className="transition-colors hover:bg-surface-2">
                       <Td className="font-medium">
                         {s.account_name}
                         {!s.enabled && <span className="ml-2 text-xs text-muted">(disabled)</span>}
@@ -73,7 +91,7 @@ export function HealthPage() {
                         <button
                           onClick={() => handleReset(s)}
                           disabled={reset.isPending || s.state === 'closed'}
-                          className="text-muted hover:text-ink hover:underline disabled:opacity-40"
+                          className="text-muted underline-offset-4 hover:text-ink hover:underline disabled:opacity-40"
                           title={s.state === 'closed' ? 'Already closed' : 'Force closed'}
                         >
                           Reset
@@ -85,19 +103,21 @@ export function HealthPage() {
               </table>
             </div>
             {reset.error && (
-              <p className="text-sm text-danger">
+              <ErrorNotice>
                 {reset.error instanceof ApiError ? reset.error.message : 'Reset failed.'}
-              </p>
+              </ErrorNotice>
             )}
           </section>
         )}
 
         <section className="mt-8">
-          <h3 className="mb-3 text-sm font-medium text-muted">
+          <h3 className="mb-3 font-mono text-xs font-medium uppercase tracking-[0.16em] text-muted">
             Recent transitions
           </h3>
           {events && events.length === 0 && (
-            <p className="text-sm text-muted">No transitions recorded yet.</p>
+            <p className="rounded-xl border border-line bg-surface px-4 py-3 text-sm text-muted">
+              No transitions recorded yet.
+            </p>
           )}
           {events && events.length > 0 && (
             <ol className="space-y-1.5">

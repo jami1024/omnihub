@@ -6,62 +6,61 @@
 @tailwind utilities;
 
 /* ── Design tokens (OKLCH) ─────────────────────────────────────────
-   Vercel / Geist: near-monochrome. The "accent" is the ink itself, so
-   the primary button is solid black on white (and white on black in
-   dark) — the Geist signature. Charts go monochrome too. Color is
-   reserved for semantic state only. See DESIGN.md. */
+   Graphite + Slate Violet: neutral control-plane surfaces with one
+   desaturated AI-gateway signal. The accent is reserved for primary
+   actions, active navigation, focus, selection, and the brand mark. */
 :root {
   --bg: oklch(1 0 0);
   --surface: oklch(1 0 0);
-  --surface-2: oklch(0.97 0 0);
-  --sidebar: oklch(1 0 0);
-  --sidebar-ink: oklch(0.16 0 0);
-  --sidebar-muted: oklch(0.54 0 0);
-  --sidebar-hover: oklch(0.96 0 0);
-  --border: oklch(0.92 0 0);
-  --border-strong: oklch(0.85 0 0);
-  --ink: oklch(0.16 0 0);
-  --muted: oklch(0.54 0 0);
-  --brand: oklch(0.18 0 0);
-  --brand-2: oklch(0.18 0 0);
-  --brand-hover: oklch(0.3 0 0);
-  --brand-ink: oklch(1 0 0);
-  --brand-subtle: oklch(0.95 0 0);
+  --surface-2: oklch(0.967 0.001 286.4);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-ink: oklch(0.141 0.005 285.8);
+  --sidebar-muted: oklch(0.552 0.016 285.9);
+  --sidebar-hover: oklch(0.967 0.001 286.4);
+  --border: oklch(0.92 0.004 286.3);
+  --border-strong: oklch(0.87 0.005 286.3);
+  --ink: oklch(0.141 0.005 285.8);
+  --muted: oklch(0.552 0.016 285.9);
+  --brand: oklch(0.4 0.045 250);
+  --brand-2: oklch(0.55 0.04 255);
+  --brand-hover: oklch(0.32 0.05 250);
+  --brand-ink: oklch(0.98 0 0);
+  --brand-subtle: oklch(0.945 0.012 250);
 
-  --success: oklch(0.55 0.13 150);
-  --success-bg: oklch(0.95 0.04 150);
-  --warning: oklch(0.62 0.13 70);
-  --warning-bg: oklch(0.96 0.06 85);
-  --danger: oklch(0.55 0.22 27);
-  --danger-bg: oklch(0.96 0.04 27);
+  --success: oklch(0.55 0.14 150);
+  --success-bg: oklch(0.95 0.05 150);
+  --warning: oklch(0.62 0.14 70);
+  --warning-bg: oklch(0.96 0.07 85);
+  --danger: oklch(0.577 0.245 27.3);
+  --danger-bg: oklch(0.96 0.05 27);
 
-  --ring: oklch(0.16 0 0 / 0.35);
-  --glow: oklch(0.16 0 0 / 0.12);
-  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.05), 0 1px 1px oklch(0 0 0 / 0.03);
-  --shadow: 0 1px 2px oklch(0 0 0 / 0.05), 0 12px 28px -12px oklch(0 0 0 / 0.14);
-  --grid: oklch(0.92 0 0);
+  --ring: oklch(0.4 0.045 250 / 0.46);
+  --glow: oklch(0.4 0.045 250 / 0.18);
+  --overlay: oklch(0.141 0.005 285.8 / 0.62);
+  --shadow-sm: 0 1px 2px oklch(0.14 0 0 / 0.05), 0 1px 1px oklch(0.14 0 0 / 0.03);
+  --shadow: 0 1px 2px oklch(0.14 0 0 / 0.05), 0 12px 28px -10px oklch(0.14 0 0 / 0.12);
 
   color-scheme: light;
   font-family: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
 .dark {
-  --bg: oklch(0.13 0 0);
-  --surface: oklch(0.165 0 0);
-  --surface-2: oklch(0.205 0 0);
-  --sidebar: oklch(0.13 0 0);
-  --sidebar-ink: oklch(0.98 0 0);
-  --sidebar-muted: oklch(0.62 0 0);
+  --bg: oklch(0.141 0.005 285.8);
+  --surface: oklch(0.21 0.006 285.9);
+  --surface-2: oklch(0.274 0.006 286);
+  --sidebar: oklch(0.21 0.006 285.9);
+  --sidebar-ink: oklch(0.985 0 0);
+  --sidebar-muted: oklch(0.705 0.015 286.1);
   --sidebar-hover: oklch(1 0 0 / 0.06);
   --border: oklch(1 0 0 / 0.1);
-  --border-strong: oklch(1 0 0 / 0.2);
-  --ink: oklch(0.98 0 0);
-  --muted: oklch(0.62 0 0);
-  --brand: oklch(0.98 0 0);
-  --brand-2: oklch(0.98 0 0);
-  --brand-hover: oklch(0.85 0 0);
-  --brand-ink: oklch(0.13 0 0);
-  --brand-subtle: oklch(1 0 0 / 0.1);
+  --border-strong: oklch(1 0 0 / 0.18);
+  --ink: oklch(0.985 0 0);
+  --muted: oklch(0.705 0.015 286.1);
+  --brand: oklch(0.78 0.055 255);
+  --brand-2: oklch(0.68 0.05 250);
+  --brand-hover: oklch(0.86 0.045 255);
+  --brand-ink: oklch(0.14 0.005 285.8);
+  --brand-subtle: oklch(0.28 0.035 255);
 
   --success: oklch(0.72 0.16 152);
   --success-bg: oklch(0.3 0.07 152);
@@ -70,11 +69,11 @@
   --danger: oklch(0.704 0.191 22.2);
   --danger-bg: oklch(0.32 0.09 22);
 
-  --ring: oklch(0.98 0 0 / 0.4);
-  --glow: oklch(1 0 0 / 0.12);
+  --ring: oklch(0.78 0.055 255 / 0.55);
+  --glow: oklch(0.78 0.055 255 / 0.24);
+  --overlay: oklch(0 0 0 / 0.68);
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.4);
   --shadow: 0 1px 2px oklch(0 0 0 / 0.35), 0 16px 36px -12px oklch(0 0 0 / 0.5);
-  --grid: oklch(1 0 0 / 0.05);
 
   color-scheme: dark;
 }
@@ -87,15 +86,11 @@
     @apply antialiased;
     background-color: var(--bg);
     color: var(--ink);
-    /* A faint geometric dot grid — Geist-style texture, no color. */
-    background-image: radial-gradient(var(--grid) 1px, transparent 1px);
-    background-size: 22px 22px;
-    background-position: -1px -1px;
   }
   h1,
   h2,
   h3 {
-    letter-spacing: -0.014em;
+    letter-spacing: -0.011em;
     text-wrap: balance;
   }
   /* Visible keyboard focus everywhere; pointer clicks stay quiet. */
@@ -136,12 +131,18 @@
       text-sm font-medium transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    background: var(--brand);
+    background-image: linear-gradient(180deg, var(--brand), var(--brand-hover));
     color: var(--brand-ink);
-    box-shadow: var(--shadow-sm);
+    box-shadow: 0 1px 2px oklch(0 0 0 / 0.12), inset 0 1px 0 oklch(1 0 0 / 0.15),
+      0 6px 16px -8px var(--glow);
   }
   .btn-primary:hover:not(:disabled) {
-    background: var(--brand-hover);
+    filter: brightness(1.07);
+    box-shadow: 0 1px 2px oklch(0 0 0 / 0.14), inset 0 1px 0 oklch(1 0 0 / 0.18),
+      0 8px 20px -8px var(--glow);
+  }
+  .btn-primary:active:not(:disabled) {
+    filter: brightness(0.96);
   }
   .btn-secondary {
     background: var(--surface);
@@ -187,13 +188,21 @@
     border: 1px solid var(--border);
     box-shadow: var(--shadow-sm);
   }
-  /* Monochrome stat card: a clean bordered box; the big number carries
-     the hierarchy, not color. */
+  /* A stat card gets a faint accent wash + lifted shadow so headline
+     numbers read as the focal point, not flat boxes. */
   .stat {
-    @apply rounded-xl p-4;
+    @apply relative overflow-hidden rounded-xl p-4;
     background: var(--surface);
     border: 1px solid var(--border);
     box-shadow: var(--shadow-sm);
+  }
+  .stat::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--brand), var(--brand-2));
+    opacity: 0.9;
   }
 
   .badge {

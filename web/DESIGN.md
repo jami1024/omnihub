@@ -1,22 +1,20 @@
 # DESIGN.md — OmniHub admin console
 
-> **Direction (current):** **Vercel / Geist** — near-monochrome. The
-> accent IS the ink, so the primary button is solid black on white (and
-> white on black in dark), charts are monochrome, and color is reserved
-> for semantic state (success/danger). Geist Sans/Mono, sharp radius
-> (~6–8px), crisp 1px borders (white/10% in dark), a faint dot-grid
-> background for geometric texture, and a top-header pill nav with a
-> grayscale active tint. The OKLCH tables below predate this; the live
-> tokens are in `src/index.css`.
+> **Direction (current):** **Graphite + Slate Violet** — true-neutral
+> control-plane surfaces with one desaturated AI-gateway signal
+> (`oklch(0.4 0.045 250)` in light mode). Geist Sans/Mono, lucide-style
+> line icons, radius `0.65rem`, subtle borders (white/10% in dark), and
+> a top-header pill nav with a slate-violet active state. The live tokens
+> are in `src/index.css`.
 
 
-Visual system for the embedded React admin. Restrained product palette, cool neutrals, one indigo accent, light + dark first-class. Tokens live as CSS variables in `src/index.css` and are mapped to Tailwind semantic colors in `tailwind.config.js`.
+Visual system for the embedded React admin. Restrained product palette, graphite neutrals, one slate-violet accent, light + dark first-class. Tokens live as CSS variables in `src/index.css` and are mapped to Tailwind semantic colors in `tailwind.config.js`.
 
 ## Color (OKLCH)
 
-Color strategy: **Restrained** — tinted-cool neutrals + a single accent ≤ 10% of surface. The mood lives in the accent and typography, never in the body background.
+Color strategy: **Restrained** — graphite neutrals + a single slate-violet accent ≤ 10% of surface. The mood lives in the accent and typography, never in the body background.
 
-Brand hue deviates from the random seed (olive 130°) on purpose: a green brand would collide with the semantic "enabled/success" green. Indigo-violet (~277°) keeps the accent distinct from state colors and reads as infrastructure-grade.
+Brand hue is deliberately desaturated slate-violet (~250°): it avoids the warning semantics of orange, the template feel of bright blue, and the success semantics of green while still reading as AI-infrastructure-grade.
 
 ### Light
 | Role | OKLCH | Use |
@@ -27,7 +25,7 @@ Brand hue deviates from the random seed (olive 130°) on purpose: a green brand 
 | `border` | `0.922 0.004 270` | hairlines, dividers |
 | `ink` | `0.23 0.02 277` | primary text |
 | `muted` | `0.55 0.02 277` | secondary text (≥4.5:1 on surface) |
-| `brand` | `0.55 0.16 277` | primary action, active nav, focus, selection |
+| `brand` | `0.4 0.045 250` | primary action, active nav, focus, selection |
 | `brand-ink` | `0.99 0 0` | text on brand |
 
 ### Dark
@@ -39,7 +37,7 @@ Brand hue deviates from the random seed (olive 130°) on purpose: a green brand 
 | `border` | `0.30 0.012 277` | hairlines |
 | `ink` | `0.96 0.005 277` | primary text |
 | `muted` | `0.70 0.015 277` | secondary text (≥4.5:1 on surface) |
-| `brand` | `0.67 0.15 277` | accent (lightened for dark) |
+| `brand` | `0.78 0.055 255` | accent (lightened for dark) |
 | `brand-ink` | `0.17 0.01 277` | text on brand |
 
 ### Semantic (both themes, tuned per mode)
@@ -59,12 +57,22 @@ Brand hue deviates from the random seed (olive 130°) on purpose: a green brand 
 
 ## Components
 
+- **Admin page chrome**: every management page uses the same compact tool-page rhythm:
+  `PageHeader` with one small mono eyebrow, one context label, a 24px title,
+  one 14px description, and the primary action aligned top-right. If a page
+  needs status context, place a two-column-mobile / four-column-desktop
+  `MetricStrip` directly below the header. Do not use marketing-style hero
+  blocks in authenticated admin pages.
 - **Button**: `.btn` base + `.btn-primary` (brand fill), `.btn-secondary` (bordered surface), `.btn-ghost` (text), `.btn-danger`. All share height, radius, focus ring; each defines hover/active/disabled.
 - **Input / select**: `.field` — surface bg, border, `focus-visible` 2px brand ring, no glow.
 - **Card**: `.card` — surface, 1px border, 12px radius.
 - **Badge**: `.badge` + tone modifiers (brand / success / warning / danger / neutral).
 - **Table**: `surface-2` header, hairline row dividers, row hover tint, no zebra. Sticky header for the long price table.
-- **Modal**: centered dialog, backdrop with subtle blur + dim, panel shadow (no border), `Esc`/backdrop close.
+- **Modal**: centered dialog, graphite dimmer above app chrome, panel shadow, `Esc`/backdrop close.
+- **Empty / loading / error states**: empty states can carry one quiet line-art
+  motif when it teaches the operator what to do next; never use a decorative
+  hero illustration above populated tables. Loading uses skeleton rows, not a
+  lone spinner. Errors use a bordered semantic notice near the affected table.
 
 ## Motion
 

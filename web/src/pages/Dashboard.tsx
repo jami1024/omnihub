@@ -12,6 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Layout } from '../components/Layout'
+import { ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { Td, Th } from '../components/Table'
 import { ApiError } from '../lib/api'
 import { useUsage, type ModelUsage } from '../lib/usage'
@@ -52,13 +53,14 @@ export function DashboardPage() {
 
   return (
     <Layout>
-      <main className="mx-auto max-w-7xl px-6 py-8">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-semibold">Dashboard</h2>
-            <p className="text-sm text-muted">Usage and spend across the gateway.</p>
-          </div>
-          <div className="flex gap-1 rounded-md border border-line p-0.5 text-sm dark:border-line">
+      <main className="mx-auto w-full max-w-7xl px-6 py-8">
+        <PageHeader
+          eyebrow="OVERVIEW"
+          context="Usage and spend"
+          title="Dashboard"
+          description="Track request volume, token usage, spend, and model mix across the gateway."
+          action={
+            <div className="flex gap-1 rounded-lg border border-line bg-surface p-0.5 text-sm">
             {WINDOWS.map((w) => (
               <button
                 key={w}
@@ -73,30 +75,33 @@ export function DashboardPage() {
               </button>
             ))}
           </div>
-        </div>
+          }
+        />
 
-        {isLoading && <p className="text-sm text-muted">Loading…</p>}
+        {isLoading && <LoadingTable />}
         {error && (
-          <p className="text-sm text-danger">
+          <ErrorNotice>
             {error instanceof ApiError ? error.message : 'Could not load usage.'}
-          </p>
+          </ErrorNotice>
         )}
 
         {data && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <Stat label="Requests" value={fmtInt(data.summary.requests)} />
-              <Stat label="Spend" value={fmtUSD(data.summary.cost_usd)} />
-              <Stat
-                label="Tokens (in / out)"
-                value={`${fmtTokens(data.summary.input_tokens)} / ${fmtTokens(data.summary.output_tokens)}`}
-              />
-              <Stat
-                label="Errors"
-                value={fmtInt(data.summary.errors)}
-                accent={data.summary.errors > 0 ? 'text-danger' : undefined}
-              />
-            </div>
+            <MetricStrip
+              metrics={[
+                { label: 'Requests', value: fmtInt(data.summary.requests) },
+                { label: 'Spend', value: fmtUSD(data.summary.cost_usd) },
+                {
+                  label: 'Tokens in/out',
+                  value: `${fmtTokens(data.summary.input_tokens)} / ${fmtTokens(data.summary.output_tokens)}`,
+                },
+                {
+                  label: 'Errors',
+                  value: fmtInt(data.summary.errors),
+                  tone: data.summary.errors > 0 ? 'danger' : undefined,
+                },
+              ]}
+            />
 
             <Card title="Daily spend (USD)">
               <ResponsiveContainer width="100%" height={240}>
@@ -195,19 +200,10 @@ function ModelBreakdown({ models }: { models: ModelUsage[] }) {
   )
 }
 
-function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
-  return (
-    <div className="stat">
-      <div className="text-xs font-medium uppercase tracking-wide text-muted">{label}</div>
-      <div className={`mt-1.5 text-2xl font-semibold tabular-nums ${accent ?? ''}`}>{value}</div>
-    </div>
-  )
-}
-
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="card p-4">
-      <h3 className="mb-3 text-sm font-medium text-muted">{title}</h3>
+      <h3 className="mb-3 font-mono text-xs font-medium uppercase tracking-[0.16em] text-muted">{title}</h3>
       {children}
     </section>
   )

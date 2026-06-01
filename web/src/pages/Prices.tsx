@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Layout } from '../components/Layout'
 import { Modal } from '../components/Modal'
+import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { Td, Th } from '../components/Table'
 import { PriceForm } from '../components/PriceForm'
 import { ApiError } from '../lib/api'
@@ -38,6 +39,9 @@ export function PricesPage() {
   }, [prices, filter])
   const CAP = 200
   const shown = filtered.slice(0, CAP)
+  const priceCount = prices?.length ?? 0
+  const manualCount = prices?.filter((p) => p.source === 'manual').length ?? 0
+  const syncedCount = prices?.filter((p) => p.source !== 'manual').length ?? 0
 
   function close() {
     setEditing(null)
@@ -65,19 +69,18 @@ export function PricesPage() {
 
   return (
     <Layout>
-      <main className="mx-auto max-w-7xl px-6 py-8">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-semibold">Model prices</h2>
-            <p className="text-sm text-muted">
-              USD per million tokens. Synced from LiteLLM; manual rows override and survive re-sync.
-            </p>
-          </div>
-          <div className="flex gap-2">
+      <main className="mx-auto w-full max-w-7xl px-6 py-8">
+        <PageHeader
+          eyebrow="PRICING"
+          context="Model cost table"
+          title="Model prices"
+          description="Review USD-per-million token pricing. LiteLLM rows can sync in bulk; manual rows override and survive re-sync."
+          action={
+            <div className="flex flex-wrap gap-2">
             <button
               onClick={handleSync}
               disabled={sync.isPending}
-              className="btn btn-secondary"
+              className="btn btn-secondary h-10"
             >
               {sync.isPending ? 'Syncing…' : 'Sync from LiteLLM'}
             </button>
@@ -86,30 +89,68 @@ export function PricesPage() {
                 setFormErr(null)
                 setEditing('new')
               }}
-              className="btn btn-primary"
+              className="btn btn-primary h-10"
             >
               Add price
             </button>
           </div>
-        </div>
+          }
+        />
 
-        {syncMsg && <p className="mb-3 text-sm text-muted">{syncMsg}</p>}
+        <MetricStrip
+          metrics={[
+            { label: 'Total', value: priceCount },
+            { label: 'Manual', value: manualCount },
+            { label: 'Synced', value: syncedCount },
+            { label: 'Showing', value: shown.length },
+          ]}
+        />
+
+        {syncMsg && (
+          <p className="mt-6 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-muted">
+            {syncMsg}
+          </p>
+        )}
 
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter by model…"
-          className="field mb-4 max-w-sm"
+          className="field my-4 max-w-sm"
         />
 
-        {isLoading && <p className="text-sm text-muted">Loading…</p>}
+        {isLoading && <LoadingTable columns={5} />}
         {error && (
-          <p className="text-sm text-danger">
+          <ErrorNotice>
             {error instanceof ApiError ? error.message : 'Could not load prices.'}
-          </p>
+          </ErrorNotice>
         )}
 
-        {prices && (
+        {prices && prices.length === 0 && (
+          <EmptyState
+            eyebrow="No price rows"
+            title="Sync model pricing before traffic is costed."
+            description="Pull the LiteLLM price table or add a manual override for a model you route through OmniHub."
+            action={
+              <div className="flex flex-wrap gap-2">
+                <button onClick={handleSync} disabled={sync.isPending} className="btn btn-secondary h-10">
+                  {sync.isPending ? 'Syncing…' : 'Sync from LiteLLM'}
+                </button>
+                <button
+                  onClick={() => {
+                    setFormErr(null)
+                    setEditing('new')
+                  }}
+                  className="btn btn-primary h-10"
+                >
+                  Add price
+                </button>
+              </div>
+            }
+          />
+        )}
+
+        {prices && prices.length > 0 && (
           <>
             <div className="overflow-x-auto rounded-xl border border-line bg-surface">
               <table className="w-full text-left text-sm">
@@ -125,7 +166,7 @@ export function PricesPage() {
                 </thead>
                 <tbody className="divide-y divide-line">
                   {shown.map((p) => (
-                    <tr key={p.id} className="hover:bg-surface-2">
+                    <tr key={p.id} className="transition-colors hover:bg-surface-2">
                       <Td className="font-mono text-xs">{p.model}</Td>
                       <Td>
                         <SourceBadge source={p.source} />
@@ -141,7 +182,7 @@ export function PricesPage() {
                             setFormErr(null)
                             setEditing(p)
                           }}
-                          className="mr-3 text-muted hover:text-ink hover:underline"
+                          className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
                         >
                           Edit
                         </button>
@@ -167,9 +208,11 @@ export function PricesPage() {
         )}
 
         {del.error && (
-          <p className="mt-3 text-sm text-danger">
-            {del.error instanceof ApiError ? del.error.message : 'Delete failed.'}
-          </p>
+          <div className="mt-3">
+            <ErrorNotice>
+              {del.error instanceof ApiError ? del.error.message : 'Delete failed.'}
+            </ErrorNotice>
+          </div>
         )}
       </main>
 

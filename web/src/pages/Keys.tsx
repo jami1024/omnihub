@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Layout } from '../components/Layout'
 import { Modal } from '../components/Modal'
+import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { StatusBadge, Td, Th } from '../components/Table'
 import { KeyForm } from '../components/KeyForm'
 import { ApiError } from '../lib/api'
@@ -26,6 +27,10 @@ export function KeysPage() {
   // Holds the freshly minted cleartext so it can be shown once, in its
   // own dialog, after the create form closes.
   const [revealed, setRevealed] = useState<CreateKeyResult | null>(null)
+  const keyCount = keys?.length ?? 0
+  const enabledCount = keys?.filter((k) => k.enabled).length ?? 0
+  const budgetedCount = keys?.filter((k) => k.daily_usd_limit != null || k.rpm_limit != null).length ?? 0
+  const modelScopedCount = keys?.filter((k) => k.allowed_models.length > 0).length ?? 0
 
   function openNew() {
     setFormErr(null)
@@ -65,31 +70,48 @@ export function KeysPage() {
 
   return (
     <Layout>
-      <main className="mx-auto max-w-7xl px-6 py-8">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-semibold">API keys</h2>
-            <p className="text-sm text-muted">Virtual keys clients use to authenticate to the gateway.</p>
-          </div>
-          <button
-            onClick={openNew}
-            className="btn btn-primary"
-          >
-            New key
-          </button>
-        </div>
+      <main className="mx-auto w-full max-w-7xl px-6 py-8">
+        <PageHeader
+          eyebrow="ACCESS"
+          context="Client authentication"
+          title="API keys"
+          description="Issue virtual keys for clients, then constrain spend, request rate, and model access without exposing upstream credentials."
+          action={
+            <button onClick={openNew} className="btn btn-primary h-10">
+              New key
+            </button>
+          }
+        />
 
-        {isLoading && <p className="text-sm text-muted">Loading…</p>}
+        <MetricStrip
+          metrics={[
+            { label: 'Total', value: keyCount },
+            { label: 'Enabled', value: enabledCount },
+            { label: 'Budgeted', value: budgetedCount },
+            { label: 'Model scoped', value: modelScopedCount },
+          ]}
+        />
+
+        <div className="mt-6" />
+
+        {isLoading && <LoadingTable />}
         {error && (
-          <p className="text-sm text-danger">
+          <ErrorNotice>
             {error instanceof ApiError ? error.message : 'Could not load keys.'}
-          </p>
+          </ErrorNotice>
         )}
 
         {keys && keys.length === 0 && (
-          <div className="rounded-xl border border-dashed border-line-strong p-10 text-center text-sm text-muted">
-            No keys yet. Create one to let a client authenticate.
-          </div>
+          <EmptyState
+            eyebrow="No client keys"
+            title="Create a virtual key before clients connect."
+            description="Client keys authenticate gateway traffic while keeping upstream account credentials private and operator-controlled."
+            action={
+              <button onClick={openNew} className="btn btn-primary h-10">
+                New key
+              </button>
+            }
+          />
         )}
 
         {keys && keys.length > 0 && (
@@ -108,7 +130,7 @@ export function KeysPage() {
               </thead>
               <tbody className="divide-y divide-line">
                 {keys.map((k) => (
-                  <tr key={k.id} className="hover:bg-surface-2">
+                  <tr key={k.id} className="transition-colors hover:bg-surface-2">
                     <Td className="font-medium">{k.name}</Td>
                     <Td className="text-muted">{k.label || '—'}</Td>
                     <Td>
@@ -124,7 +146,7 @@ export function KeysPage() {
                     <Td className="text-right">
                       <button
                         onClick={() => openEdit(k)}
-                        className="mr-3 text-muted hover:text-ink hover:underline"
+                        className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
                       >
                         Edit
                       </button>
@@ -144,9 +166,11 @@ export function KeysPage() {
         )}
 
         {del.error && (
-          <p className="mt-3 text-sm text-danger">
-            {del.error instanceof ApiError ? del.error.message : 'Delete failed.'}
-          </p>
+          <div className="mt-3">
+            <ErrorNotice>
+              {del.error instanceof ApiError ? del.error.message : 'Delete failed.'}
+            </ErrorNotice>
+          </div>
         )}
       </main>
 

@@ -26,9 +26,7 @@ export function LoginPage() {
       if (err instanceof ApiError) {
         setError(err.message)
       } else {
-        setError('Unexpected error — see browser console.')
-        // eslint-disable-next-line no-console
-        console.error(err)
+        setError('Unexpected sign-in error. Try again.')
       }
     } finally {
       setBusy(false)
@@ -36,55 +34,170 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <form
-        onSubmit={onSubmit}
-        className="card w-full max-w-sm space-y-4 p-6 shadow-panel"
-      >
-        <header>
-          <h1 className="text-lg font-semibold">OmniHub admin</h1>
-          <p className="text-sm text-muted">Sign in to manage upstream accounts and keys.</p>
-        </header>
+    <div className="relative min-h-screen overflow-hidden bg-bg text-ink">
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(circle at 18% 20%, color-mix(in oklch, var(--brand-subtle) 72%, transparent), transparent 34%), linear-gradient(135deg, var(--surface) 0%, var(--bg) 52%, var(--surface-2) 100%)',
+        }}
+      />
+      <div
+        className="pointer-events-none absolute left-1/2 top-0 hidden h-full w-px bg-line lg:block"
+        aria-hidden
+      />
 
-        <label className="block">
-          <span className="text-sm font-medium">Username</span>
-          <input
-            type="text"
-            autoFocus
-            autoComplete="username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            className="field mt-1"
-            required
-          />
-        </label>
+      <main className="relative mx-auto grid min-h-screen w-full max-w-6xl items-center gap-10 px-6 py-10 lg:grid-cols-[1.05fr_0.95fr] lg:px-8">
+        <section className="hidden max-w-xl lg:block" aria-labelledby="login-intro-title">
+          <div className="mb-12 flex items-center gap-3">
+            <BrandMark />
+            <div>
+              <p className="text-sm font-semibold tracking-tight">OmniHub</p>
+              <p className="text-xs text-muted">AI gateway control plane</p>
+            </div>
+          </div>
 
-        <label className="block">
-          <span className="text-sm font-medium">Password</span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="field mt-1"
-            required
-          />
-        </label>
-
-        {error && (
-          <p className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger">
-            {error}
+          <p className="mb-4 text-xs font-medium uppercase tracking-[0.18em] text-muted">
+            Operator access
           </p>
-        )}
+          <h1
+            id="login-intro-title"
+            className="max-w-[12ch] text-5xl font-semibold leading-[0.98] tracking-[-0.045em]"
+          >
+            Control AI traffic without losing the signal.
+          </h1>
+          <p className="mt-6 max-w-md text-base leading-7 text-muted">
+            Manage model routing, virtual keys, IP policy, spend, and circuit
+            health from a quiet console built for operators.
+          </p>
 
-        <button
-          type="submit"
-          disabled={busy}
-          className="btn btn-primary w-full py-2"
-        >
-          {busy ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
+          <GatewayPath />
+        </section>
+
+        <section className="mx-auto w-full max-w-md lg:mx-0 lg:justify-self-end">
+          <div className="mb-8 flex items-center justify-center gap-3 lg:hidden">
+            <BrandMark />
+            <div>
+              <p className="text-sm font-semibold tracking-tight">OmniHub</p>
+              <p className="text-xs text-muted">Admin console</p>
+            </div>
+          </div>
+
+          <form
+            onSubmit={onSubmit}
+            aria-busy={busy}
+            className="card relative overflow-hidden p-6 shadow-panel sm:p-7"
+          >
+            <header className="mb-6">
+              <p className="mb-2 text-xs font-medium uppercase tracking-[0.16em] text-muted">
+                Secure sign in
+              </p>
+              <h2 className="text-2xl font-semibold tracking-tight">Enter the control plane</h2>
+              <p className="mt-2 text-sm leading-6 text-muted">
+                Use your operator account to manage OmniHub.
+              </p>
+            </header>
+
+            <div className="space-y-4">
+              <label className="block">
+                <span className="text-sm font-medium">Username</span>
+                <input
+                  type="text"
+                  autoFocus
+                  autoComplete="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="field mt-1.5 h-10"
+                  placeholder="operator"
+                  required
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium">Password</span>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="field mt-1.5 h-10"
+                  placeholder="••••••••"
+                  required
+                />
+              </label>
+            </div>
+
+            {error && (
+              <p
+                className="mt-4 rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger"
+                role="alert"
+                aria-live="polite"
+              >
+                {error}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={busy}
+              className="btn btn-primary mt-6 h-10 w-full"
+            >
+              {busy ? 'Checking credentials…' : 'Sign in'}
+            </button>
+
+            <div className="mt-5 flex items-center justify-between border-t border-line pt-4 text-xs text-muted">
+              <span>Protected admin session</span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                Ready
+              </span>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+  )
+}
+
+function BrandMark() {
+  return (
+    <span
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+      style={{
+        background: 'linear-gradient(135deg, var(--brand), var(--brand-2))',
+        boxShadow: '0 4px 12px -4px var(--glow)',
+      }}
+    >
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <circle cx="12" cy="12" r="2.6" fill="white" />
+        <circle cx="5" cy="6" r="1.8" fill="white" opacity="0.7" />
+        <circle cx="19" cy="6" r="1.8" fill="white" opacity="0.7" />
+        <circle cx="5" cy="18" r="1.8" fill="white" opacity="0.7" />
+        <circle cx="19" cy="18" r="1.8" fill="white" opacity="0.7" />
+        <path d="M12 12 5 6M12 12l7-6M12 12l-7 6M12 12l7 6" stroke="white" strokeWidth="1.2" opacity="0.55" />
+      </svg>
+    </span>
+  )
+}
+
+function GatewayPath() {
+  const steps = [
+    ['AUTH', 'Verify operator session'],
+    ['POLICY', 'Apply keys, IP rules, and limits'],
+    ['ROUTE', 'Select healthy upstream accounts'],
+    ['OBSERVE', 'Track usage, spend, and breaker state'],
+  ] as const
+
+  return (
+    <div className="mt-10 max-w-lg border-y border-line py-2">
+      {steps.map(([label, value]) => (
+        <div key={label} className="grid grid-cols-[5rem_1fr] items-center gap-4 py-3">
+          <span className="font-mono text-[11px] font-medium tracking-[0.16em] text-muted">
+            {label}
+          </span>
+          <span className="text-sm text-ink">{value}</span>
+        </div>
+      ))}
     </div>
   )
 }

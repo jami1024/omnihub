@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Layout } from '../components/Layout'
 import { Modal } from '../components/Modal'
+import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { Td, Th } from '../components/Table'
 import { BlockedIPForm } from '../components/BlockedIPForm'
 import { ApiError } from '../lib/api'
@@ -22,6 +23,15 @@ export function BlockedIPsPage() {
   const del = useDeleteBlockedIP()
   const [editing, setEditing] = useState<Editing>(null)
   const [formErr, setFormErr] = useState<string | null>(null)
+  const rowCount = rows?.length ?? 0
+  const hardBlockCount = rows?.filter((r) => r.blocked).length ?? 0
+  const rateCapCount = rows?.filter((r) => !r.blocked).length ?? 0
+  const concurrentCount = rows?.filter((r) => r.concurrent_limit != null).length ?? 0
+
+  function openNew() {
+    setFormErr(null)
+    setEditing('new')
+  }
 
   function close() {
     setEditing(null)
@@ -46,36 +56,48 @@ export function BlockedIPsPage() {
 
   return (
     <Layout>
-      <main className="mx-auto max-w-7xl px-6 py-8">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-semibold">Blocked IPs</h2>
-            <p className="text-sm text-muted">
-              Hard blocks (403) and per-IP rate caps (429), enforced before auth.
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              setFormErr(null)
-              setEditing('new')
-            }}
-            className="btn btn-primary"
-          >
-            Block an IP
-          </button>
-        </div>
+      <main className="mx-auto w-full max-w-7xl px-6 py-8">
+        <PageHeader
+          eyebrow="EDGE"
+          context="Pre-auth traffic policy"
+          title="Blocked IPs"
+          description="Apply hard blocks and per-IP rate caps before authentication, so noisy traffic is stopped at the gateway edge."
+          action={
+            <button onClick={openNew} className="btn btn-primary h-10">
+              Block an IP
+            </button>
+          }
+        />
 
-        {isLoading && <p className="text-sm text-muted">Loading…</p>}
+        <MetricStrip
+          metrics={[
+            { label: 'Total', value: rowCount },
+            { label: 'Hard blocks', value: hardBlockCount, tone: hardBlockCount > 0 ? 'danger' : undefined },
+            { label: 'Rate caps', value: rateCapCount },
+            { label: 'Concurrent caps', value: concurrentCount },
+          ]}
+        />
+
+        <div className="mt-6" />
+
+        {isLoading && <LoadingTable />}
         {error && (
-          <p className="text-sm text-danger">
+          <ErrorNotice>
             {error instanceof ApiError ? error.message : 'Could not load blocked IPs.'}
-          </p>
+          </ErrorNotice>
         )}
 
         {rows && rows.length === 0 && (
-          <div className="rounded-xl border border-dashed border-line-strong p-10 text-center text-sm text-muted">
-            No blocked IPs. Traffic from every address is allowed.
-          </div>
+          <EmptyState
+            eyebrow="No IP policy rows"
+            title="No addresses are currently blocked or capped."
+            description="Add a hard block for abusive traffic, or set request, token, and concurrency caps for noisy clients."
+            action={
+              <button onClick={openNew} className="btn btn-primary h-10">
+                Block an IP
+              </button>
+            }
+          />
         )}
 
         {rows && rows.length > 0 && (
@@ -95,7 +117,7 @@ export function BlockedIPsPage() {
               </thead>
               <tbody className="divide-y divide-line">
                 {rows.map((row) => (
-                  <tr key={row.ip} className="hover:bg-surface-2">
+                  <tr key={row.ip} className="transition-colors hover:bg-surface-2">
                     <Td className="font-mono text-xs">{row.ip}</Td>
                     <Td>
                       <PolicyBadge blocked={row.blocked} />
@@ -111,7 +133,7 @@ export function BlockedIPsPage() {
                           setFormErr(null)
                           setEditing(row)
                         }}
-                        className="mr-3 text-muted hover:text-ink hover:underline"
+                        className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
                       >
                         Edit
                       </button>
@@ -131,9 +153,11 @@ export function BlockedIPsPage() {
         )}
 
         {del.error && (
-          <p className="mt-3 text-sm text-danger">
-            {del.error instanceof ApiError ? del.error.message : 'Unblock failed.'}
-          </p>
+          <div className="mt-3">
+            <ErrorNotice>
+              {del.error instanceof ApiError ? del.error.message : 'Unblock failed.'}
+            </ErrorNotice>
+          </div>
         )}
       </main>
 
