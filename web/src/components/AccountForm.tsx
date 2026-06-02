@@ -1,5 +1,12 @@
 import { useState } from 'react'
-import type { Account, AccountInput } from '../lib/accounts'
+import { ApiError } from '../lib/api'
+import {
+  useTestAccount,
+  useTestAccountById,
+  type Account,
+  type AccountInput,
+  type TestResult,
+} from '../lib/accounts'
 
 // AccountForm drives both create and edit. When `account` is provided it
 // pre-fills the metadata for an edit (credentials always start blank —
@@ -51,6 +58,37 @@ export function AccountForm({
     numToStr(account?.circuit_half_open_success),
   )
   const [localErr, setLocalErr] = useState<string | null>(null)
+
+  const test = useTestAccount()
+  const testById = useTestAccountById()
+  const testing = test.isPending || testById.isPending
+  const testResult: TestResult | undefined = test.data ?? testById.data
+  const testErr = test.error ?? testById.error
+
+  // handleTest probes connectivity without saving. If the form carries
+  // credentials we test those exact values; otherwise (editing without
+  // re-entering the secret) we test the stored account by id.
+  function handleTest() {
+    setLocalErr(null)
+    test.reset()
+    testById.reset()
+    const credentials: Record<string, string> = {}
+    for (const row of creds) {
+      const k = row.key.trim()
+      if (k && row.value) credentials[k] = row.value
+    }
+    if (!provider.trim()) {
+      setLocalErr('Choose a provider before testing.')
+      return
+    }
+    if (Object.keys(credentials).length > 0) {
+      test.mutate({ provider: provider.trim(), base_url: baseURL.trim(), credentials })
+    } else if (isEdit && account) {
+      testById.mutate(account.id)
+    } else {
+      setLocalErr('Enter the API key to test the connection.')
+    }
+  }
 
   function updateCred(i: number, patch: Partial<CredRow>) {
     setCreds((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
@@ -236,7 +274,23 @@ export function AccountForm({
         <p className="text-sm text-danger">{localErr ?? error}</p>
       )}
 
-      <div className="flex justify-end gap-2">
+      {(testResult || testErr) && (
+        <TestVerdict
+          result={testResult}
+          error={testErr ? (testErr instanceof ApiError ? testErr.message : 'Test failed.') : null}
+        />
+      )}
+
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={handleTest}
+          disabled={testing}
+          className="btn btn-secondary"
+        >
+          {testing ? 'Testing…' : 'Test connection'}
+        </button>
+        <div className="flex gap-2">
         <button
           type="button"
           onClick={onCancel}
@@ -251,8 +305,38 @@ export function AccountForm({
         >
           {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create account'}
         </button>
+        </div>
       </div>
     </form>
+  )
+}
+
+// TestVerdict renders the traffic-light connectivity result inline.
+function TestVerdict({ result, error }: { result?: TestResult; error: string | null }) {
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm">
+        <span className="inline-block h-2.5 w-2.5 rounded-full bg-danger" />
+        <span className="text-danger">{error}</span>
+      </div>
+    )
+  }
+  if (!result) return null
+  const tone =
+    result.status === 'green'
+      ? 'bg-emerald-500'
+      : result.status === 'yellow'
+        ? 'bg-amber-500'
+        : 'bg-danger'
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm">
+      <span className={`inline-block h-2.5 w-2.5 rounded-full ${tone}`} />
+      <span className="text-ink">{result.message}</span>
+      <span className="text-muted">
+        {result.http_status ? `HTTP ${result.http_status} · ` : ''}
+        {result.latency_ms}ms
+      </span>
+    </div>
   )
 }
 

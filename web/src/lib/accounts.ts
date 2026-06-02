@@ -67,6 +67,31 @@ export function useUpdateAccount() {
   })
 }
 
+// TestResult is the connectivity-probe verdict (green/yellow/red).
+export interface TestResult {
+  status: 'green' | 'yellow' | 'red' | string
+  http_status?: number
+  latency_ms: number
+  message: string
+}
+
+// useTestAccount probes the form's provider/base_url/credentials before
+// saving (the credentials must be present in the body).
+export function useTestAccount() {
+  return useMutation({
+    mutationFn: (input: { provider: string; base_url: string; credentials: Record<string, string> }) =>
+      api<TestResult>('/accounts/test', { method: 'POST', body: JSON.stringify(input) }),
+  })
+}
+
+// useTestAccountById probes an existing account using its stored
+// (write-only) credentials — used when editing without re-entering them.
+export function useTestAccountById() {
+  return useMutation({
+    mutationFn: (id: number) => api<TestResult>(`/accounts/${id}/test`, { method: 'POST' }),
+  })
+}
+
 export function useDeleteAccount() {
   const qc = useQueryClient()
   return useMutation({

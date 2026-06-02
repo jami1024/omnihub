@@ -11,6 +11,8 @@
 package anthropic
 
 import (
+	"context"
+
 	"github.com/jami1024/omnihub/internal/service/provider"
 )
 
@@ -49,6 +51,18 @@ func (d *Driver) Capabilities() provider.Capabilities {
 		Vision:    true,
 		Thinking:  true,
 	}
+}
+
+// Test probes the account with a GET /v1/models (token-free), sending
+// the x-api-key + anthropic-version headers so a bad key surfaces as a
+// 401 rather than a generation charge.
+func (d *Driver) Test(ctx context.Context, account *provider.Account) provider.TestResult {
+	var key string
+	if account != nil {
+		key = account.Credential("api_key")
+	}
+	return provider.ProbeGET(ctx, provider.ModelsURL(d.baseURL(account), DefaultBaseURL),
+		map[string]string{"x-api-key": key, "anthropic-version": DefaultAnthropicVersion})
 }
 
 // baseURL returns the upstream host for the given account, falling

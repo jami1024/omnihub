@@ -231,7 +231,7 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 	// accounts / no DB), and the admin circuit handlers treat nil as
 	// "circuit data unavailable".
 	tracker := mountGatewayRoutes(r, registry)
-	mountAdminRoutes(r, tracker)
+	mountAdminRoutes(r, tracker, registry)
 
 	return r
 }
@@ -252,7 +252,7 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 // The SPA is served via gin's NoRoute fallback rather than a wildcard
 // route because /admin/api/* already lives under /admin/ and gin
 // disallows a catch-all sharing a prefix with concrete routes.
-func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker) {
+func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider.Registry) {
 	secret := os.Getenv("OMNIHUB_ADMIN_JWT_SECRET")
 	if secret == "" {
 		slog.Warn("/admin disabled: OMNIHUB_ADMIN_JWT_SECRET not set; the web UI will not authenticate")
@@ -294,6 +294,10 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker) {
 	authed.POST("/accounts", adminhandler.CreateAccountHandler(accountRepo))
 	authed.PATCH("/accounts/:id", adminhandler.UpdateAccountHandler(accountRepo))
 	authed.DELETE("/accounts/:id", adminhandler.DeleteAccountHandler(accountRepo))
+	// M8a — connectivity test: probe the form's values before saving, or
+	// an existing account by id using its stored credentials.
+	authed.POST("/accounts/test", adminhandler.TestAccountHandler(registry))
+	authed.POST("/accounts/:id/test", adminhandler.TestAccountByIDHandler(accountRepo, registry))
 
 	// M3 — virtual key management. Writes flow through the api_keys
 	// NOTIFY trigger (migration 0008), so the in-memory key pool refreshes

@@ -9,6 +9,7 @@ import {
   useAccounts,
   useCreateAccount,
   useDeleteAccount,
+  useTestAccountById,
   useUpdateAccount,
   type Account,
   type AccountInput,
@@ -124,6 +125,7 @@ export function AccountsPage() {
                       {a.credential_keys.length > 0 ? a.credential_keys.join(', ') : '—'}
                     </Td>
                     <Td className="text-right">
+                      <RowTest id={a.id} />
                       <button
                         onClick={() => openEdit(a)}
                         className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
@@ -210,5 +212,38 @@ function EmptyAccounts({ onCreate }: { onCreate: () => void }) {
       }
       visual={<AccountsGlyph />}
     />
+  )
+}
+
+// RowTest is an inline per-row connectivity probe. It tests the account's
+// stored credentials and shows a traffic-light dot with the latency /
+// message on hover.
+function RowTest({ id }: { id: number }) {
+  const test = useTestAccountById()
+  const r = test.data
+  const tone = !r
+    ? 'bg-line'
+    : r.status === 'green'
+      ? 'bg-emerald-500'
+      : r.status === 'yellow'
+        ? 'bg-amber-500'
+        : 'bg-danger'
+  const title = test.error
+    ? test.error instanceof ApiError
+      ? test.error.message
+      : 'Test failed'
+    : r
+      ? `${r.message}${r.http_status ? ` · HTTP ${r.http_status}` : ''} · ${r.latency_ms}ms`
+      : 'Test connectivity'
+  return (
+    <button
+      onClick={() => test.mutate(id)}
+      disabled={test.isPending}
+      title={title}
+      className="mr-3 inline-flex items-center gap-1.5 text-muted underline-offset-4 hover:text-ink hover:underline disabled:opacity-50"
+    >
+      <span className={`inline-block h-2 w-2 rounded-full ${test.error ? 'bg-danger' : tone}`} />
+      {test.isPending ? 'Testing…' : 'Test'}
+    </button>
   )
 }

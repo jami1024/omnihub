@@ -10,6 +10,7 @@
 package openai
 
 import (
+	"context"
 	"strings"
 
 	"github.com/jami1024/omnihub/internal/service/provider"
@@ -48,6 +49,17 @@ func (d *Driver) Capabilities() provider.Capabilities {
 		Tools:     true,
 		Vision:    true,
 	}
+}
+
+// Test probes the account with a GET /v1/models — cheap, token-free, and
+// it exercises both the base URL and the api_key auth.
+func (d *Driver) Test(ctx context.Context, account *provider.Account) provider.TestResult {
+	var base, key string
+	if account != nil {
+		base, key = account.BaseURL, account.Credential("api_key")
+	}
+	return provider.ProbeGET(ctx, provider.ModelsURL(base, DefaultBaseURL),
+		map[string]string{"Authorization": "Bearer " + key})
 }
 
 // endpointURL resolves the Chat Completions URL for an account,
