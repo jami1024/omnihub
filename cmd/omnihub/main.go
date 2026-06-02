@@ -65,6 +65,11 @@ var (
 
 const accountPoolRefreshInterval = 30 * time.Second
 
+// accountSpendRefreshInterval is how often the per-account spend guard
+// reloads daily / total USD totals from the DB. Matches the pool
+// refresh cadence; only accounts with a cap configured are queried.
+const accountSpendRefreshInterval = 30 * time.Second
+
 func main() {
 	// Dispatch on the first non-flag arg so this binary doubles as
 	// gateway daemon AND admin CLI. No args (or "serve") runs the
@@ -463,6 +468,15 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 	}
 
 	res := resolver.New(accountPool, registry, tracker, sessions)
+	// Per-account spend caps: a background-refreshed guard skips
+	// accounts that have reached their daily / total USD limit. Requires
+	// a DB-backed spend source; stays disabled in log-only mode.
+	if pool != nil {
+		accountGuard := limits.NewAccountGuard(repository.NewMessageRequestRepo(pool))
+		accountGuard.Start(context.Background(), accountPool.All, accountSpendRefreshInterval)
+		res.SetSpendFilter(accountGuard)
+		slog.Info("per-account spend caps enabled", "refresh_interval", accountSpendRefreshInterval)
+	}
 	forwarder := forward.New(nil)
 	// Hot-reloadable, DB-backed price source (built by setupPricePool).
 	// Falls back to the static defaults if the pool wasn't built.

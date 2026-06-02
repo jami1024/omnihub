@@ -60,6 +60,8 @@ export function AccountForm({
     numToStr(account?.circuit_half_open_success),
   )
   const [redirects, setRedirects] = useState<ModelRedirect[]>(account?.model_redirects ?? [])
+  const [dailyLimit, setDailyLimit] = useState(numToStr(account?.daily_usd_limit))
+  const [totalLimit, setTotalLimit] = useState(numToStr(account?.total_usd_limit))
   const [localErr, setLocalErr] = useState<string | null>(null)
 
   function updateRedirect(i: number, patch: Partial<ModelRedirect>) {
@@ -169,8 +171,8 @@ export function AccountForm({
       circuit_open_duration_ms: strToNum(openDurationMs),
       circuit_half_open_success: strToNum(halfOpenSuccess),
       model_redirects: cleanRedirects,
-      daily_usd_limit: account?.daily_usd_limit ?? null,
-      total_usd_limit: account?.total_usd_limit ?? null,
+      daily_usd_limit: strToNum(dailyLimit),
+      total_usd_limit: strToNum(totalLimit),
     }
     onSubmit(input)
   }
@@ -307,6 +309,40 @@ export function AccountForm({
           <button type="button" onClick={addRedirect} className="text-sm text-muted hover:text-ink">
             + add redirect
           </button>
+        </div>
+      </details>
+
+      <details className="rounded-lg border border-line p-3" open={dailyLimit !== '' || totalLimit !== ''}>
+        <summary className="cursor-pointer text-sm text-muted">
+          Spend caps (optional)
+        </summary>
+        <p className="mt-2 text-xs text-muted">
+          Stop routing to this account once its spend reaches a cap. Daily is a rolling 24-hour
+          window; total is lifetime. Leave blank for no cap.
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-4">
+          <Field label="Daily USD limit">
+            <input
+              className={FIELD}
+              type="number"
+              step="0.01"
+              min="0"
+              value={dailyLimit}
+              onChange={(e) => setDailyLimit(e.target.value)}
+              placeholder="no cap"
+            />
+          </Field>
+          <Field label="Total USD limit">
+            <input
+              className={FIELD}
+              type="number"
+              step="0.01"
+              min="0"
+              value={totalLimit}
+              onChange={(e) => setTotalLimit(e.target.value)}
+              placeholder="no cap"
+            />
+          </Field>
         </div>
       </details>
 

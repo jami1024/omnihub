@@ -167,3 +167,36 @@ func (r *MessageRequestRepo) SumCostByKey(ctx context.Context, keyName string) (
 	}
 	return total, nil
 }
+
+// SumCostByAccount returns the rolling 24h USD spend recorded against
+// the named upstream account. Mirrors SumCostByKey but groups on
+// account_name; used to enforce per-account daily spend caps.
+func (r *MessageRequestRepo) SumCostByAccount(ctx context.Context, accountName string) (float64, error) {
+	var total float64
+	err := r.pool.QueryRow(ctx, `
+        SELECT COALESCE(SUM(cost_usd), 0)::float8
+        FROM message_requests
+        WHERE account_name = $1
+          AND created_at > NOW() - INTERVAL '24 hours'`,
+		accountName).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("sum 24h cost for account %q: %w", accountName, err)
+	}
+	return total, nil
+}
+
+// TotalCostByAccount returns the lifetime USD spend recorded against the
+// named upstream account (no time bound); used to enforce per-account
+// total spend caps.
+func (r *MessageRequestRepo) TotalCostByAccount(ctx context.Context, accountName string) (float64, error) {
+	var total float64
+	err := r.pool.QueryRow(ctx, `
+        SELECT COALESCE(SUM(cost_usd), 0)::float8
+        FROM message_requests
+        WHERE account_name = $1`,
+		accountName).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("sum lifetime cost for account %q: %w", accountName, err)
+	}
+	return total, nil
+}

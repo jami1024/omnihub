@@ -48,6 +48,14 @@ type Resolver interface {
 	) (*provider.Account, provider.Driver, error)
 }
 
+// SpendFilter reports whether an account has exhausted a configured
+// per-account USD spend cap and should be skipped during selection. It
+// is an in-memory check (no I/O on the hot path), mirroring the health
+// tracker. Implemented by limits.AccountGuard.
+type SpendFilter interface {
+	OverLimit(a *provider.Account) bool
+}
+
 // WeightedResolver implements Resolver with priority + weighted-random
 // selection, health-aware filtering, and session stickiness.
 type WeightedResolver struct {
@@ -55,9 +63,18 @@ type WeightedResolver struct {
 	registry *provider.Registry
 	tracker  *health.Tracker
 	sessions *session.Store
+	spend    SpendFilter
 
 	mu  sync.Mutex
 	rng *rand.Rand
+}
+
+// SetSpendFilter installs an optional per-account spend-cap filter. Nil
+// (the default) disables spend filtering. Returns the resolver for
+// chaining.
+func (r *WeightedResolver) SetSpendFilter(f SpendFilter) *WeightedResolver {
+	r.spend = f
+	return r
 }
 
 // New returns a resolver wired against the given dependencies.
@@ -170,6 +187,9 @@ func (r *WeightedResolver) resolveSticky(
 		if a.ID != accountID {
 			continue
 		}
+		if r.spend != nil && r.spend.OverLimit(a) {
+			return nil
+		}
 		if len(allowed) == 0 {
 			return a
 		}
@@ -208,6 +228,9 @@ func (r *WeightedResolver) gather(allowed []string, excluded []int64) []*provide
 			continue
 		}
 		if r.tracker != nil && !r.tracker.IsAvailable(a.ID) {
+			continue
+		}
+		if r.spend != nil && r.spend.OverLimit(a) {
 			continue
 		}
 		out = append(out, a)
