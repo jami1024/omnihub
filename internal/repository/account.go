@@ -54,7 +54,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
                a.circuit_failure_threshold, a.circuit_open_duration_ms, a.circuit_half_open_success,
                a.model_redirects, a.daily_usd_limit, a.total_usd_limit,
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
-               a.custom_headers, a.endpoints
+               a.custom_headers, a.endpoints, a.health_probe_enabled
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.enabled = TRUE
@@ -86,7 +86,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			&failureThreshold, &openDurationMs, &halfOpenSuccess,
 			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 			&a.GroupID, &a.GroupName, &groupMultiplier,
-			&headersRaw, &endpointsRaw,
+			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled,
 		); err != nil {
 			return nil, fmt.Errorf("scan account row: %w", err)
 		}
@@ -224,9 +224,10 @@ type InsertParams struct {
 	ModelRedirects []provider.ModelRedirect
 	DailyUSDLimit  *float64
 	TotalUSDLimit  *float64
-	GroupID        *int64
-	CustomHeaders  map[string]string
-	Endpoints      []string
+	GroupID            *int64
+	CustomHeaders      map[string]string
+	Endpoints          []string
+	HealthProbeEnabled *bool
 }
 
 // marshalRedirects encodes a redirect rule set for the model_redirects
@@ -248,7 +249,7 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
                a.circuit_failure_threshold, a.circuit_open_duration_ms, a.circuit_half_open_success,
                a.model_redirects, a.daily_usd_limit, a.total_usd_limit,
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
-               a.custom_headers, a.endpoints
+               a.custom_headers, a.endpoints, a.health_probe_enabled
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          ORDER BY a.id ASC`
@@ -283,7 +284,7 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			&failureThreshold, &openDurationMs, &halfOpenSuccess,
 			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 			&a.GroupID, &a.GroupName, &groupMultiplier,
-			&headersRaw, &endpointsRaw,
+			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan account row: %w", err)
 		}
@@ -368,9 +369,10 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
             name, provider, enabled, weight, priority,
             cost_multiplier, base_url, credentials,
             circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success,
-            model_redirects, daily_usd_limit, total_usd_limit, group_id, custom_headers, endpoints
+            model_redirects, daily_usd_limit, total_usd_limit, group_id, custom_headers, endpoints,
+            health_probe_enabled
         )
-        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING id`
 
 	var id int64
@@ -379,6 +381,7 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
+		p.HealthProbeEnabled,
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -401,7 +404,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
                a.circuit_failure_threshold, a.circuit_open_duration_ms, a.circuit_half_open_success,
                a.model_redirects, a.daily_usd_limit, a.total_usd_limit,
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
-               a.custom_headers, a.endpoints
+               a.custom_headers, a.endpoints, a.health_probe_enabled
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.id = $1`
@@ -425,7 +428,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		&failureThreshold, &openDurationMs, &halfOpenSuccess,
 		&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 		&a.GroupID, &a.GroupName, &groupMultiplier,
-		&headersRaw, &endpointsRaw,
+		&headersRaw, &endpointsRaw, &a.HealthProbeEnabled,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -476,9 +479,10 @@ type UpdateParams struct {
 	ModelRedirects []provider.ModelRedirect
 	DailyUSDLimit  *float64
 	TotalUSDLimit  *float64
-	GroupID        *int64
-	CustomHeaders  map[string]string
-	Endpoints      []string
+	GroupID            *int64
+	CustomHeaders      map[string]string
+	Endpoints          []string
+	HealthProbeEnabled *bool
 }
 
 // Update replaces the mutable columns of the account identified by id.
@@ -523,14 +527,16 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
             circuit_failure_threshold = $9, circuit_open_duration_ms = $10,
             circuit_half_open_success = $11,
             model_redirects = $12, daily_usd_limit = $13, total_usd_limit = $14,
-            group_id = $15, custom_headers = $16, endpoints = $17, updated_at = NOW()
-         WHERE id = $18`
+            group_id = $15, custom_headers = $16, endpoints = $17,
+            health_probe_enabled = $18, updated_at = NOW()
+         WHERE id = $19`
 
 	tag, err := r.pool.Exec(ctx, q,
 		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
+		p.HealthProbeEnabled,
 		id,
 	)
 	if err != nil {

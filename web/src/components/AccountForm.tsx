@@ -69,6 +69,9 @@ export function AccountForm({
       : [],
   )
   const [endpoints, setEndpoints] = useState<string[]>(account?.endpoints ?? [])
+  const [healthProbe, setHealthProbe] = useState(
+    account?.health_probe_enabled == null ? '' : account.health_probe_enabled ? 'true' : 'false',
+  )
   const [dailyLimit, setDailyLimit] = useState(numToStr(account?.daily_usd_limit))
   const [totalLimit, setTotalLimit] = useState(numToStr(account?.total_usd_limit))
   const [localErr, setLocalErr] = useState<string | null>(null)
@@ -213,6 +216,7 @@ export function AccountForm({
       group_id: groupID === '' ? null : Number(groupID),
       custom_headers: cleanHeaders,
       endpoints: endpoints.map((e) => e.trim()).filter((e) => e !== ''),
+      health_probe_enabled: healthProbe === '' ? null : healthProbe === 'true',
     }
     onSubmit(input)
   }
@@ -287,16 +291,25 @@ export function AccountForm({
         </Field>
       </div>
 
-      <Field label="Group (optional)">
-        <select className={FIELD} value={groupID} onChange={(e) => setGroupID(e.target.value)}>
-          <option value="">Ungrouped</option>
-          {(groups ?? []).map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.name} (×{g.cost_multiplier})
-            </option>
-          ))}
-        </select>
-      </Field>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Group (optional)">
+          <select className={FIELD} value={groupID} onChange={(e) => setGroupID(e.target.value)}>
+            <option value="">Ungrouped</option>
+            {(groups ?? []).map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name} (×{g.cost_multiplier})
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Active health probe">
+          <select className={FIELD} value={healthProbe} onChange={(e) => setHealthProbe(e.target.value)}>
+            <option value="">Inherit default</option>
+            <option value="true">Enabled</option>
+            <option value="false">Disabled</option>
+          </select>
+        </Field>
+      </div>
 
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />

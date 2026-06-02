@@ -53,6 +53,7 @@ type accountDTO struct {
 	GroupName      string                    `json:"group_name"`
 	CustomHeaders  map[string]string         `json:"custom_headers"`
 	Endpoints      []string                  `json:"endpoints"`
+	HealthProbeEnabled *bool                 `json:"health_probe_enabled"`
 }
 
 // toDTO projects a provider.Account (+ its enabled flag) onto the
@@ -101,6 +102,7 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		GroupName:               a.GroupName,
 		CustomHeaders:           headers,
 		Endpoints:               endpoints,
+		HealthProbeEnabled:      a.HealthProbeEnabled,
 	}
 }
 
@@ -195,6 +197,7 @@ type accountInput struct {
 	GroupID        *int64                    `json:"group_id"`
 	CustomHeaders  map[string]string         `json:"custom_headers"`
 	Endpoints      []string                  `json:"endpoints"`
+	HealthProbeEnabled *bool                 `json:"health_probe_enabled"`
 }
 
 // circuitDuration converts the millisecond wire value into the
@@ -277,6 +280,7 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			GroupID:                 in.GroupID,
 			CustomHeaders:           headers,
 			Endpoints:               endpoints,
+			HealthProbeEnabled:      in.HealthProbeEnabled,
 		}
 
 		id, err := store.Insert(c.Request.Context(), params)
@@ -364,6 +368,7 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			GroupID:                 in.GroupID,
 			CustomHeaders:           headers,
 			Endpoints:               endpoints,
+			HealthProbeEnabled:      in.HealthProbeEnabled,
 		}
 
 		if err := store.Update(c.Request.Context(), id, params); err != nil {

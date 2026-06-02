@@ -104,6 +104,12 @@ type Account struct {
 	// status. They share this account's credentials. Empty means
 	// "BaseURL only".
 	Endpoints []string
+
+	// HealthProbeEnabled opts this account into (or out of) the active
+	// background health prober. Nil means "inherit the global default"
+	// (OMNIHUB_HEALTH_PROBE_ENABLED); a non-nil value is an explicit
+	// per-account override. Mirrors the nullable circuit overrides.
+	HealthProbeEnabled *bool
 }
 
 // EndpointURLs returns the ordered list of base URLs to try for this

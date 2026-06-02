@@ -487,6 +487,20 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 		res.SetSpendFilter(accountGuard)
 		slog.Info("per-account spend caps enabled", "refresh_interval", accountSpendRefreshInterval)
 	}
+
+	// Active health probes: a background prober checks each opted-in
+	// account's upstream reachability and feeds the verdict into the same
+	// circuit breaker the resolver already honours, so a sick upstream is
+	// taken out of rotation before user traffic hits it. Globally off by
+	// default (probes cost a real upstream GET); opt in per account.
+	probeCfg := loadHealthProbeConfig()
+	prober := health.NewProber(tracker, registry, probeCfg.GlobalDefault, probeCfg.Concurrency)
+	prober.Start(context.Background(), accountPool.All, probeCfg.Interval)
+	slog.Info("active health probes started",
+		"global_default", probeCfg.GlobalDefault,
+		"interval", probeCfg.Interval,
+		"concurrency", probeCfg.Concurrency)
+
 	forwarder := forward.New(nil)
 	// Hot-reloadable, DB-backed price source (built by setupPricePool).
 	// Falls back to the static defaults if the pool wasn't built.
@@ -765,6 +779,54 @@ func loadHealthConfig() health.Config {
 		} else {
 			slog.Warn("OMNIHUB_CIRCUIT_HALF_OPEN_SUCCESS invalid; using default",
 				"value", v, "default", cfg.HalfOpenSuccessThreshold)
+		}
+	}
+
+	return cfg
+}
+
+// healthProbeConfig is the resolved active-health-probe configuration.
+type healthProbeConfig struct {
+	GlobalDefault bool          // default for accounts with health_probe_enabled = NULL
+	Interval      time.Duration // between probe passes
+	Concurrency   int           // max simultaneous upstream probes
+}
+
+// loadHealthProbeConfig builds the active-health-probe configuration.
+//
+//   - OMNIHUB_HEALTH_PROBE_ENABLED      bool ("true"/"false"); default false.
+//     The global default for accounts that don't override via the
+//     health_probe_enabled column. The prober loop always runs so a
+//     per-account true is still honoured.
+//   - OMNIHUB_HEALTH_PROBE_INTERVAL     Go duration; default 60s, min 10s.
+//   - OMNIHUB_HEALTH_PROBE_CONCURRENCY  integer; default 4, clamped 1..16.
+func loadHealthProbeConfig() healthProbeConfig {
+	cfg := healthProbeConfig{GlobalDefault: false, Interval: 60 * time.Second, Concurrency: 4}
+
+	if v := os.Getenv("OMNIHUB_HEALTH_PROBE_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.GlobalDefault = b
+		} else {
+			slog.Warn("OMNIHUB_HEALTH_PROBE_ENABLED invalid; using default",
+				"value", v, "default", cfg.GlobalDefault)
+		}
+	}
+
+	if v := os.Getenv("OMNIHUB_HEALTH_PROBE_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= 10*time.Second {
+			cfg.Interval = d
+		} else {
+			slog.Warn("OMNIHUB_HEALTH_PROBE_INTERVAL invalid or < 10s; using default",
+				"value", v, "default", cfg.Interval)
+		}
+	}
+
+	if v := os.Getenv("OMNIHUB_HEALTH_PROBE_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 16 {
+			cfg.Concurrency = n
+		} else {
+			slog.Warn("OMNIHUB_HEALTH_PROBE_CONCURRENCY invalid; using default",
+				"value", v, "default", cfg.Concurrency)
 		}
 	}
 
