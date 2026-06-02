@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './lib/auth'
 import { PortalAuthProvider, usePortalAuth } from './lib/portalAuth'
 import { LoginPage } from './pages/Login'
 import { AccountsPage } from './pages/Accounts'
+import { GroupsPage } from './pages/Groups'
 import { KeysPage } from './pages/Keys'
 import { BlockedIPsPage } from './pages/BlockedIPs'
 import { HealthPage } from './pages/Health'
@@ -56,6 +57,7 @@ function AdminRoutes() {
       <Route path="login" element={<LoginPage />} />
       <Route path="" element={<AdminProtected><Suspense fallback={<PageLoading />}><DashboardPage /></Suspense></AdminProtected>} />
       <Route path="accounts" element={<AdminProtected><AccountsPage /></AdminProtected>} />
+      <Route path="groups" element={<AdminProtected><GroupsPage /></AdminProtected>} />
       <Route path="keys" element={<AdminProtected><KeysPage /></AdminProtected>} />
       <Route path="blocked-ips" element={<AdminProtected><BlockedIPsPage /></AdminProtected>} />
       <Route path="health" element={<AdminProtected><HealthPage /></AdminProtected>} />

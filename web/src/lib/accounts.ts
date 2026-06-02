@@ -35,6 +35,8 @@ export interface Account {
   model_redirects: ModelRedirect[]
   daily_usd_limit: number | null
   total_usd_limit: number | null
+  group_id: number | null
+  group_name: string
 }
 
 // AccountInput is the create/update body. On create, credentials is
@@ -55,6 +57,7 @@ export interface AccountInput {
   model_redirects: ModelRedirect[]
   daily_usd_limit: number | null
   total_usd_limit: number | null
+  group_id: number | null
 }
 
 const ACCOUNTS_KEY = ['accounts'] as const

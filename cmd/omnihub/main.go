@@ -271,6 +271,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	issuer := admin.NewIssuer([]byte(secret), 24*time.Hour)
 	adminUserRepo := repository.NewAdminUserRepo(pool)
 	accountRepo := repository.NewAccountRepo(pool)
+	groupRepo := repository.NewProviderGroupRepo(pool)
 	apiKeyRepo := repository.NewApiKeyRepo(pool)
 	blockedIPRepo := repository.NewBlockedIPRepo(pool)
 	messageRepo := repository.NewMessageRequestRepo(pool)
@@ -303,6 +304,15 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	// an existing account by id using its stored credentials.
 	authed.POST("/accounts/test", adminhandler.TestAccountHandler(registry))
 	authed.POST("/accounts/:id/test", adminhandler.TestAccountByIDHandler(accountRepo, registry))
+
+	// M8b-3 — provider groups: organisational buckets with a shared cost
+	// multiplier. The provider_groups NOTIFY trigger (migration 0018)
+	// refreshes the account pool so group-multiplier edits take effect
+	// without a restart.
+	authed.GET("/groups", adminhandler.ListGroupsHandler(groupRepo))
+	authed.POST("/groups", adminhandler.CreateGroupHandler(groupRepo))
+	authed.PATCH("/groups/:id", adminhandler.UpdateGroupHandler(groupRepo))
+	authed.DELETE("/groups/:id", adminhandler.DeleteGroupHandler(groupRepo))
 
 	// M3 — virtual key management. Writes flow through the api_keys
 	// NOTIFY trigger (migration 0008), so the in-memory key pool refreshes

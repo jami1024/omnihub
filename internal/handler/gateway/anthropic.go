@@ -412,7 +412,7 @@ func computeCost(
 		)
 		return nil, nil
 	}
-	final := base.ApplyMultiplier(account.CostMultiplier)
+	final := base.ApplyMultiplier(account.EffectiveCostMultiplier())
 	return &final.Total, &final
 }
 

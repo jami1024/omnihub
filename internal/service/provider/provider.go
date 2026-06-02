@@ -84,6 +84,29 @@ type Account struct {
 	// respectively). Nil means "no cap".
 	DailyUSDLimit *float64
 	TotalUSDLimit *float64
+
+	// GroupID / GroupName / GroupCostMultiplier describe the optional
+	// provider group this account belongs to. GroupID nil means
+	// ungrouped. GroupCostMultiplier defaults to 1.0 (loaded via JOIN);
+	// it stacks on top of the account's own CostMultiplier for billing.
+	GroupID             *int64
+	GroupName           string
+	GroupCostMultiplier float64
+}
+
+// EffectiveCostMultiplier is the factor applied to upstream cost for
+// billing: the account's own multiplier times its group's (when
+// grouped). A zero/unset group multiplier is treated as 1.0 so an
+// ungrouped account bills at exactly its own multiplier.
+func (a *Account) EffectiveCostMultiplier() float64 {
+	if a == nil {
+		return 1
+	}
+	g := a.GroupCostMultiplier
+	if g <= 0 {
+		g = 1
+	}
+	return a.CostMultiplier * g
 }
 
 // Credential returns the value for the given credential key, or "" if

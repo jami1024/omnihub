@@ -49,6 +49,8 @@ type accountDTO struct {
 	ModelRedirects []provider.ModelRedirect `json:"model_redirects"`
 	DailyUSDLimit  *float64                  `json:"daily_usd_limit"`
 	TotalUSDLimit  *float64                  `json:"total_usd_limit"`
+	GroupID        *int64                    `json:"group_id"`
+	GroupName      string                    `json:"group_name"`
 }
 
 // toDTO projects a provider.Account (+ its enabled flag) onto the
@@ -85,6 +87,8 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		ModelRedirects:          redirects,
 		DailyUSDLimit:           a.DailyUSDLimit,
 		TotalUSDLimit:           a.TotalUSDLimit,
+		GroupID:                 a.GroupID,
+		GroupName:               a.GroupName,
 	}
 }
 
@@ -128,6 +132,7 @@ type accountInput struct {
 	ModelRedirects []provider.ModelRedirect `json:"model_redirects"`
 	DailyUSDLimit  *float64                  `json:"daily_usd_limit"`
 	TotalUSDLimit  *float64                  `json:"total_usd_limit"`
+	GroupID        *int64                    `json:"group_id"`
 }
 
 // circuitDuration converts the millisecond wire value into the
@@ -197,6 +202,7 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			ModelRedirects:          redirects,
 			DailyUSDLimit:           in.DailyUSDLimit,
 			TotalUSDLimit:           in.TotalUSDLimit,
+			GroupID:                 in.GroupID,
 		}
 
 		id, err := store.Insert(c.Request.Context(), params)
@@ -271,6 +277,7 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			ModelRedirects:          redirects,
 			DailyUSDLimit:           in.DailyUSDLimit,
 			TotalUSDLimit:           in.TotalUSDLimit,
+			GroupID:                 in.GroupID,
 		}
 
 		if err := store.Update(c.Request.Context(), id, params); err != nil {

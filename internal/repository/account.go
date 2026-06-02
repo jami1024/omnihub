@@ -49,13 +49,15 @@ func isUniqueViolation(err error) bool {
 // are excluded so the resolver sees only routable upstreams.
 func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, error) {
 	const q = `
-        SELECT id, name, provider, weight, priority, cost_multiplier,
-               COALESCE(base_url, ''), credentials,
-               circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success,
-               model_redirects, daily_usd_limit, total_usd_limit
-          FROM accounts
-         WHERE enabled = TRUE
-         ORDER BY priority ASC, id ASC`
+        SELECT a.id, a.name, a.provider, a.weight, a.priority, a.cost_multiplier,
+               COALESCE(a.base_url, ''), a.credentials,
+               a.circuit_failure_threshold, a.circuit_open_duration_ms, a.circuit_half_open_success,
+               a.model_redirects, a.daily_usd_limit, a.total_usd_limit,
+               a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8
+          FROM accounts a
+          LEFT JOIN provider_groups g ON a.group_id = g.id
+         WHERE a.enabled = TRUE
+         ORDER BY a.priority ASC, a.id ASC`
 
 	rows, err := r.pool.Query(ctx, q)
 	if err != nil {
@@ -73,16 +75,19 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			openDurationMs   *int64
 			halfOpenSuccess  *int
 			redirectsRaw     []byte
+			groupMultiplier  float64
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &a.Weight, &a.Priority, &multiplier,
 			&a.BaseURL, &credentialsRaw,
 			&failureThreshold, &openDurationMs, &halfOpenSuccess,
 			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
+			&a.GroupID, &a.GroupName, &groupMultiplier,
 		); err != nil {
 			return nil, fmt.Errorf("scan account row: %w", err)
 		}
 		a.CostMultiplier = multiplier
+		a.GroupCostMultiplier = groupMultiplier
 		applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
 		if err := decodeCredentials(&a, credentialsRaw); err != nil {
 			return nil, err
@@ -162,10 +167,12 @@ type InsertParams struct {
 	CircuitHalfOpenSuccess  *int
 
 	// Routing extras. ModelRedirects nil/empty writes '[]'; the USD
-	// limits nil writes NULL ("no cap").
+	// limits nil writes NULL ("no cap"); GroupID nil writes NULL
+	// (ungrouped).
 	ModelRedirects []provider.ModelRedirect
 	DailyUSDLimit  *float64
 	TotalUSDLimit  *float64
+	GroupID        *int64
 }
 
 // marshalRedirects encodes a redirect rule set for the model_redirects
@@ -182,12 +189,14 @@ func marshalRedirects(rules []provider.ModelRedirect) ([]byte, error) {
 // Used by the CLI list command and admin views.
 func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool, error) {
 	const q = `
-        SELECT id, name, provider, enabled, weight, priority, cost_multiplier,
-               COALESCE(base_url, ''), credentials,
-               circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success,
-               model_redirects, daily_usd_limit, total_usd_limit
-          FROM accounts
-         ORDER BY id ASC`
+        SELECT a.id, a.name, a.provider, a.enabled, a.weight, a.priority, a.cost_multiplier,
+               COALESCE(a.base_url, ''), a.credentials,
+               a.circuit_failure_threshold, a.circuit_open_duration_ms, a.circuit_half_open_success,
+               a.model_redirects, a.daily_usd_limit, a.total_usd_limit,
+               a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8
+          FROM accounts a
+          LEFT JOIN provider_groups g ON a.group_id = g.id
+         ORDER BY a.id ASC`
 	rows, err := r.pool.Query(ctx, q)
 	if err != nil {
 		return nil, nil, fmt.Errorf("query accounts: %w", err)
@@ -208,6 +217,7 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			openDurationMs   *int64
 			halfOpenSuccess  *int
 			redirectsRaw     []byte
+			groupMultiplier  float64
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &enabled,
@@ -215,10 +225,12 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			&a.BaseURL, &credentialsRaw,
 			&failureThreshold, &openDurationMs, &halfOpenSuccess,
 			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
+			&a.GroupID, &a.GroupName, &groupMultiplier,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan account row: %w", err)
 		}
 		a.CostMultiplier = multiplier
+		a.GroupCostMultiplier = groupMultiplier
 		applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
 		if err := decodeCredentials(&a, credentialsRaw); err != nil {
 			return nil, nil, err
@@ -284,9 +296,9 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
             name, provider, enabled, weight, priority,
             cost_multiplier, base_url, credentials,
             circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success,
-            model_redirects, daily_usd_limit, total_usd_limit
+            model_redirects, daily_usd_limit, total_usd_limit, group_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14)
+        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15)
         RETURNING id`
 
 	var id int64
@@ -294,7 +306,7 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
-		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit,
+		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID,
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -312,12 +324,14 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 // its enabled flag, and ErrAccountNotFound when no row matches.
 func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account, bool, error) {
 	const q = `
-        SELECT id, name, provider, enabled, weight, priority, cost_multiplier,
-               COALESCE(base_url, ''), credentials,
-               circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success,
-               model_redirects, daily_usd_limit, total_usd_limit
-          FROM accounts
-         WHERE id = $1`
+        SELECT a.id, a.name, a.provider, a.enabled, a.weight, a.priority, a.cost_multiplier,
+               COALESCE(a.base_url, ''), a.credentials,
+               a.circuit_failure_threshold, a.circuit_open_duration_ms, a.circuit_half_open_success,
+               a.model_redirects, a.daily_usd_limit, a.total_usd_limit,
+               a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8
+          FROM accounts a
+          LEFT JOIN provider_groups g ON a.group_id = g.id
+         WHERE a.id = $1`
 	var (
 		a                provider.Account
 		enabled          bool
@@ -327,6 +341,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		openDurationMs   *int64
 		halfOpenSuccess  *int
 		redirectsRaw     []byte
+		groupMultiplier  float64
 	)
 	err := r.pool.QueryRow(ctx, q, id).Scan(
 		&a.ID, &a.Name, &a.Provider, &enabled,
@@ -334,6 +349,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		&a.BaseURL, &credentialsRaw,
 		&failureThreshold, &openDurationMs, &halfOpenSuccess,
 		&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
+		&a.GroupID, &a.GroupName, &groupMultiplier,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -342,6 +358,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		return nil, false, fmt.Errorf("query account %d: %w", id, err)
 	}
 	a.CostMultiplier = multiplier
+	a.GroupCostMultiplier = groupMultiplier
 	applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
 	if err := decodeCredentials(&a, credentialsRaw); err != nil {
 		return nil, false, err
@@ -377,6 +394,7 @@ type UpdateParams struct {
 	ModelRedirects []provider.ModelRedirect
 	DailyUSDLimit  *float64
 	TotalUSDLimit  *float64
+	GroupID        *int64
 }
 
 // Update replaces the mutable columns of the account identified by id.
@@ -413,14 +431,14 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
             circuit_failure_threshold = $9, circuit_open_duration_ms = $10,
             circuit_half_open_success = $11,
             model_redirects = $12, daily_usd_limit = $13, total_usd_limit = $14,
-            updated_at = NOW()
-         WHERE id = $15`
+            group_id = $15, updated_at = NOW()
+         WHERE id = $16`
 
 	tag, err := r.pool.Exec(ctx, q,
 		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
-		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit,
+		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID,
 		id,
 	)
 	if err != nil {

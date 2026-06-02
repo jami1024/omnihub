@@ -10,6 +10,7 @@ import { getTheme, nextTheme, setTheme, type Theme } from '../lib/theme'
 const NAV = [
   { to: '/admin', label: 'Dashboard' },
   { to: '/admin/accounts', label: 'Accounts' },
+  { to: '/admin/groups', label: 'Groups' },
   { to: '/admin/keys', label: 'Keys' },
   { to: '/admin/blocked-ips', label: 'Blocked IPs' },
   { to: '/admin/health', label: 'Health' },

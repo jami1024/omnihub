@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ApiError } from '../lib/api'
+import { useGroups } from '../lib/groups'
 import {
   useTestAccount,
   useTestAccountById,
@@ -59,6 +60,8 @@ export function AccountForm({
   const [halfOpenSuccess, setHalfOpenSuccess] = useState(
     numToStr(account?.circuit_half_open_success),
   )
+  const { data: groups } = useGroups()
+  const [groupID, setGroupID] = useState(account?.group_id != null ? String(account.group_id) : '')
   const [redirects, setRedirects] = useState<ModelRedirect[]>(account?.model_redirects ?? [])
   const [dailyLimit, setDailyLimit] = useState(numToStr(account?.daily_usd_limit))
   const [totalLimit, setTotalLimit] = useState(numToStr(account?.total_usd_limit))
@@ -173,6 +176,7 @@ export function AccountForm({
       model_redirects: cleanRedirects,
       daily_usd_limit: strToNum(dailyLimit),
       total_usd_limit: strToNum(totalLimit),
+      group_id: groupID === '' ? null : Number(groupID),
     }
     onSubmit(input)
   }
@@ -219,6 +223,17 @@ export function AccountForm({
           />
         </Field>
       </div>
+
+      <Field label="Group (optional)">
+        <select className={FIELD} value={groupID} onChange={(e) => setGroupID(e.target.value)}>
+          <option value="">Ungrouped</option>
+          {(groups ?? []).map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name} (×{g.cost_multiplier})
+            </option>
+          ))}
+        </select>
+      </Field>
 
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
