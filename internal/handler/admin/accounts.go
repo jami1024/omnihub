@@ -52,6 +52,7 @@ type accountDTO struct {
 	GroupID        *int64                    `json:"group_id"`
 	GroupName      string                    `json:"group_name"`
 	CustomHeaders  map[string]string         `json:"custom_headers"`
+	Endpoints      []string                  `json:"endpoints"`
 }
 
 // toDTO projects a provider.Account (+ its enabled flag) onto the
@@ -76,6 +77,10 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 	if headers == nil {
 		headers = map[string]string{} // serialise as {} not null
 	}
+	endpoints := a.Endpoints
+	if endpoints == nil {
+		endpoints = []string{} // serialise as [] not null
+	}
 	return accountDTO{
 		ID:                      a.ID,
 		Name:                    a.Name,
@@ -95,6 +100,7 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		GroupID:                 a.GroupID,
 		GroupName:               a.GroupName,
 		CustomHeaders:           headers,
+		Endpoints:               endpoints,
 	}
 }
 
@@ -141,6 +147,30 @@ func sanitizeHeaders(h map[string]string) (map[string]string, string) {
 	return out, ""
 }
 
+// sanitizeEndpoints trims each additional endpoint URL, drops blanks,
+// and validates the rest with the same SSRF guard used for base_url.
+// Returns the cleaned list (nil when empty) or an error message.
+func sanitizeEndpoints(eps []string) ([]string, string) {
+	if len(eps) == 0 {
+		return nil, ""
+	}
+	out := make([]string, 0, len(eps))
+	for i, e := range eps {
+		u := strings.TrimSpace(e)
+		if u == "" {
+			continue
+		}
+		if err := provider.ValidateUpstreamURL(u); err != nil {
+			return nil, "endpoint " + strconv.Itoa(i+1) + " rejected: " + err.Error()
+		}
+		out = append(out, u)
+	}
+	if len(out) == 0 {
+		return nil, ""
+	}
+	return out, ""
+}
+
 // accountInput is the create/update request body. Numeric defaults are
 // applied in the create path only; update is a full replace and the SPA
 // always re-submits every field. Credentials are optional on update
@@ -164,6 +194,7 @@ type accountInput struct {
 	TotalUSDLimit  *float64                  `json:"total_usd_limit"`
 	GroupID        *int64                    `json:"group_id"`
 	CustomHeaders  map[string]string         `json:"custom_headers"`
+	Endpoints      []string                  `json:"endpoints"`
 }
 
 // circuitDuration converts the millisecond wire value into the
@@ -222,6 +253,11 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			writeBadRequest(c, herr)
 			return
 		}
+		endpoints, eerr := sanitizeEndpoints(in.Endpoints)
+		if eerr != "" {
+			writeBadRequest(c, eerr)
+			return
+		}
 
 		params := repository.InsertParams{
 			Name:                    in.Name,
@@ -240,6 +276,7 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			TotalUSDLimit:           in.TotalUSDLimit,
 			GroupID:                 in.GroupID,
 			CustomHeaders:           headers,
+			Endpoints:               endpoints,
 		}
 
 		id, err := store.Insert(c.Request.Context(), params)
@@ -303,6 +340,11 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			writeBadRequest(c, herr)
 			return
 		}
+		endpoints, eerr := sanitizeEndpoints(in.Endpoints)
+		if eerr != "" {
+			writeBadRequest(c, eerr)
+			return
+		}
 
 		params := repository.UpdateParams{
 			Name:                    in.Name,
@@ -321,6 +363,7 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			TotalUSDLimit:           in.TotalUSDLimit,
 			GroupID:                 in.GroupID,
 			CustomHeaders:           headers,
+			Endpoints:               endpoints,
 		}
 
 		if err := store.Update(c.Request.Context(), id, params); err != nil {

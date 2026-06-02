@@ -54,7 +54,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
                a.circuit_failure_threshold, a.circuit_open_duration_ms, a.circuit_half_open_success,
                a.model_redirects, a.daily_usd_limit, a.total_usd_limit,
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
-               a.custom_headers
+               a.custom_headers, a.endpoints
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.enabled = TRUE
@@ -78,6 +78,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			redirectsRaw     []byte
 			groupMultiplier  float64
 			headersRaw       []byte
+			endpointsRaw     []byte
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &a.Weight, &a.Priority, &multiplier,
@@ -85,7 +86,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			&failureThreshold, &openDurationMs, &halfOpenSuccess,
 			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 			&a.GroupID, &a.GroupName, &groupMultiplier,
-			&headersRaw,
+			&headersRaw, &endpointsRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan account row: %w", err)
 		}
@@ -99,6 +100,9 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			return nil, err
 		}
 		if err := decodeHeaders(&a, headersRaw); err != nil {
+			return nil, err
+		}
+		if err := decodeEndpoints(&a, endpointsRaw); err != nil {
 			return nil, err
 		}
 		out = append(out, &a)
@@ -162,6 +166,27 @@ func marshalHeaders(h map[string]string) ([]byte, error) {
 	return json.Marshal(h)
 }
 
+// decodeEndpoints unmarshals the endpoints JSONB array onto the account.
+// An empty / "[]" payload leaves Endpoints nil.
+func decodeEndpoints(a *provider.Account, raw []byte) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(raw, &a.Endpoints); err != nil {
+		return fmt.Errorf("decode endpoints for account %q: %w", a.Name, err)
+	}
+	return nil
+}
+
+// marshalEndpoints encodes the additional-endpoints list for the
+// endpoints JSONB column, defaulting nil/empty to "[]" (NOT NULL).
+func marshalEndpoints(e []string) ([]byte, error) {
+	if len(e) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(e)
+}
+
 // CountAll returns the total number of rows regardless of enabled
 // flag. Used by the bootstrap path to decide whether to seed from
 // environment variables on first boot.
@@ -201,6 +226,7 @@ type InsertParams struct {
 	TotalUSDLimit  *float64
 	GroupID        *int64
 	CustomHeaders  map[string]string
+	Endpoints      []string
 }
 
 // marshalRedirects encodes a redirect rule set for the model_redirects
@@ -222,7 +248,7 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
                a.circuit_failure_threshold, a.circuit_open_duration_ms, a.circuit_half_open_success,
                a.model_redirects, a.daily_usd_limit, a.total_usd_limit,
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
-               a.custom_headers
+               a.custom_headers, a.endpoints
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          ORDER BY a.id ASC`
@@ -248,6 +274,7 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			redirectsRaw     []byte
 			groupMultiplier  float64
 			headersRaw       []byte
+			endpointsRaw     []byte
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &enabled,
@@ -256,7 +283,7 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			&failureThreshold, &openDurationMs, &halfOpenSuccess,
 			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 			&a.GroupID, &a.GroupName, &groupMultiplier,
-			&headersRaw,
+			&headersRaw, &endpointsRaw,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan account row: %w", err)
 		}
@@ -270,6 +297,9 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			return nil, nil, err
 		}
 		if err := decodeHeaders(&a, headersRaw); err != nil {
+			return nil, nil, err
+		}
+		if err := decodeEndpoints(&a, endpointsRaw); err != nil {
 			return nil, nil, err
 		}
 		accounts = append(accounts, &a)
@@ -328,15 +358,19 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 	if err != nil {
 		return 0, fmt.Errorf("encode custom_headers: %w", err)
 	}
+	endpointsJSON, err := marshalEndpoints(p.Endpoints)
+	if err != nil {
+		return 0, fmt.Errorf("encode endpoints: %w", err)
+	}
 
 	const q = `
         INSERT INTO accounts (
             name, provider, enabled, weight, priority,
             cost_multiplier, base_url, credentials,
             circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success,
-            model_redirects, daily_usd_limit, total_usd_limit, group_id, custom_headers
+            model_redirects, daily_usd_limit, total_usd_limit, group_id, custom_headers, endpoints
         )
-        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         RETURNING id`
 
 	var id int64
@@ -344,7 +378,7 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
-		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON,
+		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -367,7 +401,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
                a.circuit_failure_threshold, a.circuit_open_duration_ms, a.circuit_half_open_success,
                a.model_redirects, a.daily_usd_limit, a.total_usd_limit,
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
-               a.custom_headers
+               a.custom_headers, a.endpoints
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.id = $1`
@@ -382,6 +416,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		redirectsRaw     []byte
 		groupMultiplier  float64
 		headersRaw       []byte
+		endpointsRaw     []byte
 	)
 	err := r.pool.QueryRow(ctx, q, id).Scan(
 		&a.ID, &a.Name, &a.Provider, &enabled,
@@ -390,7 +425,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		&failureThreshold, &openDurationMs, &halfOpenSuccess,
 		&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 		&a.GroupID, &a.GroupName, &groupMultiplier,
-		&headersRaw,
+		&headersRaw, &endpointsRaw,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -408,6 +443,9 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		return nil, false, err
 	}
 	if err := decodeHeaders(&a, headersRaw); err != nil {
+		return nil, false, err
+	}
+	if err := decodeEndpoints(&a, endpointsRaw); err != nil {
 		return nil, false, err
 	}
 	return &a, enabled, nil
@@ -440,6 +478,7 @@ type UpdateParams struct {
 	TotalUSDLimit  *float64
 	GroupID        *int64
 	CustomHeaders  map[string]string
+	Endpoints      []string
 }
 
 // Update replaces the mutable columns of the account identified by id.
@@ -471,6 +510,10 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
 	if err != nil {
 		return fmt.Errorf("encode custom_headers: %w", err)
 	}
+	endpointsJSON, err := marshalEndpoints(p.Endpoints)
+	if err != nil {
+		return fmt.Errorf("encode endpoints: %w", err)
+	}
 
 	const q = `
         UPDATE accounts SET
@@ -480,14 +523,14 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
             circuit_failure_threshold = $9, circuit_open_duration_ms = $10,
             circuit_half_open_success = $11,
             model_redirects = $12, daily_usd_limit = $13, total_usd_limit = $14,
-            group_id = $15, custom_headers = $16, updated_at = NOW()
-         WHERE id = $17`
+            group_id = $15, custom_headers = $16, endpoints = $17, updated_at = NOW()
+         WHERE id = $18`
 
 	tag, err := r.pool.Exec(ctx, q,
 		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
-		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON,
+		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
 		id,
 	)
 	if err != nil {

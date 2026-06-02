@@ -68,6 +68,7 @@ export function AccountForm({
       ? Object.entries(account.custom_headers).map(([key, value]) => ({ key, value }))
       : [],
   )
+  const [endpoints, setEndpoints] = useState<string[]>(account?.endpoints ?? [])
   const [dailyLimit, setDailyLimit] = useState(numToStr(account?.daily_usd_limit))
   const [totalLimit, setTotalLimit] = useState(numToStr(account?.total_usd_limit))
   const [localErr, setLocalErr] = useState<string | null>(null)
@@ -90,6 +91,16 @@ export function AccountForm({
   }
   function removeHeader(i: number) {
     setHeaders((rows) => rows.filter((_, j) => j !== i))
+  }
+
+  function updateEndpoint(i: number, value: string) {
+    setEndpoints((rows) => rows.map((r, j) => (j === i ? value : r)))
+  }
+  function addEndpoint() {
+    setEndpoints((rows) => [...rows, ''])
+  }
+  function removeEndpoint(i: number) {
+    setEndpoints((rows) => rows.filter((_, j) => j !== i))
   }
 
   const test = useTestAccount()
@@ -201,6 +212,7 @@ export function AccountForm({
       total_usd_limit: strToNum(totalLimit),
       group_id: groupID === '' ? null : Number(groupID),
       custom_headers: cleanHeaders,
+      endpoints: endpoints.map((e) => e.trim()).filter((e) => e !== ''),
     }
     onSubmit(input)
   }
@@ -229,6 +241,33 @@ export function AccountForm({
           placeholder="leave blank for the provider default"
         />
       </Field>
+
+      <details className="rounded-lg border border-line p-3" open={endpoints.length > 0}>
+        <summary className="cursor-pointer text-sm text-muted">Failover endpoints (optional)</summary>
+        <p className="mt-2 text-xs text-muted">
+          Additional base URLs (same credentials) tried in order after the Base URL when a request
+          fails with a transport error or a retriable status (5xx / 429), before failing over to
+          another account.
+        </p>
+        <div className="mt-3 space-y-2">
+          {endpoints.map((url, i) => (
+            <div key={i} className="flex gap-2">
+              <input
+                className={FIELD + ' flex-1'}
+                value={url}
+                onChange={(e) => updateEndpoint(i, e.target.value)}
+                placeholder="https://backup.example.com"
+              />
+              <button type="button" onClick={() => removeEndpoint(i)} className="btn btn-secondary px-2">
+                ✕
+              </button>
+            </div>
+          ))}
+          <button type="button" onClick={addEndpoint} className="text-sm text-muted hover:text-ink">
+            + add endpoint
+          </button>
+        </div>
+      </details>
 
       <div className="grid grid-cols-3 gap-4">
         <Field label="Weight">

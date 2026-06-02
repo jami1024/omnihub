@@ -105,6 +105,64 @@ func TestForwardCustomHeadersAppliedButCannotOverrideInvariants(t *testing.T) {
 	}
 }
 
+func TestForwardEndpointFailover(t *testing.T) {
+	// First endpoint returns 503 (retriable) → forwarder must fail over
+	// to the second, whose 200 is what the client sees.
+	var firstHits, secondHits int
+	bad := upstreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		firstHits++
+		w.WriteHeader(503)
+		_, _ = w.Write([]byte(`{"error":"down"}`))
+	})
+	good := upstreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		secondHits++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"msg_ok","role":"assistant","model":"x","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	})
+
+	acct := anthropicAccount(bad.URL)
+	acct.Endpoints = []string{good.URL} // failover target
+
+	f := forward.New(bad.Client())
+	resp, _, err := f.Dispatch(context.Background(),
+		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 100},
+		anthropic.New(), acct)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("want 200 from failover endpoint, got %d", resp.StatusCode)
+	}
+	if firstHits != 1 || secondHits != 1 {
+		t.Errorf("expected 1 hit each (first=%d second=%d)", firstHits, secondHits)
+	}
+}
+
+func TestForwardEndpointFailoverAllRetriable(t *testing.T) {
+	// Both endpoints 503 → Dispatch returns the LAST response (still
+	// retriable) so the caller's inter-account loop can take over.
+	srv := upstreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(503)
+		_, _ = w.Write([]byte(`{"error":"down"}`))
+	})
+	acct := anthropicAccount(srv.URL)
+	acct.Endpoints = []string{srv.URL + "/b"} // distinct URL, same server → still 503
+
+	f := forward.New(srv.Client())
+	resp, _, err := f.Dispatch(context.Background(),
+		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 100},
+		anthropic.New(), acct)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 503 {
+		t.Errorf("want last 503 returned, got %d", resp.StatusCode)
+	}
+}
+
 func TestForwardStreamingFlushesEachEvent(t *testing.T) {
 	sse := strings.Join([]string{
 		"event: message_start",

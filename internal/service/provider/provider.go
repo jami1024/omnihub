@@ -98,6 +98,32 @@ type Account struct {
 	// override the gateway's security / streaming invariants (forwarded-
 	// for stripping, identity encoding) — those are re-asserted after.
 	CustomHeaders map[string]string
+
+	// Endpoints are ADDITIONAL upstream base URLs tried (in order) after
+	// BaseURL when a request fails with a transport error or retriable
+	// status. They share this account's credentials. Empty means
+	// "BaseURL only".
+	Endpoints []string
+}
+
+// EndpointURLs returns the ordered list of base URLs to try for this
+// account: BaseURL first, then any extra Endpoints, de-duplicated while
+// preserving order. The result always has at least one element (BaseURL,
+// which may be "" → the driver's default endpoint).
+func (a *Account) EndpointURLs() []string {
+	if a == nil {
+		return []string{""}
+	}
+	seen := map[string]struct{}{a.BaseURL: {}}
+	out := []string{a.BaseURL}
+	for _, e := range a.Endpoints {
+		if _, dup := seen[e]; dup {
+			continue
+		}
+		seen[e] = struct{}{}
+		out = append(out, e)
+	}
+	return out
 }
 
 // EffectiveCostMultiplier is the factor applied to upstream cost for

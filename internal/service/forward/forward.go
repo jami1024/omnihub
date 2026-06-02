@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -119,6 +120,57 @@ func (f *Forwarder) Dispatch(
 		return nil, time.Time{}, errors.New("forward: nil driver")
 	}
 
+	// Multi-endpoint failover: try each of the account's base URLs in
+	// order. A transport error or a retriable status (5xx / 429) on a
+	// non-final endpoint fails over to the next one; this runs BEFORE the
+	// caller's inter-account retry loop. Accounts with a single endpoint
+	// behave exactly as before (one iteration).
+	endpoints := account.EndpointURLs()
+	for i, ep := range endpoints {
+		last := i == len(endpoints)-1
+		acct := account
+		if account != nil && ep != account.BaseURL {
+			clone := *account
+			clone.BaseURL = ep
+			acct = &clone
+		}
+		resp, requestSentAt, err = f.dispatchOnce(ctx, req, driver, acct)
+		if err != nil {
+			if last {
+				return nil, requestSentAt, err
+			}
+			slog.Warn("endpoint dispatch failed; failing over to next endpoint",
+				"account", accountName(account), "endpoint_index", i, "err", err.Error())
+			continue
+		}
+		if !last && IsRetriable(resp.StatusCode) {
+			resp.Body.Close()
+			slog.Warn("endpoint returned retriable status; failing over to next endpoint",
+				"account", accountName(account), "endpoint_index", i, "status", resp.StatusCode)
+			continue
+		}
+		return resp, requestSentAt, nil
+	}
+	return nil, time.Time{}, errors.New("forward: no endpoints configured")
+}
+
+// accountName is a nil-safe label for logging.
+func accountName(a *provider.Account) string {
+	if a == nil {
+		return ""
+	}
+	return a.Name
+}
+
+// dispatchOnce sends a single upstream request for the given account
+// (whose BaseURL has already been set to the endpoint to try) and
+// returns the raw response.
+func (f *Forwarder) dispatchOnce(
+	ctx context.Context,
+	req *ir.UnifiedRequest,
+	driver provider.Driver,
+	account *provider.Account,
+) (resp *http.Response, requestSentAt time.Time, err error) {
 	// Per-account model redirect: rewrite the requested model name on a
 	// shallow copy so the shared request (and its billing model) is
 	// untouched for retries on other accounts. This is a matched-pair

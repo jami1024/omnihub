@@ -38,6 +38,7 @@ export interface Account {
   group_id: number | null
   group_name: string
   custom_headers: Record<string, string>
+  endpoints: string[]
 }
 
 // AccountInput is the create/update body. On create, credentials is
@@ -60,6 +61,7 @@ export interface AccountInput {
   total_usd_limit: number | null
   group_id: number | null
   custom_headers: Record<string, string>
+  endpoints: string[]
 }
 
 const ACCOUNTS_KEY = ['accounts'] as const
