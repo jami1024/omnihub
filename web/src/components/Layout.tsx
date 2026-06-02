@@ -14,6 +14,8 @@ const NAV = [
   { to: '/admin/blocked-ips', label: 'Blocked IPs' },
   { to: '/admin/health', label: 'Health' },
   { to: '/admin/prices', label: 'Prices' },
+  { to: '/admin/users', label: 'Users' },
+  { to: '/admin/settings', label: 'Settings' },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {

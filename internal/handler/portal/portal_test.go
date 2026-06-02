@@ -46,11 +46,19 @@ func (f *fakeUserStore) Insert(_ context.Context, p repository.UserInsertParams)
 
 func newIssuer() *admin.Issuer { return admin.NewIssuer([]byte("test-secret"), 0) }
 
+// fakeSettings returns a fixed portal policy. Defaults to permissive
+// (signup on, no caps) so most tests don't care about it.
+type fakeSettings struct{ s repository.PortalSettings }
+
+func (f fakeSettings) Get(context.Context) (repository.PortalSettings, error) { return f.s, nil }
+
+func permissive() fakeSettings { return fakeSettings{s: repository.PortalSettings{SignupEnabled: true}} }
+
 func TestSignupValidatesAndHashes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := &fakeUserStore{insertID: 1}
 	r := gin.New()
-	r.POST("/portal/api/signup", portal.SignupHandler(store, newIssuer()))
+	r.POST("/portal/api/signup", portal.SignupHandler(store, permissive(), newIssuer()))
 
 	// short password rejected
 	if rec := do(r, http.MethodPost, "/portal/api/signup", `{"username":"alice","password":"short"}`, ""); rec.Code != http.StatusBadRequest {
@@ -76,7 +84,7 @@ func TestSignupUsernameTaken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := &fakeUserStore{insertErr: repository.ErrUsernameTaken}
 	r := gin.New()
-	r.POST("/portal/api/signup", portal.SignupHandler(store, newIssuer()))
+	r.POST("/portal/api/signup", portal.SignupHandler(store, permissive(), newIssuer()))
 	rec := do(r, http.MethodPost, "/portal/api/signup", `{"username":"taken","password":"alicepw12345"}`, "")
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status %d want 409", rec.Code)
@@ -120,7 +128,7 @@ func engineWithUser(register func(r *gin.Engine)) *gin.Engine {
 func TestCreateKeyOwnedByUserAndCleartextOnce(t *testing.T) {
 	store := &fakeKeyStore{insertID: 3}
 	r := engineWithUser(func(r *gin.Engine) {
-		r.POST("/portal/api/keys", portal.CreateKeyHandler(store))
+		r.POST("/portal/api/keys", portal.CreateKeyHandler(store, permissive()))
 	})
 	rec := do(r, http.MethodPost, "/portal/api/keys", `{"name":"alice-key-1"}`, "")
 	if rec.Code != http.StatusCreated {
@@ -131,6 +139,39 @@ func TestCreateKeyOwnedByUserAndCleartextOnce(t *testing.T) {
 	}
 	if store.lastParams.Hash == "" || !strings.Contains(rec.Body.String(), `"key":"omni-`) {
 		t.Error("create must store a hash and return the cleartext once")
+	}
+}
+
+func TestSignupDisabledByPolicy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	closed := fakeSettings{s: repository.PortalSettings{SignupEnabled: false}}
+	r.POST("/portal/api/signup", portal.SignupHandler(&fakeUserStore{}, closed, newIssuer()))
+	rec := do(r, http.MethodPost, "/portal/api/signup", `{"username":"bob","password":"bobpw12345"}`, "")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d want 403 when signup disabled", rec.Code)
+	}
+}
+
+func TestCreateKeyClampsToPolicy(t *testing.T) {
+	max := 10.0
+	rpmMax := 60
+	pol := fakeSettings{s: repository.PortalSettings{SignupEnabled: true, KeyDailyUSDMax: &max, KeyRPMMax: &rpmMax}}
+	store := &fakeKeyStore{insertID: 1}
+	r := engineWithUser(func(r *gin.Engine) {
+		r.POST("/portal/api/keys", portal.CreateKeyHandler(store, pol))
+	})
+	// User asks for $100/day and 600 rpm; policy caps to $10 and 60.
+	rec := do(r, http.MethodPost, "/portal/api/keys",
+		`{"name":"k","daily_usd_limit":100,"rpm_limit":600}`, "")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status %d want 201 (%s)", rec.Code, rec.Body.String())
+	}
+	if store.lastParams.DailyUSDLimit == nil || *store.lastParams.DailyUSDLimit != 10 {
+		t.Errorf("daily clamped to 10, got %v", store.lastParams.DailyUSDLimit)
+	}
+	if store.lastParams.RPMLimit == nil || *store.lastParams.RPMLimit != 60 {
+		t.Errorf("rpm clamped to 60, got %v", store.lastParams.RPMLimit)
 	}
 }
 

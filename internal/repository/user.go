@@ -101,6 +101,77 @@ func (r *UserRepo) Insert(ctx context.Context, p UserInsertParams) (int64, error
 	return id, nil
 }
 
+// UserStat enriches a user row with the admin-management aggregates:
+// how many keys they own and how much they've spent in the last 30 days.
+type UserStat struct {
+	User
+	KeyCount int     `json:"key_count"`
+	Spend30d float64 `json:"spend_30d"`
+}
+
+// ListWithStats returns every user with their key count and 30-day
+// spend, newest first. The spend joins message_requests on key_name =
+// the key's name (portal keys carry no separate label, so this
+// attributes cleanly); the (key_name, created_at) index serves it.
+func (r *UserRepo) ListWithStats(ctx context.Context) ([]UserStat, error) {
+	const q = `
+        SELECT u.id, u.username, u.email, u.enabled, u.created_at,
+               COUNT(DISTINCT k.id) AS key_count,
+               COALESCE(SUM(mr.cost_usd), 0)::float8 AS spend_30d
+          FROM users u
+          LEFT JOIN api_keys k ON k.user_id = u.id
+          LEFT JOIN message_requests mr
+                 ON mr.key_name = k.name
+                AND mr.created_at > NOW() - INTERVAL '30 days'
+         GROUP BY u.id, u.username, u.email, u.enabled, u.created_at
+         ORDER BY u.created_at DESC`
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("query users with stats: %w", err)
+	}
+	defer rows.Close()
+	var out []UserStat
+	for rows.Next() {
+		var (
+			s     UserStat
+			email *string
+		)
+		if err := rows.Scan(&s.ID, &s.Username, &email, &s.Enabled, &s.CreatedAt, &s.KeyCount, &s.Spend30d); err != nil {
+			return nil, fmt.Errorf("scan user stat: %w", err)
+		}
+		if email != nil {
+			s.Email = *email
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// SetEnabled toggles a user's enabled flag (a disabled user can't log in).
+func (r *UserRepo) SetEnabled(ctx context.Context, id int64, enabled bool) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE users SET enabled = $2, updated_at = NOW() WHERE id = $1`, id, enabled)
+	if err != nil {
+		return fmt.Errorf("set user %d enabled: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// DeleteByID hard-deletes a user. Their keys survive but become unowned
+// (api_keys.user_id → NULL via the FK's ON DELETE SET NULL).
+func (r *UserRepo) DeleteByID(ctx context.Context, id int64) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete user %d: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
 // ListAll returns every user (admin management view), newest first.
 func (r *UserRepo) ListAll(ctx context.Context) ([]*User, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+userColumns+` FROM users ORDER BY created_at DESC`)

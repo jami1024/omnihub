@@ -93,6 +93,11 @@
     letter-spacing: -0.011em;
     text-wrap: balance;
   }
+  /* Keep native checkboxes/radios monochrome with the theme. */
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--ink);
+  }
   /* Visible keyboard focus everywhere; pointer clicks stay quiet. */
   :focus-visible {
     outline: 2px solid var(--brand);

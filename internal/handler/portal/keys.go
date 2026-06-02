@@ -89,8 +89,10 @@ type keyInput struct {
 
 // CreateKeyHandler handles POST /portal/api/keys. The key is generated
 // server-side and the cleartext returned exactly once; only the hash is
-// stored. The new key is owned by the authenticated user.
-func CreateKeyHandler(store keyStore) gin.HandlerFunc {
+// stored. The new key is owned by the authenticated user, and its limits
+// are clamped to the admin-set policy so an open-signup user can't mint
+// an unbounded (real-money) key.
+func CreateKeyHandler(store keyStore, settings settingsProvider) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		uid := guard.UserID(c)
 		var in keyInput
@@ -110,6 +112,12 @@ func CreateKeyHandler(store keyStore) gin.HandlerFunc {
 		if in.DailyUSDLimit != nil && *in.DailyUSDLimit < 0 {
 			writeBadRequest(c, "daily_usd_limit cannot be negative")
 			return
+		}
+		// Apply the admin policy: a blank limit takes the default; any
+		// limit is then capped at the ceiling.
+		if pol, err := settings.Get(c.Request.Context()); err == nil {
+			in.DailyUSDLimit = clampDaily(in.DailyUSDLimit, pol.KeyDailyUSDDefault, pol.KeyDailyUSDMax)
+			in.RPMLimit = clampRPM(in.RPMLimit, pol.KeyRPMMax)
 		}
 
 		cleartext, err := apikey.Generate()
@@ -149,6 +157,31 @@ func CreateKeyHandler(store keyStore) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusCreated, createKeyResponse{keyDTO: toKeyDTO(k, 0), Key: cleartext})
 	}
+}
+
+// clampDaily applies the daily-USD policy: a nil request takes the
+// default; the result is then capped at max (a nil/over-cap value
+// becomes max). Returns nil only when both default and max are nil.
+func clampDaily(req, def, max *float64) *float64 {
+	out := req
+	if out == nil {
+		out = def
+	}
+	if max != nil && (out == nil || *out > *max) {
+		m := *max
+		out = &m
+	}
+	return out
+}
+
+// clampRPM caps the requested RPM at max (a nil/over-cap value becomes
+// max). With no max, the request passes through.
+func clampRPM(req, max *int) *int {
+	if max != nil && (req == nil || *req > *max) {
+		m := *max
+		return &m
+	}
+	return req
 }
 
 // DeleteKeyHandler handles DELETE /portal/api/keys/:id — only the user's

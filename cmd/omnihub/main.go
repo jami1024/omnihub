@@ -333,16 +333,25 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker) {
 	// login mint a "user"-kind token (rejected by the admin guard); the
 	// rest is scoped to the authenticated user's own keys and usage.
 	userRepo := repository.NewUserRepo(pool)
+	portalSettingsRepo := repository.NewPortalSettingsRepo(pool)
 	userAuth := guard.NewUserAuthenticator(issuer)
 	papi := r.Group("/portal/api")
-	papi.POST("/signup", portalhandler.SignupHandler(userRepo, issuer))
+	papi.POST("/signup", portalhandler.SignupHandler(userRepo, portalSettingsRepo, issuer))
 	papi.POST("/login", portalhandler.LoginHandler(userRepo, issuer))
 	puser := papi.Group("", userAuth.Middleware())
 	puser.GET("/me", portalhandler.MeHandler(userRepo))
 	puser.GET("/keys", portalhandler.ListKeysHandler(apiKeyRepo, messageRepo))
-	puser.POST("/keys", portalhandler.CreateKeyHandler(apiKeyRepo))
+	puser.POST("/keys", portalhandler.CreateKeyHandler(apiKeyRepo, portalSettingsRepo))
 	puser.DELETE("/keys/:id", portalhandler.DeleteKeyHandler(apiKeyRepo))
 	puser.GET("/usage", portalhandler.UsageHandler(messageRepo, apiKeyRepo))
+
+	// M7 — admin oversight of portal users + the portal policy (signup
+	// toggle, per-key limit default/ceiling).
+	authed.GET("/users", adminhandler.ListUsersHandler(userRepo))
+	authed.PATCH("/users/:id", adminhandler.UpdateUserHandler(userRepo))
+	authed.DELETE("/users/:id", adminhandler.DeleteUserHandler(userRepo))
+	authed.GET("/settings", adminhandler.GetSettingsHandler(portalSettingsRepo))
+	authed.PUT("/settings", adminhandler.UpdateSettingsHandler(portalSettingsRepo))
 
 	if web.Available() {
 		// One bundle, served from the root, backs both surfaces: the admin

@@ -33,16 +33,28 @@ type userStore interface {
 	Insert(ctx context.Context, p repository.UserInsertParams) (int64, error)
 }
 
+// settingsProvider exposes the admin-controlled portal policy (signup
+// toggle + per-key limit default/ceiling).
+type settingsProvider interface {
+	Get(ctx context.Context) (repository.PortalSettings, error)
+}
+
 type credentials struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 	Email    string `json:"email"`
 }
 
-// SignupHandler handles POST /portal/api/signup — open self-registration.
-// On success it logs the user straight in (returns a portal token).
-func SignupHandler(store userStore, issuer *admin.Issuer) gin.HandlerFunc {
+// SignupHandler handles POST /portal/api/signup — self-registration,
+// gated on the admin's signup_enabled policy. On success it logs the
+// user straight in (returns a portal token).
+func SignupHandler(store userStore, settings settingsProvider, issuer *admin.Issuer) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if s, err := settings.Get(c.Request.Context()); err == nil && !s.SignupEnabled {
+			writeError(c, http.StatusForbidden, "signup_disabled",
+				"registration is closed; ask an administrator for an account")
+			return
+		}
 		var in credentials
 		if err := c.ShouldBindJSON(&in); err != nil {
 			writeBadRequest(c, "invalid JSON: "+err.Error())

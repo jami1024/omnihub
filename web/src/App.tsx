@@ -8,6 +8,8 @@ import { KeysPage } from './pages/Keys'
 import { BlockedIPsPage } from './pages/BlockedIPs'
 import { HealthPage } from './pages/Health'
 import { PricesPage } from './pages/Prices'
+import { UsersPage } from './pages/Users'
+import { SettingsPage } from './pages/Settings'
 import { PortalLoginPage } from './pages/portal/PortalLogin'
 import { PortalOverviewPage } from './pages/portal/PortalOverview'
 import { PortalKeysPage } from './pages/portal/PortalKeys'
@@ -58,6 +60,8 @@ function AdminRoutes() {
       <Route path="blocked-ips" element={<AdminProtected><BlockedIPsPage /></AdminProtected>} />
       <Route path="health" element={<AdminProtected><HealthPage /></AdminProtected>} />
       <Route path="prices" element={<AdminProtected><PricesPage /></AdminProtected>} />
+      <Route path="users" element={<AdminProtected><UsersPage /></AdminProtected>} />
+      <Route path="settings" element={<AdminProtected><SettingsPage /></AdminProtected>} />
       <Route path="*" element={<Navigate to="/admin" replace />} />
     </Routes>
   )
