@@ -24,8 +24,10 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jami1024/omnihub/internal/ir"
@@ -66,6 +68,9 @@ const maxCapturedErrorBodyBytes = 8 << 10
 // timeouts) that all upstream calls use.
 type Forwarder struct {
 	client *http.Client
+	// proxyClients caches one *http.Client per distinct account proxy
+	// URL so a proxied account adds no per-request client-build cost.
+	proxyClients sync.Map // map[string]*http.Client
 }
 
 // New returns a Forwarder using the given client. A nil client falls
@@ -80,24 +85,54 @@ func New(client *http.Client) *Forwarder {
 }
 
 func defaultClient() *http.Client {
-	return &http.Client{
-		// No Timeout — streaming responses may run for tens of seconds.
-		Transport: &http.Transport{
-			MaxIdleConnsPerHost:   100,
-			MaxConnsPerHost:       200,
-			MaxIdleConns:          1000,
-			IdleConnTimeout:       90 * time.Second,
-			ForceAttemptHTTP2:     true,
-			DisableCompression:    true,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			ResponseHeaderTimeout: 60 * time.Second,
-			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-		},
+	// No Timeout — streaming responses may run for tens of seconds.
+	return &http.Client{Transport: defaultTransport()}
+}
+
+// defaultTransport is the tuned transport shared by the default client
+// and each per-account proxied client (which sets Proxy on top).
+func defaultTransport() *http.Transport {
+	return &http.Transport{
+		MaxIdleConnsPerHost:   100,
+		MaxConnsPerHost:       200,
+		MaxIdleConns:          1000,
+		IdleConnTimeout:       90 * time.Second,
+		ForceAttemptHTTP2:     true,
+		DisableCompression:    true,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
 	}
+}
+
+// clientFor returns the HTTP client to use for an account: the shared
+// default client when the account has no proxy, or a cached client whose
+// transport routes through the account's proxy (http/https/socks5). A
+// malformed proxy URL falls back to the default client (logged once) so
+// a bad value degrades to a direct connection rather than failing every
+// request.
+func (f *Forwarder) clientFor(account *provider.Account) *http.Client {
+	if account == nil || account.ProxyURL == "" {
+		return f.client
+	}
+	if c, ok := f.proxyClients.Load(account.ProxyURL); ok {
+		return c.(*http.Client)
+	}
+	u, err := url.Parse(account.ProxyURL)
+	if err != nil || u.Host == "" {
+		slog.Warn("invalid account proxy_url; connecting directly",
+			"account", account.Name, "proxy_url", account.ProxyURL)
+		return f.client
+	}
+	tr := defaultTransport()
+	tr.Proxy = http.ProxyURL(u)
+	c := &http.Client{Transport: tr}
+	actual, _ := f.proxyClients.LoadOrStore(account.ProxyURL, c)
+	return actual.(*http.Client)
 }
 
 // Dispatch sends an upstream request and returns the response. The
@@ -225,7 +260,7 @@ func (f *Forwarder) dispatchOnce(
 	upstreamReq.Header.Set("Accept-Encoding", "identity")
 
 	requestSentAt = time.Now()
-	resp, err = f.client.Do(upstreamReq)
+	resp, err = f.clientFor(account).Do(upstreamReq)
 	if err != nil {
 		return nil, requestSentAt, fmt.Errorf("upstream call: %w", err)
 	}

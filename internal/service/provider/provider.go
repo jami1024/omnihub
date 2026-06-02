@@ -110,6 +110,10 @@ type Account struct {
 	// (OMNIHUB_HEALTH_PROBE_ENABLED); a non-nil value is an explicit
 	// per-account override. Mirrors the nullable circuit overrides.
 	HealthProbeEnabled *bool
+
+	// ProxyURL optionally routes this account's upstream requests through
+	// an http/https/socks5 proxy. Empty means connect directly.
+	ProxyURL string
 }
 
 // EndpointURLs returns the ordered list of base URLs to try for this

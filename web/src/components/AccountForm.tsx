@@ -69,6 +69,7 @@ export function AccountForm({
       : [],
   )
   const [endpoints, setEndpoints] = useState<string[]>(account?.endpoints ?? [])
+  const [proxyURL, setProxyURL] = useState(account?.proxy_url ?? '')
   const [healthProbe, setHealthProbe] = useState(
     account?.health_probe_enabled == null ? '' : account.health_probe_enabled ? 'true' : 'false',
   )
@@ -217,6 +218,7 @@ export function AccountForm({
       custom_headers: cleanHeaders,
       endpoints: endpoints.map((e) => e.trim()).filter((e) => e !== ''),
       health_probe_enabled: healthProbe === '' ? null : healthProbe === 'true',
+      proxy_url: proxyURL.trim(),
     }
     onSubmit(input)
   }
@@ -246,12 +248,22 @@ export function AccountForm({
         />
       </Field>
 
-      <details className="rounded-lg border border-line p-3" open={endpoints.length > 0}>
-        <summary className="cursor-pointer text-sm text-muted">Failover endpoints (optional)</summary>
-        <p className="mt-2 text-xs text-muted">
-          Additional base URLs (same credentials) tried in order after the Base URL when a request
-          fails with a transport error or a retriable status (5xx / 429), before failing over to
-          another account.
+      <details className="rounded-lg border border-line p-3" open={endpoints.length > 0 || proxyURL !== ''}>
+        <summary className="cursor-pointer text-sm text-muted">Network: failover & proxy (optional)</summary>
+        <div className="mt-3">
+          <Field label="Outbound proxy URL">
+            <input
+              className={FIELD}
+              value={proxyURL}
+              onChange={(e) => setProxyURL(e.target.value)}
+              placeholder="http://, https://, socks5:// — blank for direct"
+            />
+          </Field>
+        </div>
+        <p className="mt-3 text-xs text-muted">
+          Failover endpoints: additional base URLs (same credentials) tried in order after the Base
+          URL when a request fails with a transport error or a retriable status (5xx / 429), before
+          failing over to another account.
         </p>
         <div className="mt-3 space-y-2">
           {endpoints.map((url, i) => (

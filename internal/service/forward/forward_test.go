@@ -105,6 +105,47 @@ func TestForwardCustomHeadersAppliedButCannotOverrideInvariants(t *testing.T) {
 	}
 }
 
+func TestForwardRoutesThroughAccountProxy(t *testing.T) {
+	// A stand-in proxy: it records that it was hit and returns a 200 so
+	// the request never reaches the (unused) upstream. An account with
+	// ProxyURL set must route through it.
+	var proxyHits int
+	proxy := upstreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		proxyHits++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"msg_p","role":"assistant","model":"x","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	})
+
+	// An http:// upstream so the HTTP proxy receives the forwarded
+	// request directly (no CONNECT tunnel needed); the proxy answers it.
+	acct := anthropicAccount("http://anthropic.invalid")
+	acct.ProxyURL = proxy.URL // all upstream traffic must traverse the proxy
+
+	f := forward.New(nil) // default client; proxied client built on demand
+	resp, _, err := f.Dispatch(context.Background(),
+		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 100},
+		anthropic.New(), acct)
+	if err != nil {
+		t.Fatalf("Dispatch through proxy: %v", err)
+	}
+	defer resp.Body.Close()
+	if proxyHits == 0 {
+		t.Fatalf("expected the request to traverse the account proxy")
+	}
+	// A second dispatch reuses the cached proxied client (no assertion on
+	// internals, just exercise the cache path).
+	resp2, _, err := f.Dispatch(context.Background(),
+		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 100},
+		anthropic.New(), acct)
+	if err == nil {
+		resp2.Body.Close()
+	}
+	if proxyHits < 2 {
+		t.Errorf("cached proxied client should also route through proxy, hits=%d", proxyHits)
+	}
+}
+
 func TestForwardEndpointFailover(t *testing.T) {
 	// First endpoint returns 503 (retriable) → forwarder must fail over
 	// to the second, whose 200 is what the client sees.

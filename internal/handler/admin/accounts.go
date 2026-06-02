@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,14 +47,15 @@ type accountDTO struct {
 	CircuitOpenDurationMs   *int64   `json:"circuit_open_duration_ms"`
 	CircuitHalfOpenSuccess  *int     `json:"circuit_half_open_success"`
 
-	ModelRedirects []provider.ModelRedirect `json:"model_redirects"`
-	DailyUSDLimit  *float64                  `json:"daily_usd_limit"`
-	TotalUSDLimit  *float64                  `json:"total_usd_limit"`
-	GroupID        *int64                    `json:"group_id"`
-	GroupName      string                    `json:"group_name"`
-	CustomHeaders  map[string]string         `json:"custom_headers"`
-	Endpoints      []string                  `json:"endpoints"`
-	HealthProbeEnabled *bool                 `json:"health_probe_enabled"`
+	ModelRedirects     []provider.ModelRedirect `json:"model_redirects"`
+	DailyUSDLimit      *float64                 `json:"daily_usd_limit"`
+	TotalUSDLimit      *float64                 `json:"total_usd_limit"`
+	GroupID            *int64                   `json:"group_id"`
+	GroupName          string                   `json:"group_name"`
+	CustomHeaders      map[string]string        `json:"custom_headers"`
+	Endpoints          []string                 `json:"endpoints"`
+	HealthProbeEnabled *bool                    `json:"health_probe_enabled"`
+	ProxyURL           string                   `json:"proxy_url"`
 }
 
 // toDTO projects a provider.Account (+ its enabled flag) onto the
@@ -103,6 +105,7 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		CustomHeaders:           headers,
 		Endpoints:               endpoints,
 		HealthProbeEnabled:      a.HealthProbeEnabled,
+		ProxyURL:                a.ProxyURL,
 	}
 }
 
@@ -149,6 +152,30 @@ func sanitizeHeaders(h map[string]string) (map[string]string, string) {
 	return out, ""
 }
 
+// sanitizeProxyURL trims the proxy URL and validates its scheme. Empty
+// is allowed (direct connection). Unlike base_url it is NOT SSRF-guarded
+// against private hosts — a local/internal proxy (e.g. socks5://
+// 127.0.0.1:1080) is a legitimate egress setup the operator chooses.
+func sanitizeProxyURL(raw string) (string, string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", "proxy URL is not a valid URL"
+	}
+	switch u.Scheme {
+	case "http", "https", "socks5", "socks5h":
+	default:
+		return "", "proxy URL scheme must be http, https, socks5, or socks5h"
+	}
+	if u.Host == "" {
+		return "", "proxy URL has no host"
+	}
+	return raw, ""
+}
+
 // sanitizeEndpoints trims each additional endpoint URL, drops blanks,
 // and validates the rest with the same SSRF guard used for base_url.
 // Returns the cleaned list (nil when empty) or an error message.
@@ -191,13 +218,14 @@ type accountInput struct {
 	CircuitOpenDurationMs   *int64 `json:"circuit_open_duration_ms"`
 	CircuitHalfOpenSuccess  *int   `json:"circuit_half_open_success"`
 
-	ModelRedirects []provider.ModelRedirect `json:"model_redirects"`
-	DailyUSDLimit  *float64                  `json:"daily_usd_limit"`
-	TotalUSDLimit  *float64                  `json:"total_usd_limit"`
-	GroupID        *int64                    `json:"group_id"`
-	CustomHeaders  map[string]string         `json:"custom_headers"`
-	Endpoints      []string                  `json:"endpoints"`
-	HealthProbeEnabled *bool                 `json:"health_probe_enabled"`
+	ModelRedirects     []provider.ModelRedirect `json:"model_redirects"`
+	DailyUSDLimit      *float64                 `json:"daily_usd_limit"`
+	TotalUSDLimit      *float64                 `json:"total_usd_limit"`
+	GroupID            *int64                   `json:"group_id"`
+	CustomHeaders      map[string]string        `json:"custom_headers"`
+	Endpoints          []string                 `json:"endpoints"`
+	HealthProbeEnabled *bool                    `json:"health_probe_enabled"`
+	ProxyURL           string                   `json:"proxy_url"`
 }
 
 // circuitDuration converts the millisecond wire value into the
@@ -261,6 +289,11 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			writeBadRequest(c, eerr)
 			return
 		}
+		proxyURL, perr := sanitizeProxyURL(in.ProxyURL)
+		if perr != "" {
+			writeBadRequest(c, perr)
+			return
+		}
 
 		params := repository.InsertParams{
 			Name:                    in.Name,
@@ -281,6 +314,7 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			CustomHeaders:           headers,
 			Endpoints:               endpoints,
 			HealthProbeEnabled:      in.HealthProbeEnabled,
+			ProxyURL:                proxyURL,
 		}
 
 		id, err := store.Insert(c.Request.Context(), params)
@@ -349,6 +383,11 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			writeBadRequest(c, eerr)
 			return
 		}
+		proxyURL, perr := sanitizeProxyURL(in.ProxyURL)
+		if perr != "" {
+			writeBadRequest(c, perr)
+			return
+		}
 
 		params := repository.UpdateParams{
 			Name:                    in.Name,
@@ -369,6 +408,7 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			CustomHeaders:           headers,
 			Endpoints:               endpoints,
 			HealthProbeEnabled:      in.HealthProbeEnabled,
+			ProxyURL:                proxyURL,
 		}
 
 		if err := store.Update(c.Request.Context(), id, params); err != nil {

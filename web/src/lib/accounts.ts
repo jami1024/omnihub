@@ -40,6 +40,7 @@ export interface Account {
   custom_headers: Record<string, string>
   endpoints: string[]
   health_probe_enabled: boolean | null
+  proxy_url: string
 }
 
 // AccountInput is the create/update body. On create, credentials is
@@ -64,6 +65,7 @@ export interface AccountInput {
   custom_headers: Record<string, string>
   endpoints: string[]
   health_probe_enabled: boolean | null
+  proxy_url: string
 }
 
 const ACCOUNTS_KEY = ['accounts'] as const
