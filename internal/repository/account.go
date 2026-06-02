@@ -51,7 +51,8 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 	const q = `
         SELECT id, name, provider, weight, priority, cost_multiplier,
                COALESCE(base_url, ''), credentials,
-               circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success
+               circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success,
+               model_redirects, daily_usd_limit, total_usd_limit
           FROM accounts
          WHERE enabled = TRUE
          ORDER BY priority ASC, id ASC`
@@ -71,17 +72,22 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			failureThreshold *int
 			openDurationMs   *int64
 			halfOpenSuccess  *int
+			redirectsRaw     []byte
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &a.Weight, &a.Priority, &multiplier,
 			&a.BaseURL, &credentialsRaw,
 			&failureThreshold, &openDurationMs, &halfOpenSuccess,
+			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 		); err != nil {
 			return nil, fmt.Errorf("scan account row: %w", err)
 		}
 		a.CostMultiplier = multiplier
 		applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
 		if err := decodeCredentials(&a, credentialsRaw); err != nil {
+			return nil, err
+		}
+		if err := decodeRedirects(&a, redirectsRaw); err != nil {
 			return nil, err
 		}
 		out = append(out, &a)
@@ -108,6 +114,18 @@ func decodeCredentials(a *provider.Account, raw []byte) error {
 	}
 	if err := json.Unmarshal(raw, &a.Credentials); err != nil {
 		return fmt.Errorf("decode credentials for account %q: %w", a.Name, err)
+	}
+	return nil
+}
+
+// decodeRedirects unmarshals the model_redirects JSONB array onto the
+// account. An empty / "[]" payload leaves ModelRedirects nil.
+func decodeRedirects(a *provider.Account, raw []byte) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(raw, &a.ModelRedirects); err != nil {
+		return fmt.Errorf("decode model_redirects for account %q: %w", a.Name, err)
 	}
 	return nil
 }
@@ -142,6 +160,22 @@ type InsertParams struct {
 	CircuitFailureThreshold *int
 	CircuitOpenDuration     *time.Duration
 	CircuitHalfOpenSuccess  *int
+
+	// Routing extras. ModelRedirects nil/empty writes '[]'; the USD
+	// limits nil writes NULL ("no cap").
+	ModelRedirects []provider.ModelRedirect
+	DailyUSDLimit  *float64
+	TotalUSDLimit  *float64
+}
+
+// marshalRedirects encodes a redirect rule set for the model_redirects
+// JSONB column, defaulting nil/empty to "[]" (never SQL NULL — the
+// column is NOT NULL).
+func marshalRedirects(rules []provider.ModelRedirect) ([]byte, error) {
+	if len(rules) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(rules)
 }
 
 // ListAll returns every row regardless of enabled flag, ordered by id.
@@ -150,7 +184,8 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 	const q = `
         SELECT id, name, provider, enabled, weight, priority, cost_multiplier,
                COALESCE(base_url, ''), credentials,
-               circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success
+               circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success,
+               model_redirects, daily_usd_limit, total_usd_limit
           FROM accounts
          ORDER BY id ASC`
 	rows, err := r.pool.Query(ctx, q)
@@ -172,18 +207,23 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			failureThreshold *int
 			openDurationMs   *int64
 			halfOpenSuccess  *int
+			redirectsRaw     []byte
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &enabled,
 			&a.Weight, &a.Priority, &multiplier,
 			&a.BaseURL, &credentialsRaw,
 			&failureThreshold, &openDurationMs, &halfOpenSuccess,
+			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan account row: %w", err)
 		}
 		a.CostMultiplier = multiplier
 		applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
 		if err := decodeCredentials(&a, credentialsRaw); err != nil {
+			return nil, nil, err
+		}
+		if err := decodeRedirects(&a, redirectsRaw); err != nil {
 			return nil, nil, err
 		}
 		accounts = append(accounts, &a)
@@ -234,13 +274,19 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 		openDurationMs = &ms
 	}
 
+	redirectsJSON, err := marshalRedirects(p.ModelRedirects)
+	if err != nil {
+		return 0, fmt.Errorf("encode model_redirects: %w", err)
+	}
+
 	const q = `
         INSERT INTO accounts (
             name, provider, enabled, weight, priority,
             cost_multiplier, base_url, credentials,
-            circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success
+            circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success,
+            model_redirects, daily_usd_limit, total_usd_limit
         )
-        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14)
         RETURNING id`
 
 	var id int64
@@ -248,6 +294,7 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
+		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit,
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -267,7 +314,8 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 	const q = `
         SELECT id, name, provider, enabled, weight, priority, cost_multiplier,
                COALESCE(base_url, ''), credentials,
-               circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success
+               circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success,
+               model_redirects, daily_usd_limit, total_usd_limit
           FROM accounts
          WHERE id = $1`
 	var (
@@ -278,12 +326,14 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		failureThreshold *int
 		openDurationMs   *int64
 		halfOpenSuccess  *int
+		redirectsRaw     []byte
 	)
 	err := r.pool.QueryRow(ctx, q, id).Scan(
 		&a.ID, &a.Name, &a.Provider, &enabled,
 		&a.Weight, &a.Priority, &multiplier,
 		&a.BaseURL, &credentialsRaw,
 		&failureThreshold, &openDurationMs, &halfOpenSuccess,
+		&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -294,6 +344,9 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 	a.CostMultiplier = multiplier
 	applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
 	if err := decodeCredentials(&a, credentialsRaw); err != nil {
+		return nil, false, err
+	}
+	if err := decodeRedirects(&a, redirectsRaw); err != nil {
 		return nil, false, err
 	}
 	return &a, enabled, nil
@@ -319,6 +372,11 @@ type UpdateParams struct {
 	CircuitFailureThreshold *int
 	CircuitOpenDuration     *time.Duration
 	CircuitHalfOpenSuccess  *int
+
+	// Routing extras (PUT-style replace, same as the other columns).
+	ModelRedirects []provider.ModelRedirect
+	DailyUSDLimit  *float64
+	TotalUSDLimit  *float64
 }
 
 // Update replaces the mutable columns of the account identified by id.
@@ -342,19 +400,27 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
 		openDurationMs = &ms
 	}
 
+	redirectsJSON, err := marshalRedirects(p.ModelRedirects)
+	if err != nil {
+		return fmt.Errorf("encode model_redirects: %w", err)
+	}
+
 	const q = `
         UPDATE accounts SET
             name = $1, provider = $2, enabled = $3, weight = $4, priority = $5,
             cost_multiplier = $6, base_url = NULLIF($7, ''),
             credentials = COALESCE($8, credentials),
             circuit_failure_threshold = $9, circuit_open_duration_ms = $10,
-            circuit_half_open_success = $11, updated_at = NOW()
-         WHERE id = $12`
+            circuit_half_open_success = $11,
+            model_redirects = $12, daily_usd_limit = $13, total_usd_limit = $14,
+            updated_at = NOW()
+         WHERE id = $15`
 
 	tag, err := r.pool.Exec(ctx, q,
 		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
+		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit,
 		id,
 	)
 	if err != nil {

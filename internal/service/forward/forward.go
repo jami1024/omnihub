@@ -119,7 +119,20 @@ func (f *Forwarder) Dispatch(
 		return nil, time.Time{}, errors.New("forward: nil driver")
 	}
 
-	upstreamReq, err := driver.BuildRequest(ctx, req, account)
+	// Per-account model redirect: rewrite the requested model name on a
+	// shallow copy so the shared request (and its billing model) is
+	// untouched for retries on other accounts. This is a matched-pair
+	// rename only — no cross-protocol transform.
+	buildReq := req
+	if account != nil && len(account.ModelRedirects) > 0 {
+		if mapped, ok := provider.ApplyModelRedirects(account.ModelRedirects, req.Model); ok && mapped != req.Model {
+			clone := *req
+			clone.Model = mapped
+			buildReq = &clone
+		}
+	}
+
+	upstreamReq, err := driver.BuildRequest(ctx, buildReq, account)
 	if err != nil {
 		return nil, time.Time{}, fmt.Errorf("build request: %w", err)
 	}

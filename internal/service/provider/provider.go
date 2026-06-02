@@ -73,6 +73,17 @@ type Account struct {
 	CircuitFailureThreshold *int
 	CircuitOpenDuration     *time.Duration
 	CircuitHalfOpenSuccess  *int
+
+	// ModelRedirects rewrites the requested model name before the
+	// driver builds its upstream request. Rules are evaluated in order;
+	// the first match wins. Empty means "forward the model unchanged".
+	ModelRedirects []ModelRedirect
+
+	// DailyUSDLimit / TotalUSDLimit are optional per-account spend
+	// ceilings the resolver enforces (rolling 24h and lifetime,
+	// respectively). Nil means "no cap".
+	DailyUSDLimit *float64
+	TotalUSDLimit *float64
 }
 
 // Credential returns the value for the given credential key, or "" if

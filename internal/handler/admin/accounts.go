@@ -45,6 +45,10 @@ type accountDTO struct {
 	CircuitFailureThreshold *int     `json:"circuit_failure_threshold"`
 	CircuitOpenDurationMs   *int64   `json:"circuit_open_duration_ms"`
 	CircuitHalfOpenSuccess  *int     `json:"circuit_half_open_success"`
+
+	ModelRedirects []provider.ModelRedirect `json:"model_redirects"`
+	DailyUSDLimit  *float64                  `json:"daily_usd_limit"`
+	TotalUSDLimit  *float64                  `json:"total_usd_limit"`
 }
 
 // toDTO projects a provider.Account (+ its enabled flag) onto the
@@ -61,6 +65,10 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		ms := a.CircuitOpenDuration.Milliseconds()
 		openMs = &ms
 	}
+	redirects := a.ModelRedirects
+	if redirects == nil {
+		redirects = []provider.ModelRedirect{} // serialise as [] not null
+	}
 	return accountDTO{
 		ID:                      a.ID,
 		Name:                    a.Name,
@@ -74,7 +82,29 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		CircuitFailureThreshold: a.CircuitFailureThreshold,
 		CircuitOpenDurationMs:   openMs,
 		CircuitHalfOpenSuccess:  a.CircuitHalfOpenSuccess,
+		ModelRedirects:          redirects,
+		DailyUSDLimit:           a.DailyUSDLimit,
+		TotalUSDLimit:           a.TotalUSDLimit,
 	}
+}
+
+// sanitizeRedirects trims and validates each redirect rule, returning
+// the cleaned set or an error message identifying the first bad rule.
+func sanitizeRedirects(rules []provider.ModelRedirect) ([]provider.ModelRedirect, string) {
+	if len(rules) == 0 {
+		return nil, ""
+	}
+	out := make([]provider.ModelRedirect, 0, len(rules))
+	for i, r := range rules {
+		r.Source = strings.TrimSpace(r.Source)
+		r.Target = strings.TrimSpace(r.Target)
+		if !r.Valid() {
+			return nil, "model redirect rule " + strconv.Itoa(i+1) +
+				" is invalid (check match type, source, target, and regex syntax)"
+		}
+		out = append(out, r)
+	}
+	return out, ""
 }
 
 // accountInput is the create/update request body. Numeric defaults are
@@ -94,6 +124,10 @@ type accountInput struct {
 	CircuitFailureThreshold *int   `json:"circuit_failure_threshold"`
 	CircuitOpenDurationMs   *int64 `json:"circuit_open_duration_ms"`
 	CircuitHalfOpenSuccess  *int   `json:"circuit_half_open_success"`
+
+	ModelRedirects []provider.ModelRedirect `json:"model_redirects"`
+	DailyUSDLimit  *float64                  `json:"daily_usd_limit"`
+	TotalUSDLimit  *float64                  `json:"total_usd_limit"`
 }
 
 // circuitDuration converts the millisecond wire value into the
@@ -142,6 +176,11 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			writeBadRequest(c, "credentials are required (at least api_key)")
 			return
 		}
+		redirects, rerr := sanitizeRedirects(in.ModelRedirects)
+		if rerr != "" {
+			writeBadRequest(c, rerr)
+			return
+		}
 
 		params := repository.InsertParams{
 			Name:                    in.Name,
@@ -155,6 +194,9 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			CircuitFailureThreshold: in.CircuitFailureThreshold,
 			CircuitOpenDuration:     in.circuitDuration(),
 			CircuitHalfOpenSuccess:  in.CircuitHalfOpenSuccess,
+			ModelRedirects:          redirects,
+			DailyUSDLimit:           in.DailyUSDLimit,
+			TotalUSDLimit:           in.TotalUSDLimit,
 		}
 
 		id, err := store.Insert(c.Request.Context(), params)
@@ -208,6 +250,11 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			writeBadRequest(c, "credentials cannot be empty; omit the field to keep the existing secret")
 			return
 		}
+		redirects, rerr := sanitizeRedirects(in.ModelRedirects)
+		if rerr != "" {
+			writeBadRequest(c, rerr)
+			return
+		}
 
 		params := repository.UpdateParams{
 			Name:                    in.Name,
@@ -221,6 +268,9 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			CircuitFailureThreshold: in.CircuitFailureThreshold,
 			CircuitOpenDuration:     in.circuitDuration(),
 			CircuitHalfOpenSuccess:  in.CircuitHalfOpenSuccess,
+			ModelRedirects:          redirects,
+			DailyUSDLimit:           in.DailyUSDLimit,
+			TotalUSDLimit:           in.TotalUSDLimit,
 		}
 
 		if err := store.Update(c.Request.Context(), id, params); err != nil {

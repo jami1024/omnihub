@@ -5,6 +5,8 @@ import {
   useTestAccountById,
   type Account,
   type AccountInput,
+  type ModelRedirect,
+  type ModelRedirectMatch,
   type TestResult,
 } from '../lib/accounts'
 
@@ -57,7 +59,18 @@ export function AccountForm({
   const [halfOpenSuccess, setHalfOpenSuccess] = useState(
     numToStr(account?.circuit_half_open_success),
   )
+  const [redirects, setRedirects] = useState<ModelRedirect[]>(account?.model_redirects ?? [])
   const [localErr, setLocalErr] = useState<string | null>(null)
+
+  function updateRedirect(i: number, patch: Partial<ModelRedirect>) {
+    setRedirects((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  }
+  function addRedirect() {
+    setRedirects((rows) => [...rows, { match_type: 'exact', source: '', target: '' }])
+  }
+  function removeRedirect(i: number) {
+    setRedirects((rows) => rows.filter((_, j) => j !== i))
+  }
 
   const test = useTestAccount()
   const testById = useTestAccountById()
@@ -128,6 +141,19 @@ export function AccountForm({
       return
     }
 
+    // Trim redirect rows and drop blank ones; flag a half-filled row.
+    const cleanRedirects: ModelRedirect[] = []
+    for (const r of redirects) {
+      const source = r.source.trim()
+      const target = r.target.trim()
+      if (!source && !target) continue
+      if (!source || !target) {
+        setLocalErr('A model redirect needs both a source and a target.')
+        return
+      }
+      cleanRedirects.push({ match_type: r.match_type, source, target })
+    }
+
     const input: AccountInput = {
       name: name.trim(),
       provider: provider.trim(),
@@ -142,6 +168,9 @@ export function AccountForm({
       circuit_failure_threshold: strToNum(failureThreshold),
       circuit_open_duration_ms: strToNum(openDurationMs),
       circuit_half_open_success: strToNum(halfOpenSuccess),
+      model_redirects: cleanRedirects,
+      daily_usd_limit: account?.daily_usd_limit ?? null,
+      total_usd_limit: account?.total_usd_limit ?? null,
     }
     onSubmit(input)
   }
@@ -234,6 +263,52 @@ export function AccountForm({
           + add credential
         </button>
       </fieldset>
+
+      <details className="rounded-lg border border-line p-3" open={redirects.length > 0}>
+        <summary className="cursor-pointer text-sm text-muted">
+          Model redirects (optional)
+        </summary>
+        <p className="mt-2 text-xs text-muted">
+          Rewrite the requested model to a different upstream model before sending. Rules run
+          top-to-bottom; the first match wins.
+        </p>
+        <div className="mt-3 space-y-2">
+          {redirects.map((row, i) => (
+            <div key={i} className="flex gap-2">
+              <select
+                className={FIELD + ' w-28'}
+                value={row.match_type}
+                onChange={(e) => updateRedirect(i, { match_type: e.target.value as ModelRedirectMatch })}
+              >
+                <option value="exact">exact</option>
+                <option value="prefix">prefix</option>
+                <option value="suffix">suffix</option>
+                <option value="contains">contains</option>
+                <option value="regex">regex</option>
+              </select>
+              <input
+                className={FIELD + ' flex-1'}
+                value={row.source}
+                onChange={(e) => updateRedirect(i, { source: e.target.value })}
+                placeholder="source (requested)"
+              />
+              <span className="self-center text-muted">→</span>
+              <input
+                className={FIELD + ' flex-1'}
+                value={row.target}
+                onChange={(e) => updateRedirect(i, { target: e.target.value })}
+                placeholder="target (upstream)"
+              />
+              <button type="button" onClick={() => removeRedirect(i)} className="btn btn-secondary px-2">
+                ✕
+              </button>
+            </div>
+          ))}
+          <button type="button" onClick={addRedirect} className="text-sm text-muted hover:text-ink">
+            + add redirect
+          </button>
+        </div>
+      </details>
 
       <details className="rounded-lg border border-line p-3">
         <summary className="cursor-pointer text-sm text-muted">

@@ -8,6 +8,17 @@ import { api } from './api'
 // the server never returns secret VALUES, only the key names that are
 // configured (credentialKeys), so the UI can show "api_key, aws_region"
 // without ever holding the secrets.
+// ModelRedirectMatch mirrors the server's match types. Rules rewrite a
+// requested model name to a different upstream model before dispatch;
+// first match wins.
+export type ModelRedirectMatch = 'exact' | 'prefix' | 'suffix' | 'contains' | 'regex'
+
+export interface ModelRedirect {
+  match_type: ModelRedirectMatch
+  source: string
+  target: string
+}
+
 export interface Account {
   id: number
   name: string
@@ -21,6 +32,9 @@ export interface Account {
   circuit_failure_threshold: number | null
   circuit_open_duration_ms: number | null
   circuit_half_open_success: number | null
+  model_redirects: ModelRedirect[]
+  daily_usd_limit: number | null
+  total_usd_limit: number | null
 }
 
 // AccountInput is the create/update body. On create, credentials is
@@ -38,6 +52,9 @@ export interface AccountInput {
   circuit_failure_threshold: number | null
   circuit_open_duration_ms: number | null
   circuit_half_open_success: number | null
+  model_redirects: ModelRedirect[]
+  daily_usd_limit: number | null
+  total_usd_limit: number | null
 }
 
 const ACCOUNTS_KEY = ['accounts'] as const
