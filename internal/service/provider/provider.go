@@ -92,6 +92,12 @@ type Account struct {
 	GroupID             *int64
 	GroupName           string
 	GroupCostMultiplier float64
+
+	// CustomHeaders are extra outbound HTTP headers applied to every
+	// upstream request for this account. Empty means none. They cannot
+	// override the gateway's security / streaming invariants (forwarded-
+	// for stripping, identity encoding) — those are re-asserted after.
+	CustomHeaders map[string]string
 }
 
 // EffectiveCostMultiplier is the factor applied to upstream cost for

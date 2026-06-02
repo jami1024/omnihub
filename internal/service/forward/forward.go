@@ -137,6 +137,16 @@ func (f *Forwarder) Dispatch(
 		return nil, time.Time{}, fmt.Errorf("build request: %w", err)
 	}
 
+	// Per-account custom headers, applied before the security / streaming
+	// invariants below so an operator header can add to or override the
+	// driver's headers but never defeat the forwarded-for strip or the
+	// forced identity encoding.
+	if account != nil {
+		for k, v := range account.CustomHeaders {
+			upstreamReq.Header.Set(k, v)
+		}
+	}
+
 	// Belt-and-suspenders: drivers should never set forwarding
 	// headers, but if a future driver inherits one from the inbound
 	// request it would leak the client's IP to the upstream. Drop

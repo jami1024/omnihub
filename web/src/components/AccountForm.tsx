@@ -63,6 +63,11 @@ export function AccountForm({
   const { data: groups } = useGroups()
   const [groupID, setGroupID] = useState(account?.group_id != null ? String(account.group_id) : '')
   const [redirects, setRedirects] = useState<ModelRedirect[]>(account?.model_redirects ?? [])
+  const [headers, setHeaders] = useState<CredRow[]>(
+    account?.custom_headers
+      ? Object.entries(account.custom_headers).map(([key, value]) => ({ key, value }))
+      : [],
+  )
   const [dailyLimit, setDailyLimit] = useState(numToStr(account?.daily_usd_limit))
   const [totalLimit, setTotalLimit] = useState(numToStr(account?.total_usd_limit))
   const [localErr, setLocalErr] = useState<string | null>(null)
@@ -75,6 +80,16 @@ export function AccountForm({
   }
   function removeRedirect(i: number) {
     setRedirects((rows) => rows.filter((_, j) => j !== i))
+  }
+
+  function updateHeader(i: number, patch: Partial<CredRow>) {
+    setHeaders((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  }
+  function addHeader() {
+    setHeaders((rows) => [...rows, { key: '', value: '' }])
+  }
+  function removeHeader(i: number) {
+    setHeaders((rows) => rows.filter((_, j) => j !== i))
   }
 
   const test = useTestAccount()
@@ -159,6 +174,14 @@ export function AccountForm({
       cleanRedirects.push({ match_type: r.match_type, source, target })
     }
 
+    // Collapse header rows into a map, dropping rows with a blank name.
+    const cleanHeaders: Record<string, string> = {}
+    for (const row of headers) {
+      const k = row.key.trim()
+      if (!k) continue
+      cleanHeaders[k] = row.value
+    }
+
     const input: AccountInput = {
       name: name.trim(),
       provider: provider.trim(),
@@ -177,6 +200,7 @@ export function AccountForm({
       daily_usd_limit: strToNum(dailyLimit),
       total_usd_limit: strToNum(totalLimit),
       group_id: groupID === '' ? null : Number(groupID),
+      custom_headers: cleanHeaders,
     }
     onSubmit(input)
   }
@@ -323,6 +347,40 @@ export function AccountForm({
           ))}
           <button type="button" onClick={addRedirect} className="text-sm text-muted hover:text-ink">
             + add redirect
+          </button>
+        </div>
+      </details>
+
+      <details className="rounded-lg border border-line p-3" open={headers.length > 0}>
+        <summary className="cursor-pointer text-sm text-muted">
+          Custom headers (optional)
+        </summary>
+        <p className="mt-2 text-xs text-muted">
+          Extra HTTP headers sent on every upstream request for this account (org id, beta flags,
+          routing hints). Forwarded-for and encoding headers are always enforced by the gateway.
+        </p>
+        <div className="mt-3 space-y-2">
+          {headers.map((row, i) => (
+            <div key={i} className="flex gap-2">
+              <input
+                className={FIELD + ' flex-1'}
+                value={row.key}
+                onChange={(e) => updateHeader(i, { key: e.target.value })}
+                placeholder="header name (e.g. X-Org-Id)"
+              />
+              <input
+                className={FIELD + ' flex-1'}
+                value={row.value}
+                onChange={(e) => updateHeader(i, { value: e.target.value })}
+                placeholder="value"
+              />
+              <button type="button" onClick={() => removeHeader(i)} className="btn btn-secondary px-2">
+                ✕
+              </button>
+            </div>
+          ))}
+          <button type="button" onClick={addHeader} className="text-sm text-muted hover:text-ink">
+            + add header
           </button>
         </div>
       </details>

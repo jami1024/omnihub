@@ -51,6 +51,7 @@ type accountDTO struct {
 	TotalUSDLimit  *float64                  `json:"total_usd_limit"`
 	GroupID        *int64                    `json:"group_id"`
 	GroupName      string                    `json:"group_name"`
+	CustomHeaders  map[string]string         `json:"custom_headers"`
 }
 
 // toDTO projects a provider.Account (+ its enabled flag) onto the
@@ -71,6 +72,10 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 	if redirects == nil {
 		redirects = []provider.ModelRedirect{} // serialise as [] not null
 	}
+	headers := a.CustomHeaders
+	if headers == nil {
+		headers = map[string]string{} // serialise as {} not null
+	}
 	return accountDTO{
 		ID:                      a.ID,
 		Name:                    a.Name,
@@ -89,6 +94,7 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		TotalUSDLimit:           a.TotalUSDLimit,
 		GroupID:                 a.GroupID,
 		GroupName:               a.GroupName,
+		CustomHeaders:           headers,
 	}
 }
 
@@ -107,6 +113,30 @@ func sanitizeRedirects(rules []provider.ModelRedirect) ([]provider.ModelRedirect
 				" is invalid (check match type, source, target, and regex syntax)"
 		}
 		out = append(out, r)
+	}
+	return out, ""
+}
+
+// sanitizeHeaders trims header names, drops entries with a blank name,
+// and rejects a name containing characters illegal in an HTTP field
+// name. Returns the cleaned map (nil when empty) or an error message.
+func sanitizeHeaders(h map[string]string) (map[string]string, string) {
+	if len(h) == 0 {
+		return nil, ""
+	}
+	out := make(map[string]string, len(h))
+	for k, v := range h {
+		name := strings.TrimSpace(k)
+		if name == "" {
+			continue
+		}
+		if strings.ContainsAny(name, " \t\r\n:") {
+			return nil, "custom header name " + strconv.Quote(name) + " contains illegal characters"
+		}
+		out[name] = v
+	}
+	if len(out) == 0 {
+		return nil, ""
 	}
 	return out, ""
 }
@@ -133,6 +163,7 @@ type accountInput struct {
 	DailyUSDLimit  *float64                  `json:"daily_usd_limit"`
 	TotalUSDLimit  *float64                  `json:"total_usd_limit"`
 	GroupID        *int64                    `json:"group_id"`
+	CustomHeaders  map[string]string         `json:"custom_headers"`
 }
 
 // circuitDuration converts the millisecond wire value into the
@@ -186,6 +217,11 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			writeBadRequest(c, rerr)
 			return
 		}
+		headers, herr := sanitizeHeaders(in.CustomHeaders)
+		if herr != "" {
+			writeBadRequest(c, herr)
+			return
+		}
 
 		params := repository.InsertParams{
 			Name:                    in.Name,
@@ -203,6 +239,7 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			DailyUSDLimit:           in.DailyUSDLimit,
 			TotalUSDLimit:           in.TotalUSDLimit,
 			GroupID:                 in.GroupID,
+			CustomHeaders:           headers,
 		}
 
 		id, err := store.Insert(c.Request.Context(), params)
@@ -261,6 +298,11 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			writeBadRequest(c, rerr)
 			return
 		}
+		headers, herr := sanitizeHeaders(in.CustomHeaders)
+		if herr != "" {
+			writeBadRequest(c, herr)
+			return
+		}
 
 		params := repository.UpdateParams{
 			Name:                    in.Name,
@@ -278,6 +320,7 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			DailyUSDLimit:           in.DailyUSDLimit,
 			TotalUSDLimit:           in.TotalUSDLimit,
 			GroupID:                 in.GroupID,
+			CustomHeaders:           headers,
 		}
 
 		if err := store.Update(c.Request.Context(), id, params); err != nil {

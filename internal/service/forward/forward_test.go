@@ -69,6 +69,42 @@ func TestForwardNonStreamingHappyPath(t *testing.T) {
 	}
 }
 
+func TestForwardCustomHeadersAppliedButCannotOverrideInvariants(t *testing.T) {
+	srv := upstreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Org-Id"); got != "acme" {
+			t.Errorf("custom header X-Org-Id: want acme, got %q", got)
+		}
+		// The custom header tried to set these; the gateway's invariants
+		// must win regardless.
+		if got := r.Header.Get("Accept-Encoding"); got != "identity" {
+			t.Errorf("Accept-Encoding must stay identity, got %q", got)
+		}
+		if got := r.Header.Get("X-Forwarded-For"); got != "" {
+			t.Errorf("X-Forwarded-For must be stripped, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"msg_1","role":"assistant","model":"x","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	})
+
+	acct := anthropicAccount(srv.URL)
+	acct.CustomHeaders = map[string]string{
+		"X-Org-Id":        "acme",
+		"Accept-Encoding": "gzip",      // must be overridden back to identity
+		"X-Forwarded-For": "9.9.9.9",   // must be stripped
+	}
+
+	f := forward.New(srv.Client())
+	rec := httptest.NewRecorder()
+	if _, err := f.Forward(
+		context.Background(), rec,
+		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 100},
+		anthropic.New(), acct, usage.Anthropic,
+	); err != nil {
+		t.Fatalf("Forward: %v", err)
+	}
+}
+
 func TestForwardStreamingFlushesEachEvent(t *testing.T) {
 	sse := strings.Join([]string{
 		"event: message_start",
