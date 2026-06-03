@@ -63,6 +63,7 @@ export interface Account {
   param_overrides: ParamOverrides
   active_windows: ActiveWindow[]
   active_timezone: string
+  forward_client_ip: boolean
 }
 
 // AccountInput is the create/update body. On create, credentials is
@@ -91,6 +92,7 @@ export interface AccountInput {
   param_overrides: ParamOverrides
   active_windows: ActiveWindow[]
   active_timezone: string
+  forward_client_ip: boolean
 }
 
 const ACCOUNTS_KEY = ['accounts'] as const

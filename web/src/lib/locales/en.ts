@@ -83,6 +83,8 @@ const en: Record<string, string> = {
   "accountForm.errNameProviderRequired": "Name and provider are required.",
   "accountForm.errRedirectSourceTarget": "A model redirect needs both a source and a target.",
   "accountForm.everyDay": "every day",
+  "accountForm.forwardClientIp": "Forward client IP to upstream",
+  "accountForm.forwardClientIpHelp": "Send the real client IP to this upstream as X-Forwarded-For. Off by default; other forwarding headers are always stripped and auth is never forwarded. Only enable for trusted upstreams.",
   "accountForm.failoverHelp": "Failover endpoints: additional base URLs (same credentials) tried in order after the Base URL when a request fails with a transport error or a retriable status (5xx / 429), before failing over to another account.",
   "accountForm.failureThreshold": "Failure threshold",
   "accountForm.groupOptional": "Group (optional)",

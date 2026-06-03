@@ -83,6 +83,8 @@ const zh: Record<string, string> = {
   "accountForm.errNameProviderRequired": "名称和供应商为必填项。",
   "accountForm.errRedirectSourceTarget": "模型重定向需要同时填写源和目标。",
   "accountForm.everyDay": "每天",
+  "accountForm.forwardClientIp": "向上游透传客户端 IP",
+  "accountForm.forwardClientIpHelp": "以 X-Forwarded-For 把客户端真实 IP 发给该上游。默认关闭;其它转发头始终剥离,认证永不透传。仅对可信上游开启。",
   "accountForm.failoverHelp": "故障转移端点：额外的基础 URL（使用相同凭证），当请求出现传输错误或可重试状态（5xx / 429）时，会在基础 URL 之后按顺序尝试，然后再切换到其他账号。",
   "accountForm.failureThreshold": "失败阈值",
   "accountForm.groupOptional": "分组（可选）",

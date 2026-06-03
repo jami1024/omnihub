@@ -60,6 +60,12 @@ type UnifiedRequest struct {
 	// model directly. Drivers may inspect or pass them through.
 	Extensions Extensions `json:"-"`
 
+	// ClientIP is the gateway-resolved real client IP (via gin's
+	// trusted-proxy logic). Header-only metadata — never serialised into
+	// the upstream body. The forwarder emits it as X-Forwarded-For only
+	// when the chosen account opts in (Account.ForwardClientIP).
+	ClientIP string `json:"-"`
+
 	// ClientMetadata carries opt-in HTTP headers lifted from the
 	// inbound request that drivers may forward to compatible
 	// upstreams — typically the Anthropic / OpenAI SDK identifier

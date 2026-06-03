@@ -244,19 +244,43 @@ func (f *Forwarder) dispatchOnce(
 
 	// Belt-and-suspenders: drivers should never set forwarding
 	// headers, but if a future driver inherits one from the inbound
-	// request it would leak the client's IP to the upstream. Drop
-	// the common set explicitly so the upstream always sees the
-	// gateway's outbound IP as the originating address.
+	// request it would leak ingress-proxy / CDN metadata to the
+	// upstream. Always drop these so the upstream learns nothing about
+	// the gateway's ingress topology. X-Forwarded-For is handled
+	// separately below so an operator can opt into forwarding the real
+	// client IP.
 	for _, h := range []string{
-		"X-Forwarded-For",
 		"X-Forwarded-Host",
 		"X-Forwarded-Proto",
+		"X-Forwarded-Port",
 		"X-Real-IP",
 		"Forwarded",
 		"CF-Connecting-IP",
 		"True-Client-IP",
 	} {
 		upstreamReq.Header.Del(h)
+	}
+
+	// X-Forwarded-For: stripped by default. When the account opts in and
+	// we have a valid resolved client IP, set it FRESH to that single IP
+	// — c.ClientIP() already collapsed the chain to the real client
+	// against OMNIHUB_TRUSTED_PROXIES, so this is an assertion, not a
+	// chain append. A malformed value (CRLF / non-IP) is dropped + logged
+	// rather than emitted. Other forwarding headers stay stripped above;
+	// client auth is never forwarded.
+	if account != nil && account.ForwardClientIP {
+		ip := strings.TrimSpace(req.ClientIP)
+		if ip != "" && !strings.ContainsAny(ip, "\r\n") && net.ParseIP(ip) != nil {
+			upstreamReq.Header.Set("X-Forwarded-For", ip)
+		} else {
+			upstreamReq.Header.Del("X-Forwarded-For")
+			if req.ClientIP != "" {
+				slog.Warn("forward_client_ip set but client IP invalid; stripping X-Forwarded-For",
+					"account", accountName(account), "client_ip", req.ClientIP)
+			}
+		}
+	} else {
+		upstreamReq.Header.Del("X-Forwarded-For")
 	}
 
 	// Force identity transfer encoding regardless of what the driver

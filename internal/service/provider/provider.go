@@ -125,6 +125,13 @@ type Account struct {
 	// evaluated in (empty = UTC).
 	ActiveWindows  []ActiveWindow
 	ActiveTimezone string
+
+	// ForwardClientIP, when true, forwards the resolved real client IP to
+	// the upstream as a fresh X-Forwarded-For header (some upstreams want
+	// it for risk-control / billing). Default false keeps the safe
+	// strip-everything behaviour; all OTHER forwarding headers are
+	// stripped regardless, and client auth is never forwarded.
+	ForwardClientIP bool
 }
 
 // EndpointURLs returns the ordered list of base URLs to try for this

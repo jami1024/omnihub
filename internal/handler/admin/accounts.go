@@ -59,6 +59,7 @@ type accountDTO struct {
 	ParamOverrides     provider.ParamOverrides  `json:"param_overrides"`
 	ActiveWindows      []provider.ActiveWindow  `json:"active_windows"`
 	ActiveTimezone     string                   `json:"active_timezone"`
+	ForwardClientIP    bool                     `json:"forward_client_ip"`
 }
 
 // toDTO projects a provider.Account (+ its enabled flag) onto the
@@ -116,6 +117,7 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		ParamOverrides:          a.ParamOverrides,
 		ActiveWindows:           windows,
 		ActiveTimezone:          a.ActiveTimezone,
+		ForwardClientIP:         a.ForwardClientIP,
 	}
 }
 
@@ -275,6 +277,7 @@ type accountInput struct {
 	ParamOverrides     provider.ParamOverrides  `json:"param_overrides"`
 	ActiveWindows      []provider.ActiveWindow  `json:"active_windows"`
 	ActiveTimezone     string                   `json:"active_timezone"`
+	ForwardClientIP    bool                     `json:"forward_client_ip"`
 }
 
 // circuitDuration converts the millisecond wire value into the
@@ -375,6 +378,7 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			ParamOverrides:          in.ParamOverrides,
 			ActiveWindows:           in.ActiveWindows,
 			ActiveTimezone:          strings.TrimSpace(in.ActiveTimezone),
+			ForwardClientIP:         in.ForwardClientIP,
 		}
 
 		id, err := store.Insert(c.Request.Context(), params)
@@ -480,6 +484,7 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			ParamOverrides:          in.ParamOverrides,
 			ActiveWindows:           in.ActiveWindows,
 			ActiveTimezone:          strings.TrimSpace(in.ActiveTimezone),
+			ForwardClientIP:         in.ForwardClientIP,
 		}
 
 		if err := store.Update(c.Request.Context(), id, params); err != nil {

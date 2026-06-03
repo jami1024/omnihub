@@ -117,6 +117,9 @@ func AnthropicMessagesHandler(
 		// for forwarding to compatible upstreams. See
 		// clientMetadataHeaders for the allow-list.
 		req.ClientMetadata = collectClientMetadata(c)
+		// Resolved real client IP; only emitted upstream when the chosen
+		// account sets ForwardClientIP (the forwarder decides).
+		req.ClientIP = c.ClientIP()
 
 		c.Set(guard.CtxKeyModel, req.Model)
 		c.Set(guard.CtxKeyStream, req.Stream)

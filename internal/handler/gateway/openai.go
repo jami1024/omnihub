@@ -70,6 +70,9 @@ func OpenAIChatCompletionsHandler(
 		// SDK identifier headers (x-stainless-*, x-app) are emitted by
 		// the OpenAI SDK family too; forward the allow-listed set.
 		req.ClientMetadata = collectClientMetadata(c)
+		// Resolved real client IP; only emitted upstream when the chosen
+		// account sets ForwardClientIP (the forwarder decides).
+		req.ClientIP = c.ClientIP()
 
 		c.Set(guard.CtxKeyModel, req.Model)
 		c.Set(guard.CtxKeyStream, req.Stream)

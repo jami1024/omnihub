@@ -85,6 +85,7 @@ export function AccountForm({
   )
   const [endpoints, setEndpoints] = useState<string[]>(account?.endpoints ?? [])
   const [proxyURL, setProxyURL] = useState(account?.proxy_url ?? '')
+  const [forwardClientIP, setForwardClientIP] = useState(account?.forward_client_ip ?? false)
   const po = account?.param_overrides
   const [ovMaxTokens, setOvMaxTokens] = useState(numToStr(po?.max_tokens))
   const [ovTemperature, setOvTemperature] = useState(numToStr(po?.temperature))
@@ -260,6 +261,7 @@ export function AccountForm({
       endpoints: endpoints.map((e) => e.trim()).filter((e) => e !== ''),
       health_probe_enabled: healthProbe === '' ? null : healthProbe === 'true',
       proxy_url: proxyURL.trim(),
+      forward_client_ip: forwardClientIP,
       param_overrides: {
         ...(strToNum(ovMaxTokens) != null ? { max_tokens: strToNum(ovMaxTokens)! } : {}),
         ...(strToNum(ovTemperature) != null ? { temperature: strToNum(ovTemperature)! } : {}),
@@ -312,6 +314,18 @@ export function AccountForm({
               placeholder={t('accountForm.proxyUrlPlaceholder')}
             />
           </Field>
+          <label className="mt-3 flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={forwardClientIP}
+              onChange={(e) => setForwardClientIP(e.target.checked)}
+            />
+            <span>
+              {t('accountForm.forwardClientIp')}
+              <span className="block text-xs text-muted">{t('accountForm.forwardClientIpHelp')}</span>
+            </span>
+          </label>
         </div>
         <p className="mt-3 text-xs text-muted">
           {t('accountForm.failoverHelp')}

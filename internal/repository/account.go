@@ -60,7 +60,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
                a.custom_headers, a.endpoints, a.health_probe_enabled,
                COALESCE(a.proxy_url, ''), a.param_overrides,
-               a.active_windows, COALESCE(a.active_timezone, '')
+               a.active_windows, COALESCE(a.active_timezone, ''), a.forward_client_ip
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.enabled = TRUE
@@ -95,7 +95,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			&failureThreshold, &openDurationMs, &halfOpenSuccess,
 			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 			&a.GroupID, &a.GroupName, &groupMultiplier,
-			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone,
+			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone, &a.ForwardClientIP,
 		); err != nil {
 			return nil, fmt.Errorf("scan account row: %w", err)
 		}
@@ -329,6 +329,7 @@ type InsertParams struct {
 	ParamOverrides     provider.ParamOverrides
 	ActiveWindows      []provider.ActiveWindow
 	ActiveTimezone     string
+	ForwardClientIP    bool
 }
 
 // marshalRedirects encodes a redirect rule set for the model_redirects
@@ -352,7 +353,7 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
                a.custom_headers, a.endpoints, a.health_probe_enabled,
                COALESCE(a.proxy_url, ''), a.param_overrides,
-               a.active_windows, COALESCE(a.active_timezone, '')
+               a.active_windows, COALESCE(a.active_timezone, ''), a.forward_client_ip
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          ORDER BY a.id ASC`
@@ -390,7 +391,7 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			&failureThreshold, &openDurationMs, &halfOpenSuccess,
 			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 			&a.GroupID, &a.GroupName, &groupMultiplier,
-			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone,
+			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone, &a.ForwardClientIP,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan account row: %w", err)
 		}
@@ -620,9 +621,10 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
             cost_multiplier, base_url, credentials,
             circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success,
             model_redirects, daily_usd_limit, total_usd_limit, group_id, custom_headers, endpoints,
-            health_probe_enabled, proxy_url, param_overrides, active_windows, active_timezone
+            health_probe_enabled, proxy_url, param_overrides, active_windows, active_timezone,
+            forward_client_ip
         )
-        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NULLIF($19, ''), $20, $21, NULLIF($22, ''))
+        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NULLIF($19, ''), $20, $21, NULLIF($22, ''), $23)
         RETURNING id`
 
 	var id int64
@@ -631,7 +633,7 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
-		p.HealthProbeEnabled, proxyEnc, paramsJSON, windowsJSON, p.ActiveTimezone,
+		p.HealthProbeEnabled, proxyEnc, paramsJSON, windowsJSON, p.ActiveTimezone, p.ForwardClientIP,
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -656,7 +658,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
                a.custom_headers, a.endpoints, a.health_probe_enabled,
                COALESCE(a.proxy_url, ''), a.param_overrides,
-               a.active_windows, COALESCE(a.active_timezone, '')
+               a.active_windows, COALESCE(a.active_timezone, ''), a.forward_client_ip
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.id = $1`
@@ -683,7 +685,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		&failureThreshold, &openDurationMs, &halfOpenSuccess,
 		&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 		&a.GroupID, &a.GroupName, &groupMultiplier,
-		&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone,
+		&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone, &a.ForwardClientIP,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -733,6 +735,7 @@ type UpdateParams struct {
 	ParamOverrides     provider.ParamOverrides
 	ActiveWindows      []provider.ActiveWindow
 	ActiveTimezone     string
+	ForwardClientIP    bool
 }
 
 // Update replaces the mutable columns of the account identified by id.
@@ -800,15 +803,15 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
             group_id = $15, custom_headers = $16, endpoints = $17,
             health_probe_enabled = $18, proxy_url = NULLIF($19, ''),
             param_overrides = $20, active_windows = $21, active_timezone = NULLIF($22, ''),
-            updated_at = NOW()
-         WHERE id = $23`
+            forward_client_ip = $23, updated_at = NOW()
+         WHERE id = $24`
 
 	tag, err := r.pool.Exec(ctx, q,
 		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
-		p.HealthProbeEnabled, proxyEnc, paramsJSON, windowsJSON, p.ActiveTimezone,
+		p.HealthProbeEnabled, proxyEnc, paramsJSON, windowsJSON, p.ActiveTimezone, p.ForwardClientIP,
 		id,
 	)
 	if err != nil {

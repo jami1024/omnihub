@@ -70,6 +70,57 @@ func TestForwardNonStreamingHappyPath(t *testing.T) {
 	}
 }
 
+func TestForwardClientIP(t *testing.T) {
+	// Upstream records the forwarding headers it received.
+	var gotXFF, gotRealIP string
+	srv := upstreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotXFF = r.Header.Get("X-Forwarded-For")
+		gotRealIP = r.Header.Get("X-Real-IP")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"m","role":"assistant","model":"x","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	})
+
+	dispatch := func(forwardIP bool, clientIP string) {
+		gotXFF, gotRealIP = "", ""
+		acct := anthropicAccount(srv.URL)
+		acct.ForwardClientIP = forwardIP
+		f := forward.New(srv.Client())
+		resp, _, err := f.Dispatch(context.Background(),
+			&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 10, ClientIP: clientIP},
+			anthropic.New(), acct)
+		if err != nil {
+			t.Fatalf("Dispatch: %v", err)
+		}
+		resp.Body.Close()
+	}
+
+	// Opted in + valid IP → upstream sees exactly that X-Forwarded-For.
+	dispatch(true, "203.0.113.42")
+	if gotXFF != "203.0.113.42" {
+		t.Errorf("forward on: X-Forwarded-For = %q, want 203.0.113.42", gotXFF)
+	}
+	if gotRealIP != "" {
+		t.Errorf("X-Real-IP must always be stripped, got %q", gotRealIP)
+	}
+
+	// Default (off) → X-Forwarded-For stripped even with a client IP present.
+	dispatch(false, "203.0.113.42")
+	if gotXFF != "" {
+		t.Errorf("forward off: X-Forwarded-For must be stripped, got %q", gotXFF)
+	}
+
+	// Opted in but malformed / injection IP → no header emitted.
+	dispatch(true, "not-an-ip")
+	if gotXFF != "" {
+		t.Errorf("invalid IP must not be forwarded, got %q", gotXFF)
+	}
+	dispatch(true, "1.2.3.4\r\nX-Evil: 1")
+	if gotXFF != "" {
+		t.Errorf("CRLF IP must not be forwarded, got %q", gotXFF)
+	}
+}
+
 func TestForwardCustomHeadersAppliedButCannotOverrideInvariants(t *testing.T) {
 	srv := upstreamServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("X-Org-Id"); got != "acme" {
