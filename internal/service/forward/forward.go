@@ -206,15 +206,23 @@ func (f *Forwarder) dispatchOnce(
 	driver provider.Driver,
 	account *provider.Account,
 ) (resp *http.Response, requestSentAt time.Time, err error) {
-	// Per-account model redirect: rewrite the requested model name on a
-	// shallow copy so the shared request (and its billing model) is
-	// untouched for retries on other accounts. This is a matched-pair
-	// rename only — no cross-protocol transform.
+	// Per-account model redirect + parameter overrides, applied to a
+	// shallow copy so the shared request (its billing model and the
+	// client's original params) is untouched for retries on other
+	// accounts. Both are matched-pair overrides — no cross-protocol
+	// transform.
 	buildReq := req
-	if account != nil && len(account.ModelRedirects) > 0 {
-		if mapped, ok := provider.ApplyModelRedirects(account.ModelRedirects, req.Model); ok && mapped != req.Model {
+	if account != nil {
+		mappedModel := req.Model
+		if len(account.ModelRedirects) > 0 {
+			if m, ok := provider.ApplyModelRedirects(account.ModelRedirects, req.Model); ok {
+				mappedModel = m
+			}
+		}
+		if mappedModel != req.Model || account.ParamOverrides.Any() {
 			clone := *req
-			clone.Model = mapped
+			clone.Model = mappedModel
+			account.ParamOverrides.ApplyTo(&clone)
 			buildReq = &clone
 		}
 	}

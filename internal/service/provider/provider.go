@@ -114,6 +114,11 @@ type Account struct {
 	// ProxyURL optionally routes this account's upstream requests through
 	// an http/https/socks5 proxy. Empty means connect directly.
 	ProxyURL string
+
+	// ParamOverrides force per-account generation parameters (max_tokens,
+	// temperature, top_p, thinking budget) onto each request. The zero
+	// value is a no-op.
+	ParamOverrides ParamOverrides
 }
 
 // EndpointURLs returns the ordered list of base URLs to try for this

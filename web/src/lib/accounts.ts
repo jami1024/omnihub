@@ -19,6 +19,16 @@ export interface ModelRedirect {
   target: string
 }
 
+// ParamOverrides force generation parameters on every request routed
+// through the account. Each field is optional (absent = leave the
+// client's value untouched).
+export interface ParamOverrides {
+  max_tokens?: number
+  temperature?: number
+  top_p?: number
+  thinking_budget_tokens?: number
+}
+
 export interface Account {
   id: number
   name: string
@@ -41,6 +51,7 @@ export interface Account {
   endpoints: string[]
   health_probe_enabled: boolean | null
   proxy_url: string
+  param_overrides: ParamOverrides
 }
 
 // AccountInput is the create/update body. On create, credentials is
@@ -66,6 +77,7 @@ export interface AccountInput {
   endpoints: string[]
   health_probe_enabled: boolean | null
   proxy_url: string
+  param_overrides: ParamOverrides
 }
 
 const ACCOUNTS_KEY = ['accounts'] as const

@@ -2,6 +2,7 @@ package forward_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -90,8 +91,8 @@ func TestForwardCustomHeadersAppliedButCannotOverrideInvariants(t *testing.T) {
 	acct := anthropicAccount(srv.URL)
 	acct.CustomHeaders = map[string]string{
 		"X-Org-Id":        "acme",
-		"Accept-Encoding": "gzip",      // must be overridden back to identity
-		"X-Forwarded-For": "9.9.9.9",   // must be stripped
+		"Accept-Encoding": "gzip",    // must be overridden back to identity
+		"X-Forwarded-For": "9.9.9.9", // must be stripped
 	}
 
 	f := forward.New(srv.Client())
@@ -104,6 +105,50 @@ func TestForwardCustomHeadersAppliedButCannotOverrideInvariants(t *testing.T) {
 		t.Fatalf("Forward: %v", err)
 	}
 }
+
+func TestForwardAppliesParamOverrides(t *testing.T) {
+	// The upstream echoes the body it received; assert the override
+	// values (not the client's) reached it.
+	var gotMaxTokens float64
+	var gotTemp float64
+	srv := upstreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if v, ok := body["max_tokens"].(float64); ok {
+			gotMaxTokens = v
+		}
+		if v, ok := body["temperature"].(float64); ok {
+			gotTemp = v
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"m","role":"assistant","model":"x","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	})
+
+	acct := anthropicAccount(srv.URL)
+	acct.ParamOverrides = provider.ParamOverrides{
+		MaxTokens:   intPtr(4096),
+		Temperature: floatPtr(0.0),
+	}
+	clientTemp := 0.9
+	f := forward.New(srv.Client())
+	resp, _, err := f.Dispatch(context.Background(),
+		&ir.UnifiedRequest{Model: "claude-sonnet-4-5", MaxTokens: 50, Temperature: &clientTemp},
+		anthropic.New(), acct)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	resp.Body.Close()
+	if gotMaxTokens != 4096 {
+		t.Errorf("upstream max_tokens: want 4096 (override), got %v", gotMaxTokens)
+	}
+	if gotTemp != 0.0 {
+		t.Errorf("upstream temperature: want 0.0 (override), got %v", gotTemp)
+	}
+}
+
+func intPtr(v int) *int           { return &v }
+func floatPtr(v float64) *float64 { return &v }
 
 func TestForwardRoutesThroughAccountProxy(t *testing.T) {
 	// A stand-in proxy: it records that it was hit and returns a 200 so

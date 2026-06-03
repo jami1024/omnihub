@@ -56,6 +56,7 @@ type accountDTO struct {
 	Endpoints          []string                 `json:"endpoints"`
 	HealthProbeEnabled *bool                    `json:"health_probe_enabled"`
 	ProxyURL           string                   `json:"proxy_url"`
+	ParamOverrides     provider.ParamOverrides  `json:"param_overrides"`
 }
 
 // toDTO projects a provider.Account (+ its enabled flag) onto the
@@ -106,6 +107,7 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		Endpoints:               endpoints,
 		HealthProbeEnabled:      a.HealthProbeEnabled,
 		ProxyURL:                a.ProxyURL,
+		ParamOverrides:          a.ParamOverrides,
 	}
 }
 
@@ -176,6 +178,25 @@ func sanitizeProxyURL(raw string) (string, string) {
 	return raw, ""
 }
 
+// validateParamOverrides bounds-checks the per-account generation
+// overrides. Empty (all-nil) is valid. Returns an error message on a
+// nonsensical value.
+func validateParamOverrides(p provider.ParamOverrides) string {
+	if p.MaxTokens != nil && *p.MaxTokens <= 0 {
+		return "param override max_tokens must be greater than 0"
+	}
+	if p.Temperature != nil && (*p.Temperature < 0 || *p.Temperature > 2) {
+		return "param override temperature must be between 0 and 2"
+	}
+	if p.TopP != nil && (*p.TopP < 0 || *p.TopP > 1) {
+		return "param override top_p must be between 0 and 1"
+	}
+	if p.ThinkingBudget != nil && *p.ThinkingBudget <= 0 {
+		return "param override thinking_budget_tokens must be greater than 0"
+	}
+	return ""
+}
+
 // sanitizeEndpoints trims each additional endpoint URL, drops blanks,
 // and validates the rest with the same SSRF guard used for base_url.
 // Returns the cleaned list (nil when empty) or an error message.
@@ -226,6 +247,7 @@ type accountInput struct {
 	Endpoints          []string                 `json:"endpoints"`
 	HealthProbeEnabled *bool                    `json:"health_probe_enabled"`
 	ProxyURL           string                   `json:"proxy_url"`
+	ParamOverrides     provider.ParamOverrides  `json:"param_overrides"`
 }
 
 // circuitDuration converts the millisecond wire value into the
@@ -294,6 +316,10 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			writeBadRequest(c, perr)
 			return
 		}
+		if verr := validateParamOverrides(in.ParamOverrides); verr != "" {
+			writeBadRequest(c, verr)
+			return
+		}
 
 		params := repository.InsertParams{
 			Name:                    in.Name,
@@ -315,6 +341,7 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			Endpoints:               endpoints,
 			HealthProbeEnabled:      in.HealthProbeEnabled,
 			ProxyURL:                proxyURL,
+			ParamOverrides:          in.ParamOverrides,
 		}
 
 		id, err := store.Insert(c.Request.Context(), params)
@@ -388,6 +415,10 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			writeBadRequest(c, perr)
 			return
 		}
+		if verr := validateParamOverrides(in.ParamOverrides); verr != "" {
+			writeBadRequest(c, verr)
+			return
+		}
 
 		params := repository.UpdateParams{
 			Name:                    in.Name,
@@ -409,6 +440,7 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			Endpoints:               endpoints,
 			HealthProbeEnabled:      in.HealthProbeEnabled,
 			ProxyURL:                proxyURL,
+			ParamOverrides:          in.ParamOverrides,
 		}
 
 		if err := store.Update(c.Request.Context(), id, params); err != nil {

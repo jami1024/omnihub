@@ -70,6 +70,11 @@ export function AccountForm({
   )
   const [endpoints, setEndpoints] = useState<string[]>(account?.endpoints ?? [])
   const [proxyURL, setProxyURL] = useState(account?.proxy_url ?? '')
+  const po = account?.param_overrides
+  const [ovMaxTokens, setOvMaxTokens] = useState(numToStr(po?.max_tokens))
+  const [ovTemperature, setOvTemperature] = useState(numToStr(po?.temperature))
+  const [ovTopP, setOvTopP] = useState(numToStr(po?.top_p))
+  const [ovThinking, setOvThinking] = useState(numToStr(po?.thinking_budget_tokens))
   const [healthProbe, setHealthProbe] = useState(
     account?.health_probe_enabled == null ? '' : account.health_probe_enabled ? 'true' : 'false',
   )
@@ -219,6 +224,12 @@ export function AccountForm({
       endpoints: endpoints.map((e) => e.trim()).filter((e) => e !== ''),
       health_probe_enabled: healthProbe === '' ? null : healthProbe === 'true',
       proxy_url: proxyURL.trim(),
+      param_overrides: {
+        ...(strToNum(ovMaxTokens) != null ? { max_tokens: strToNum(ovMaxTokens)! } : {}),
+        ...(strToNum(ovTemperature) != null ? { temperature: strToNum(ovTemperature)! } : {}),
+        ...(strToNum(ovTopP) != null ? { top_p: strToNum(ovTopP)! } : {}),
+        ...(strToNum(ovThinking) != null ? { thinking_budget_tokens: strToNum(ovThinking)! } : {}),
+      },
     }
     onSubmit(input)
   }
@@ -479,6 +490,35 @@ export function AccountForm({
               onChange={(e) => setTotalLimit(e.target.value)}
               placeholder="no cap"
             />
+          </Field>
+        </div>
+      </details>
+
+      <details
+        className="rounded-lg border border-line p-3"
+        open={ovMaxTokens !== '' || ovTemperature !== '' || ovTopP !== '' || ovThinking !== ''}
+      >
+        <summary className="cursor-pointer text-sm text-muted">Parameter overrides (optional)</summary>
+        <p className="mt-2 text-xs text-muted">
+          Force these generation parameters on every request routed through this account (the
+          client's values are replaced). Leave blank to pass the client's value through.
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-4">
+          <Field label="Max tokens">
+            <input className={FIELD} type="number" min="1" value={ovMaxTokens}
+              onChange={(e) => setOvMaxTokens(e.target.value)} placeholder="passthrough" />
+          </Field>
+          <Field label="Temperature (0–2)">
+            <input className={FIELD} type="number" step="0.1" min="0" max="2" value={ovTemperature}
+              onChange={(e) => setOvTemperature(e.target.value)} placeholder="passthrough" />
+          </Field>
+          <Field label="Top P (0–1)">
+            <input className={FIELD} type="number" step="0.05" min="0" max="1" value={ovTopP}
+              onChange={(e) => setOvTopP(e.target.value)} placeholder="passthrough" />
+          </Field>
+          <Field label="Thinking budget (tokens)">
+            <input className={FIELD} type="number" min="1" value={ovThinking}
+              onChange={(e) => setOvThinking(e.target.value)} placeholder="off" />
           </Field>
         </div>
       </details>
