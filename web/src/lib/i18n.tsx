@@ -15,7 +15,8 @@ const KEY = 'omnihub.lang'
 function initialLang(): Lang {
   const stored = localStorage.getItem(KEY)
   if (stored === 'en' || stored === 'zh') return stored
-  return navigator.language?.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+  // Default to Chinese; an explicit switch to English is remembered.
+  return 'zh'
 }
 
 type TFunc = (key: string, vars?: Record<string, string | number>) => string
