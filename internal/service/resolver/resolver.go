@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"sync"
+	"time"
 
 	"github.com/jami1024/omnihub/internal/service/account"
 	"github.com/jami1024/omnihub/internal/service/health"
@@ -190,6 +191,9 @@ func (r *WeightedResolver) resolveSticky(
 		if r.spend != nil && r.spend.OverLimit(a) {
 			return nil
 		}
+		if !a.IsActiveAt(time.Now()) {
+			return nil
+		}
 		if len(allowed) == 0 {
 			return a
 		}
@@ -208,6 +212,7 @@ func (r *WeightedResolver) resolveSticky(
 //   - are not in the excluded set;
 //   - pass the health tracker's IsAvailable check.
 func (r *WeightedResolver) gather(allowed []string, excluded []int64) []*provider.Account {
+	now := time.Now()
 	excludedSet := make(map[int64]struct{}, len(excluded))
 	for _, id := range excluded {
 		excludedSet[id] = struct{}{}
@@ -231,6 +236,9 @@ func (r *WeightedResolver) gather(allowed []string, excluded []int64) []*provide
 			continue
 		}
 		if r.spend != nil && r.spend.OverLimit(a) {
+			continue
+		}
+		if !a.IsActiveAt(now) {
 			continue
 		}
 		out = append(out, a)

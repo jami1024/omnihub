@@ -55,7 +55,8 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
                a.model_redirects, a.daily_usd_limit, a.total_usd_limit,
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
                a.custom_headers, a.endpoints, a.health_probe_enabled,
-               COALESCE(a.proxy_url, ''), a.param_overrides
+               COALESCE(a.proxy_url, ''), a.param_overrides,
+               a.active_windows, COALESCE(a.active_timezone, '')
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.enabled = TRUE
@@ -81,7 +82,8 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			headersRaw       []byte
 			endpointsRaw     []byte
 
-			paramsRaw []byte
+			paramsRaw  []byte
+			windowsRaw []byte
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &a.Weight, &a.Priority, &multiplier,
@@ -89,7 +91,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			&failureThreshold, &openDurationMs, &halfOpenSuccess,
 			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 			&a.GroupID, &a.GroupName, &groupMultiplier,
-			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw,
+			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone,
 		); err != nil {
 			return nil, fmt.Errorf("scan account row: %w", err)
 		}
@@ -109,6 +111,9 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			return nil, err
 		}
 		if err := decodeParams(&a, paramsRaw); err != nil {
+			return nil, err
+		}
+		if err := decodeWindows(&a, windowsRaw); err != nil {
 			return nil, err
 		}
 		out = append(out, &a)
@@ -214,6 +219,27 @@ func marshalParams(p provider.ParamOverrides) ([]byte, error) {
 	return json.Marshal(p)
 }
 
+// decodeWindows unmarshals the active_windows JSONB array onto the
+// account. An empty / "[]" payload leaves ActiveWindows nil.
+func decodeWindows(a *provider.Account, raw []byte) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(raw, &a.ActiveWindows); err != nil {
+		return fmt.Errorf("decode active_windows for account %q: %w", a.Name, err)
+	}
+	return nil
+}
+
+// marshalWindows encodes the active-window list for the active_windows
+// JSONB column, defaulting nil/empty to "[]" (NOT NULL).
+func marshalWindows(w []provider.ActiveWindow) ([]byte, error) {
+	if len(w) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(w)
+}
+
 // CountAll returns the total number of rows regardless of enabled
 // flag. Used by the bootstrap path to decide whether to seed from
 // environment variables on first boot.
@@ -257,6 +283,8 @@ type InsertParams struct {
 	HealthProbeEnabled *bool
 	ProxyURL           string
 	ParamOverrides     provider.ParamOverrides
+	ActiveWindows      []provider.ActiveWindow
+	ActiveTimezone     string
 }
 
 // marshalRedirects encodes a redirect rule set for the model_redirects
@@ -279,7 +307,8 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
                a.model_redirects, a.daily_usd_limit, a.total_usd_limit,
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
                a.custom_headers, a.endpoints, a.health_probe_enabled,
-               COALESCE(a.proxy_url, ''), a.param_overrides
+               COALESCE(a.proxy_url, ''), a.param_overrides,
+               a.active_windows, COALESCE(a.active_timezone, '')
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          ORDER BY a.id ASC`
@@ -307,7 +336,8 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			headersRaw       []byte
 			endpointsRaw     []byte
 
-			paramsRaw []byte
+			paramsRaw  []byte
+			windowsRaw []byte
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &enabled,
@@ -316,7 +346,7 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			&failureThreshold, &openDurationMs, &halfOpenSuccess,
 			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 			&a.GroupID, &a.GroupName, &groupMultiplier,
-			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw,
+			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan account row: %w", err)
 		}
@@ -336,6 +366,9 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			return nil, nil, err
 		}
 		if err := decodeParams(&a, paramsRaw); err != nil {
+			return nil, nil, err
+		}
+		if err := decodeWindows(&a, windowsRaw); err != nil {
 			return nil, nil, err
 		}
 		accounts = append(accounts, &a)
@@ -402,6 +435,10 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 	if err != nil {
 		return 0, fmt.Errorf("encode param_overrides: %w", err)
 	}
+	windowsJSON, err := marshalWindows(p.ActiveWindows)
+	if err != nil {
+		return 0, fmt.Errorf("encode active_windows: %w", err)
+	}
 
 	const q = `
         INSERT INTO accounts (
@@ -409,9 +446,9 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
             cost_multiplier, base_url, credentials,
             circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success,
             model_redirects, daily_usd_limit, total_usd_limit, group_id, custom_headers, endpoints,
-            health_probe_enabled, proxy_url, param_overrides
+            health_probe_enabled, proxy_url, param_overrides, active_windows, active_timezone
         )
-        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NULLIF($19, ''), $20)
+        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NULLIF($19, ''), $20, $21, NULLIF($22, ''))
         RETURNING id`
 
 	var id int64
@@ -420,7 +457,7 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
-		p.HealthProbeEnabled, p.ProxyURL, paramsJSON,
+		p.HealthProbeEnabled, p.ProxyURL, paramsJSON, windowsJSON, p.ActiveTimezone,
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -444,7 +481,8 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
                a.model_redirects, a.daily_usd_limit, a.total_usd_limit,
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
                a.custom_headers, a.endpoints, a.health_probe_enabled,
-               COALESCE(a.proxy_url, ''), a.param_overrides
+               COALESCE(a.proxy_url, ''), a.param_overrides,
+               a.active_windows, COALESCE(a.active_timezone, '')
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.id = $1`
@@ -461,7 +499,8 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		headersRaw       []byte
 		endpointsRaw     []byte
 
-		paramsRaw []byte
+		paramsRaw  []byte
+		windowsRaw []byte
 	)
 	err := r.pool.QueryRow(ctx, q, id).Scan(
 		&a.ID, &a.Name, &a.Provider, &enabled,
@@ -470,7 +509,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		&failureThreshold, &openDurationMs, &halfOpenSuccess,
 		&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 		&a.GroupID, &a.GroupName, &groupMultiplier,
-		&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw,
+		&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -494,6 +533,9 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		return nil, false, err
 	}
 	if err := decodeParams(&a, paramsRaw); err != nil {
+		return nil, false, err
+	}
+	if err := decodeWindows(&a, windowsRaw); err != nil {
 		return nil, false, err
 	}
 	return &a, enabled, nil
@@ -530,6 +572,8 @@ type UpdateParams struct {
 	HealthProbeEnabled *bool
 	ProxyURL           string
 	ParamOverrides     provider.ParamOverrides
+	ActiveWindows      []provider.ActiveWindow
+	ActiveTimezone     string
 }
 
 // Update replaces the mutable columns of the account identified by id.
@@ -569,6 +613,10 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
 	if err != nil {
 		return fmt.Errorf("encode param_overrides: %w", err)
 	}
+	windowsJSON, err := marshalWindows(p.ActiveWindows)
+	if err != nil {
+		return fmt.Errorf("encode active_windows: %w", err)
+	}
 
 	const q = `
         UPDATE accounts SET
@@ -580,15 +628,16 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
             model_redirects = $12, daily_usd_limit = $13, total_usd_limit = $14,
             group_id = $15, custom_headers = $16, endpoints = $17,
             health_probe_enabled = $18, proxy_url = NULLIF($19, ''),
-            param_overrides = $20, updated_at = NOW()
-         WHERE id = $21`
+            param_overrides = $20, active_windows = $21, active_timezone = NULLIF($22, ''),
+            updated_at = NOW()
+         WHERE id = $23`
 
 	tag, err := r.pool.Exec(ctx, q,
 		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
-		p.HealthProbeEnabled, p.ProxyURL, paramsJSON,
+		p.HealthProbeEnabled, p.ProxyURL, paramsJSON, windowsJSON, p.ActiveTimezone,
 		id,
 	)
 	if err != nil {

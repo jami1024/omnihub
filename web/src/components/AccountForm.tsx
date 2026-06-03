@@ -6,6 +6,7 @@ import {
   useTestAccountById,
   type Account,
   type AccountInput,
+  type ActiveWindow,
   type ModelRedirect,
   type ModelRedirectMatch,
   type TestResult,
@@ -32,6 +33,10 @@ export interface AccountFormProps {
 
 const FIELD =
   'field'
+
+// DAY_LABELS index 0..6 = Sunday..Saturday, matching the server's
+// ActiveWindow.Days encoding.
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 export function AccountForm({
   account,
@@ -75,6 +80,27 @@ export function AccountForm({
   const [ovTemperature, setOvTemperature] = useState(numToStr(po?.temperature))
   const [ovTopP, setOvTopP] = useState(numToStr(po?.top_p))
   const [ovThinking, setOvThinking] = useState(numToStr(po?.thinking_budget_tokens))
+  const [windows, setWindows] = useState<ActiveWindow[]>(account?.active_windows ?? [])
+  const [timezone, setTimezone] = useState(account?.active_timezone ?? '')
+
+  function updateWindow(i: number, patch: Partial<ActiveWindow>) {
+    setWindows((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  }
+  function toggleDay(i: number, day: number) {
+    setWindows((rows) =>
+      rows.map((r, j) => {
+        if (j !== i) return r
+        const days = r.days ?? []
+        return { ...r, days: days.includes(day) ? days.filter((d) => d !== day) : [...days, day].sort() }
+      }),
+    )
+  }
+  function addWindow() {
+    setWindows((rows) => [...rows, { days: [], start: '09:00', end: '18:00' }])
+  }
+  function removeWindow(i: number) {
+    setWindows((rows) => rows.filter((_, j) => j !== i))
+  }
   const [healthProbe, setHealthProbe] = useState(
     account?.health_probe_enabled == null ? '' : account.health_probe_enabled ? 'true' : 'false',
   )
@@ -230,6 +256,12 @@ export function AccountForm({
         ...(strToNum(ovTopP) != null ? { top_p: strToNum(ovTopP)! } : {}),
         ...(strToNum(ovThinking) != null ? { thinking_budget_tokens: strToNum(ovThinking)! } : {}),
       },
+      active_windows: windows.map((w) => ({
+        days: w.days ?? [],
+        start: w.start.trim(),
+        end: w.end.trim(),
+      })),
+      active_timezone: timezone.trim(),
     }
     onSubmit(input)
   }
@@ -520,6 +552,76 @@ export function AccountForm({
             <input className={FIELD} type="number" min="1" value={ovThinking}
               onChange={(e) => setOvThinking(e.target.value)} placeholder="off" />
           </Field>
+        </div>
+      </details>
+
+      <details className="rounded-lg border border-line p-3" open={windows.length > 0}>
+        <summary className="cursor-pointer text-sm text-muted">Active time windows (optional)</summary>
+        <p className="mt-2 text-xs text-muted">
+          Route to this account only during these windows. No windows = always active. Times are
+          HH:MM in the timezone below; a window whose start is after its end wraps past midnight.
+        </p>
+        <div className="mt-3">
+          <Field label="Timezone (IANA, blank = UTC)">
+            <input
+              className={FIELD}
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+              placeholder="e.g. America/New_York"
+            />
+          </Field>
+        </div>
+        <div className="mt-3 space-y-3">
+          {windows.map((w, i) => (
+            <div key={i} className="rounded-lg border border-line p-3">
+              <div className="flex items-center gap-2">
+                <input
+                  className={FIELD + ' w-28'}
+                  type="time"
+                  value={w.start}
+                  onChange={(e) => updateWindow(i, { start: e.target.value })}
+                />
+                <span className="text-muted">→</span>
+                <input
+                  className={FIELD + ' w-28'}
+                  type="time"
+                  value={w.end}
+                  onChange={(e) => updateWindow(i, { end: e.target.value })}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeWindow(i)}
+                  className="btn btn-secondary px-2 ml-auto"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {DAY_LABELS.map((d, day) => {
+                  const on = (w.days ?? []).includes(day)
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => toggleDay(i, day)}
+                      className={
+                        'rounded px-2 py-0.5 text-xs ' +
+                        (on ? 'bg-ink text-bg' : 'border border-line text-muted hover:text-ink')
+                      }
+                    >
+                      {d}
+                    </button>
+                  )
+                })}
+                <span className="ml-1 self-center text-xs text-muted">
+                  {(w.days ?? []).length === 0 ? 'every day' : ''}
+                </span>
+              </div>
+            </div>
+          ))}
+          <button type="button" onClick={addWindow} className="text-sm text-muted hover:text-ink">
+            + add window
+          </button>
         </div>
       </details>
 

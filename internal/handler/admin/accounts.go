@@ -57,6 +57,8 @@ type accountDTO struct {
 	HealthProbeEnabled *bool                    `json:"health_probe_enabled"`
 	ProxyURL           string                   `json:"proxy_url"`
 	ParamOverrides     provider.ParamOverrides  `json:"param_overrides"`
+	ActiveWindows      []provider.ActiveWindow  `json:"active_windows"`
+	ActiveTimezone     string                   `json:"active_timezone"`
 }
 
 // toDTO projects a provider.Account (+ its enabled flag) onto the
@@ -85,6 +87,10 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 	if endpoints == nil {
 		endpoints = []string{} // serialise as [] not null
 	}
+	windows := a.ActiveWindows
+	if windows == nil {
+		windows = []provider.ActiveWindow{} // serialise as [] not null
+	}
 	return accountDTO{
 		ID:                      a.ID,
 		Name:                    a.Name,
@@ -108,6 +114,8 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		HealthProbeEnabled:      a.HealthProbeEnabled,
 		ProxyURL:                a.ProxyURL,
 		ParamOverrides:          a.ParamOverrides,
+		ActiveWindows:           windows,
+		ActiveTimezone:          a.ActiveTimezone,
 	}
 }
 
@@ -197,6 +205,23 @@ func validateParamOverrides(p provider.ParamOverrides) string {
 	return ""
 }
 
+// validateActiveWindows checks each window parses and that the timezone
+// (if any) is loadable. Empty windows are valid.
+func validateActiveWindows(windows []provider.ActiveWindow, tz string) string {
+	if tz != "" {
+		if _, err := time.LoadLocation(tz); err != nil {
+			return "active_timezone " + strconv.Quote(tz) + " is not a valid IANA timezone"
+		}
+	}
+	for i, w := range windows {
+		if !w.Valid() {
+			return "active window " + strconv.Itoa(i+1) +
+				" is invalid (start/end must be HH:MM, days 0-6)"
+		}
+	}
+	return ""
+}
+
 // sanitizeEndpoints trims each additional endpoint URL, drops blanks,
 // and validates the rest with the same SSRF guard used for base_url.
 // Returns the cleaned list (nil when empty) or an error message.
@@ -248,6 +273,8 @@ type accountInput struct {
 	HealthProbeEnabled *bool                    `json:"health_probe_enabled"`
 	ProxyURL           string                   `json:"proxy_url"`
 	ParamOverrides     provider.ParamOverrides  `json:"param_overrides"`
+	ActiveWindows      []provider.ActiveWindow  `json:"active_windows"`
+	ActiveTimezone     string                   `json:"active_timezone"`
 }
 
 // circuitDuration converts the millisecond wire value into the
@@ -320,6 +347,10 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			writeBadRequest(c, verr)
 			return
 		}
+		if werr := validateActiveWindows(in.ActiveWindows, in.ActiveTimezone); werr != "" {
+			writeBadRequest(c, werr)
+			return
+		}
 
 		params := repository.InsertParams{
 			Name:                    in.Name,
@@ -342,6 +373,8 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			HealthProbeEnabled:      in.HealthProbeEnabled,
 			ProxyURL:                proxyURL,
 			ParamOverrides:          in.ParamOverrides,
+			ActiveWindows:           in.ActiveWindows,
+			ActiveTimezone:          strings.TrimSpace(in.ActiveTimezone),
 		}
 
 		id, err := store.Insert(c.Request.Context(), params)
@@ -419,6 +452,10 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			writeBadRequest(c, verr)
 			return
 		}
+		if werr := validateActiveWindows(in.ActiveWindows, in.ActiveTimezone); werr != "" {
+			writeBadRequest(c, werr)
+			return
+		}
 
 		params := repository.UpdateParams{
 			Name:                    in.Name,
@@ -441,6 +478,8 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			HealthProbeEnabled:      in.HealthProbeEnabled,
 			ProxyURL:                proxyURL,
 			ParamOverrides:          in.ParamOverrides,
+			ActiveWindows:           in.ActiveWindows,
+			ActiveTimezone:          strings.TrimSpace(in.ActiveTimezone),
 		}
 
 		if err := store.Update(c.Request.Context(), id, params); err != nil {

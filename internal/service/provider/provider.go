@@ -119,6 +119,12 @@ type Account struct {
 	// temperature, top_p, thinking budget) onto each request. The zero
 	// value is a no-op.
 	ParamOverrides ParamOverrides
+
+	// ActiveWindows restrict when the account is routable. Empty means
+	// "always active". ActiveTimezone is the IANA name the windows are
+	// evaluated in (empty = UTC).
+	ActiveWindows  []ActiveWindow
+	ActiveTimezone string
 }
 
 // EndpointURLs returns the ordered list of base URLs to try for this

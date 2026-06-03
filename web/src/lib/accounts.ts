@@ -19,6 +19,15 @@ export interface ModelRedirect {
   target: string
 }
 
+// ActiveWindow restricts when an account is routable. days are
+// 0=Sunday..6=Saturday (empty = every day); start/end are "HH:MM" local
+// times in the account's active_timezone.
+export interface ActiveWindow {
+  days?: number[]
+  start: string
+  end: string
+}
+
 // ParamOverrides force generation parameters on every request routed
 // through the account. Each field is optional (absent = leave the
 // client's value untouched).
@@ -52,6 +61,8 @@ export interface Account {
   health_probe_enabled: boolean | null
   proxy_url: string
   param_overrides: ParamOverrides
+  active_windows: ActiveWindow[]
+  active_timezone: string
 }
 
 // AccountInput is the create/update body. On create, credentials is
@@ -78,6 +89,8 @@ export interface AccountInput {
   health_probe_enabled: boolean | null
   proxy_url: string
   param_overrides: ParamOverrides
+  active_windows: ActiveWindow[]
+  active_timezone: string
 }
 
 const ACCOUNTS_KEY = ['accounts'] as const
