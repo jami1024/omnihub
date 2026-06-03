@@ -9,8 +9,10 @@ import {
   type CircuitStatus,
   type HealthEvent,
 } from '../lib/circuit'
+import { useI18n } from '../lib/i18n'
 
 export function HealthPage() {
+  const { t } = useI18n()
   const { data: circuit, isLoading, error } = useCircuit()
   const { data: events } = useCircuitEvents(50)
   const reset = useResetBreaker()
@@ -20,7 +22,7 @@ export function HealthPage() {
   const halfOpenCount = accounts.filter((s) => s.state === 'half-open').length
 
   function handleReset(s: CircuitStatus) {
-    if (!confirm(`Force account "${s.account_name}" back to closed?`)) return
+    if (!confirm(t('health.forceClosedConfirm', { name: s.account_name }))) return
     reset.mutate(s.account_id)
   }
 
@@ -28,18 +30,18 @@ export function HealthPage() {
     <Layout>
       <main className="mx-auto w-full max-w-7xl px-6 py-8">
         <PageHeader
-          eyebrow="HEALTH"
-          context="Circuit breaker state"
-          title="Circuit breakers"
-          description="Watch per-account breaker state and recent transitions. The live table refreshes every 10 seconds."
+          eyebrow={t('health.eyebrow')}
+          context={t('health.context')}
+          title={t('health.title')}
+          description={t('health.description')}
         />
 
         <MetricStrip
           metrics={[
-            { label: 'Accounts', value: accounts.length },
-            { label: 'Closed', value: closedCount },
-            { label: 'Half-open', value: halfOpenCount, tone: halfOpenCount > 0 ? 'warning' : undefined },
-            { label: 'Open', value: openCount, tone: openCount > 0 ? 'danger' : undefined },
+            { label: t('health.metricAccounts'), value: accounts.length },
+            { label: t('health.metricClosed'), value: closedCount },
+            { label: t('health.metricHalfOpen'), value: halfOpenCount, tone: halfOpenCount > 0 ? 'warning' : undefined },
+            { label: t('health.metricOpen'), value: openCount, tone: openCount > 0 ? 'danger' : undefined },
           ]}
         />
 
@@ -48,15 +50,15 @@ export function HealthPage() {
         {isLoading && <LoadingTable />}
         {error && (
           <ErrorNotice>
-            {error instanceof ApiError ? error.message : 'Could not load circuit state.'}
+            {error instanceof ApiError ? error.message : t('health.loadError')}
           </ErrorNotice>
         )}
 
         {circuit && !circuit.available && (
           <EmptyState
-            eyebrow="No live breaker state"
-            title="Configure an upstream account before monitoring health."
-            description="Circuit breaker state appears once the gateway has at least one routable account to watch."
+            eyebrow={t('health.emptyEyebrow')}
+            title={t('health.emptyTitle')}
+            description={t('health.emptyDescription')}
           />
         )}
 
@@ -66,12 +68,12 @@ export function HealthPage() {
               <table className="w-full text-left text-sm">
                 <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-muted">
                   <tr>
-                    <Th>Account</Th>
-                    <Th>State</Th>
-                    <Th className="text-right">Failures</Th>
-                    <Th>Open until</Th>
-                    <Th>Last failure</Th>
-                    <Th className="text-right">Actions</Th>
+                    <Th>{t('health.colAccount')}</Th>
+                    <Th>{t('health.colState')}</Th>
+                    <Th className="text-right">{t('health.colFailures')}</Th>
+                    <Th>{t('health.colOpenUntil')}</Th>
+                    <Th>{t('health.colLastFailure')}</Th>
+                    <Th className="text-right">{t('common.actions')}</Th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -79,7 +81,7 @@ export function HealthPage() {
                     <tr key={s.account_id} className="transition-colors hover:bg-surface-2">
                       <Td className="font-medium">
                         {s.account_name}
-                        {!s.enabled && <span className="ml-2 text-xs text-muted">(disabled)</span>}
+                        {!s.enabled && <span className="ml-2 text-xs text-muted">{t('health.disabledSuffix')}</span>}
                       </Td>
                       <Td>
                         <StateBadge state={s.state} />
@@ -92,9 +94,9 @@ export function HealthPage() {
                           onClick={() => handleReset(s)}
                           disabled={reset.isPending || s.state === 'closed'}
                           className="text-muted underline-offset-4 hover:text-ink hover:underline disabled:opacity-40"
-                          title={s.state === 'closed' ? 'Already closed' : 'Force closed'}
+                          title={s.state === 'closed' ? t('health.alreadyClosed') : t('health.forceClosed')}
                         >
-                          Reset
+                          {t('health.reset')}
                         </button>
                       </Td>
                     </tr>
@@ -104,7 +106,7 @@ export function HealthPage() {
             </div>
             {reset.error && (
               <ErrorNotice>
-                {reset.error instanceof ApiError ? reset.error.message : 'Reset failed.'}
+                {reset.error instanceof ApiError ? reset.error.message : t('health.resetFailed')}
               </ErrorNotice>
             )}
           </section>
@@ -112,11 +114,11 @@ export function HealthPage() {
 
         <section className="mt-8">
           <h3 className="mb-3 font-mono text-xs font-medium uppercase tracking-[0.16em] text-muted">
-            Recent transitions
+            {t('health.recentTransitions')}
           </h3>
           {events && events.length === 0 && (
             <p className="rounded-xl border border-line bg-surface px-4 py-3 text-sm text-muted">
-              No transitions recorded yet.
+              {t('health.noTransitions')}
             </p>
           )}
           {events && events.length > 0 && (
@@ -148,10 +150,16 @@ function EventRow({ ev }: { ev: HealthEvent }) {
 }
 
 function StateBadge({ state, small }: { state: string; small?: boolean }) {
+  const { t } = useI18n()
   const styles: Record<string, string> = {
     closed: 'bg-success-bg text-success',
     open: 'bg-danger-bg text-danger',
     'half-open': 'bg-warning-bg text-warning',
+  }
+  const labels: Record<string, string> = {
+    closed: t('health.stateClosed'),
+    open: t('health.stateOpen'),
+    'half-open': t('health.stateHalfOpen'),
   }
   const cls = styles[state] ?? 'surface-2 text-muted'
   return (
@@ -160,7 +168,7 @@ function StateBadge({ state, small }: { state: string; small?: boolean }) {
         small ? 'px-1.5 py-0.5 text-[11px]' : 'px-2 py-0.5 text-xs'
       }`}
     >
-      {state}
+      {labels[state] ?? state}
     </span>
   )
 }

@@ -2,9 +2,11 @@ import { Layout } from '../components/Layout'
 import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { StatusBadge, Td, Th } from '../components/Table'
 import { ApiError } from '../lib/api'
+import { useI18n } from '../lib/i18n'
 import { useDeleteUser, useSetUserEnabled, useUsers, type AdminUser } from '../lib/users'
 
 export function UsersPage() {
+  const { t } = useI18n()
   const { data: users, isLoading, error } = useUsers()
   const setEnabled = useSetUserEnabled()
   const del = useDeleteUser()
@@ -18,7 +20,7 @@ export function UsersPage() {
     setEnabled.mutate({ id: u.id, enabled: !u.enabled })
   }
   function remove(u: AdminUser) {
-    if (!confirm(`Delete user "${u.username}"? Their keys stay but become unowned.`)) return
+    if (!confirm(t('users.deleteConfirm', { name: u.username }))) return
     del.mutate(u.id)
   }
 
@@ -26,19 +28,19 @@ export function UsersPage() {
     <Layout>
       <main className="mx-auto w-full max-w-7xl px-6 py-8">
         <PageHeader
-          eyebrow="PORTAL"
-          context="Self-service accounts"
-          title="Users"
-          description="People who registered on the end-user portal, with their key count and 30-day spend. Disable or remove an account here."
+          eyebrow={t('users.eyebrow')}
+          context={t('users.context')}
+          title={t('users.title')}
+          description={t('users.description')}
         />
 
         {users && users.length > 0 && (
           <MetricStrip
             metrics={[
-              { label: 'Users', value: total },
-              { label: 'Enabled', value: enabled },
-              { label: 'Keys', value: keyCount },
-              { label: 'Spend 30d', value: `$${spend.toFixed(2)}` },
+              { label: t('users.metricUsers'), value: total },
+              { label: t('common.enabled'), value: enabled },
+              { label: t('users.metricKeys'), value: keyCount },
+              { label: t('users.metricSpend30d'), value: `$${spend.toFixed(2)}` },
             ]}
           />
         )}
@@ -46,13 +48,13 @@ export function UsersPage() {
         <div className="mt-6" />
 
         {isLoading && <LoadingTable columns={6} />}
-        {error && <ErrorNotice>{error instanceof ApiError ? error.message : 'Could not load users.'}</ErrorNotice>}
+        {error && <ErrorNotice>{error instanceof ApiError ? error.message : t('users.loadError')}</ErrorNotice>}
 
         {users && users.length === 0 && (
           <EmptyState
-            eyebrow="NO USERS YET"
-            title="No one has signed up"
-            description="End users register at /portal. Once they do, their accounts, keys, and spend show up here for you to manage."
+            eyebrow={t('users.emptyEyebrow')}
+            title={t('users.emptyTitle')}
+            description={t('users.emptyDescription')}
           />
         )}
 
@@ -61,13 +63,13 @@ export function UsersPage() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-muted">
                 <tr>
-                  <Th>Username</Th>
-                  <Th>Email</Th>
-                  <Th className="text-right">Keys</Th>
-                  <Th className="text-right">Spent (30d)</Th>
-                  <Th>Status</Th>
-                  <Th>Joined</Th>
-                  <Th className="text-right">Actions</Th>
+                  <Th>{t('users.colUsername')}</Th>
+                  <Th>{t('common.email')}</Th>
+                  <Th className="text-right">{t('users.colKeys')}</Th>
+                  <Th className="text-right">{t('users.colSpent30d')}</Th>
+                  <Th>{t('common.status')}</Th>
+                  <Th>{t('users.colJoined')}</Th>
+                  <Th className="text-right">{t('common.actions')}</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
@@ -87,14 +89,14 @@ export function UsersPage() {
                         disabled={setEnabled.isPending}
                         className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline disabled:opacity-50"
                       >
-                        {u.enabled ? 'Disable' : 'Enable'}
+                        {u.enabled ? t('common.disable') : t('common.enable')}
                       </button>
                       <button
                         onClick={() => remove(u)}
                         disabled={del.isPending}
                         className="btn-danger hover:underline disabled:opacity-50"
                       >
-                        Delete
+                        {t('common.delete')}
                       </button>
                     </Td>
                   </tr>
@@ -109,7 +111,7 @@ export function UsersPage() {
             <ErrorNotice>
               {(setEnabled.error || del.error) instanceof ApiError
                 ? ((setEnabled.error || del.error) as ApiError).message
-                : 'Action failed.'}
+                : t('common.actionFailed')}
             </ErrorNotice>
           </div>
         )}

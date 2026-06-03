@@ -5,6 +5,7 @@ import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '
 import { StatusBadge, Td, Th } from '../components/Table'
 import { KeyForm } from '../components/KeyForm'
 import { ApiError } from '../lib/api'
+import { useI18n } from '../lib/i18n'
 import {
   useCreateKey,
   useDeleteKey,
@@ -18,6 +19,7 @@ import {
 type Editing = 'new' | Key | null
 
 export function KeysPage() {
+  const { t } = useI18n()
   const { data: keys, isLoading, error } = useKeys()
   const create = useCreateKey()
   const update = useUpdateKey()
@@ -48,7 +50,7 @@ export function KeysPage() {
   function handleSubmit(input: KeyInput) {
     setFormErr(null)
     const onError = (err: unknown) =>
-      setFormErr(err instanceof ApiError ? err.message : 'Request failed.')
+      setFormErr(err instanceof ApiError ? err.message : t('keys.requestFailed'))
     if (editing === 'new') {
       create.mutate(input, {
         onSuccess: (result) => {
@@ -63,8 +65,7 @@ export function KeysPage() {
   }
 
   function handleDelete(k: Key) {
-    if (!confirm(`Delete key "${k.name}"? Any client using it will stop working immediately.`))
-      return
+    if (!confirm(t('keys.deleteConfirm', { name: k.name }))) return
     del.mutate(k.id)
   }
 
@@ -72,23 +73,23 @@ export function KeysPage() {
     <Layout>
       <main className="mx-auto w-full max-w-7xl px-6 py-8">
         <PageHeader
-          eyebrow="ACCESS"
-          context="Client authentication"
-          title="API keys"
-          description="Issue virtual keys for clients, then constrain spend, request rate, and model access without exposing upstream credentials."
+          eyebrow={t('keys.eyebrow')}
+          context={t('keys.context')}
+          title={t('keys.title')}
+          description={t('keys.description')}
           action={
             <button onClick={openNew} className="btn btn-primary h-10">
-              New key
+              {t('keys.newKey')}
             </button>
           }
         />
 
         <MetricStrip
           metrics={[
-            { label: 'Total', value: keyCount },
-            { label: 'Enabled', value: enabledCount },
-            { label: 'Budgeted', value: budgetedCount },
-            { label: 'Model scoped', value: modelScopedCount },
+            { label: t('keys.metricTotal'), value: keyCount },
+            { label: t('common.enabled'), value: enabledCount },
+            { label: t('keys.metricBudgeted'), value: budgetedCount },
+            { label: t('keys.metricModelScoped'), value: modelScopedCount },
           ]}
         />
 
@@ -97,18 +98,18 @@ export function KeysPage() {
         {isLoading && <LoadingTable />}
         {error && (
           <ErrorNotice>
-            {error instanceof ApiError ? error.message : 'Could not load keys.'}
+            {error instanceof ApiError ? error.message : t('keys.loadError')}
           </ErrorNotice>
         )}
 
         {keys && keys.length === 0 && (
           <EmptyState
-            eyebrow="No client keys"
-            title="Create a virtual key before clients connect."
-            description="Client keys authenticate gateway traffic while keeping upstream account credentials private and operator-controlled."
+            eyebrow={t('keys.emptyEyebrow')}
+            title={t('keys.emptyTitle')}
+            description={t('keys.emptyDescription')}
             action={
               <button onClick={openNew} className="btn btn-primary h-10">
-                New key
+                {t('keys.newKey')}
               </button>
             }
           />
@@ -119,13 +120,13 @@ export function KeysPage() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-muted">
                 <tr>
-                  <Th>Name</Th>
-                  <Th>Label</Th>
-                  <Th>Status</Th>
-                  <Th className="text-right">Daily USD</Th>
-                  <Th className="text-right">RPM</Th>
-                  <Th>Models</Th>
-                  <Th className="text-right">Actions</Th>
+                  <Th>{t('common.name')}</Th>
+                  <Th>{t('keys.colLabel')}</Th>
+                  <Th>{t('common.status')}</Th>
+                  <Th className="text-right">{t('keys.colDailyUsd')}</Th>
+                  <Th className="text-right">{t('keys.colRpm')}</Th>
+                  <Th>{t('keys.colModels')}</Th>
+                  <Th className="text-right">{t('common.actions')}</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
@@ -141,21 +142,21 @@ export function KeysPage() {
                     </Td>
                     <Td className="text-right tabular-nums">{k.rpm_limit ?? '—'}</Td>
                     <Td className="text-muted">
-                      {k.allowed_models.length > 0 ? k.allowed_models.join(', ') : 'all'}
+                      {k.allowed_models.length > 0 ? k.allowed_models.join(', ') : t('keys.allModels')}
                     </Td>
                     <Td className="text-right">
                       <button
                         onClick={() => openEdit(k)}
                         className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
                       >
-                        Edit
+                        {t('common.edit')}
                       </button>
                       <button
                         onClick={() => handleDelete(k)}
                         disabled={del.isPending}
                         className="btn-danger hover:underline disabled:opacity-50"
                       >
-                        Delete
+                        {t('common.delete')}
                       </button>
                     </Td>
                   </tr>
@@ -168,14 +169,14 @@ export function KeysPage() {
         {del.error && (
           <div className="mt-3">
             <ErrorNotice>
-              {del.error instanceof ApiError ? del.error.message : 'Delete failed.'}
+              {del.error instanceof ApiError ? del.error.message : t('keys.deleteError')}
             </ErrorNotice>
           </div>
         )}
       </main>
 
       {editing && (
-        <Modal title={editing === 'new' ? 'New key' : `Edit ${editing.name}`} onClose={close}>
+        <Modal title={editing === 'new' ? t('keys.newKey') : t('keys.editKey', { name: editing.name })} onClose={close}>
           <KeyForm
             apiKey={editing === 'new' ? undefined : editing}
             submitting={create.isPending || update.isPending}
@@ -194,6 +195,7 @@ export function KeysPage() {
 // RevealKey shows the cleartext exactly once. It cannot be recovered
 // after the operator dismisses this dialog.
 function RevealKey({ result, onClose }: { result: CreateKeyResult; onClose: () => void }) {
+  const { t } = useI18n()
   const [copied, setCopied] = useState(false)
   function copy() {
     navigator.clipboard?.writeText(result.key).then(
@@ -202,9 +204,9 @@ function RevealKey({ result, onClose }: { result: CreateKeyResult; onClose: () =
     )
   }
   return (
-    <Modal title={`Key "${result.name}" created`} onClose={onClose}>
+    <Modal title={t('keys.createdTitle', { name: result.name })} onClose={onClose}>
       <p className="text-sm text-muted">
-        Copy this key now — it is shown only once and cannot be retrieved again.
+        {t('keys.revealHint')}
       </p>
       <div className="mt-3 flex items-center gap-2">
         <code className="flex-1 break-all rounded-lg border border-line bg-surface-2 px-3 py-2 font-mono text-sm">
@@ -214,7 +216,7 @@ function RevealKey({ result, onClose }: { result: CreateKeyResult; onClose: () =
           onClick={copy}
           className="btn btn-secondary shrink-0"
         >
-          {copied ? 'Copied' : 'Copy'}
+          {copied ? t('keys.copied') : t('keys.copy')}
         </button>
       </div>
       <div className="mt-5 flex justify-end">
@@ -222,7 +224,7 @@ function RevealKey({ result, onClose }: { result: CreateKeyResult; onClose: () =
           onClick={onClose}
           className="btn btn-primary"
         >
-          Done
+          {t('keys.done')}
         </button>
       </div>
     </Modal>

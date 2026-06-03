@@ -15,6 +15,7 @@ import { Layout } from '../components/Layout'
 import { ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { Td, Th } from '../components/Table'
 import { ApiError } from '../lib/api'
+import { useI18n } from '../lib/i18n'
 import { useUsage, type ModelUsage } from '../lib/usage'
 
 const WINDOWS = [7, 14, 30, 90]
@@ -47,6 +48,7 @@ function useChartColors() {
 }
 
 export function DashboardPage() {
+  const { t } = useI18n()
   const [days, setDays] = useState(7)
   const { data, isLoading, error } = useUsage(days)
   const cc = useChartColors()
@@ -55,10 +57,10 @@ export function DashboardPage() {
     <Layout>
       <main className="mx-auto w-full max-w-7xl px-6 py-8">
         <PageHeader
-          eyebrow="OVERVIEW"
-          context="Usage and spend"
-          title="Dashboard"
-          description="Track request volume, token usage, spend, and model mix across the gateway."
+          eyebrow={t('dashboard.eyebrow')}
+          context={t('dashboard.context')}
+          title={t('dashboard.title')}
+          description={t('dashboard.description')}
           action={
             <div className="flex gap-1 rounded-lg border border-line bg-surface p-0.5 text-sm">
             {WINDOWS.map((w) => (
@@ -71,7 +73,7 @@ export function DashboardPage() {
                     : 'text-muted hover:bg-surface-2 hover:text-ink'
                 }`}
               >
-                {w}d
+                {t('dashboard.daysShort', { n: w })}
               </button>
             ))}
           </div>
@@ -81,7 +83,7 @@ export function DashboardPage() {
         {isLoading && <LoadingTable />}
         {error && (
           <ErrorNotice>
-            {error instanceof ApiError ? error.message : 'Could not load usage.'}
+            {error instanceof ApiError ? error.message : t('dashboard.loadError')}
           </ErrorNotice>
         )}
 
@@ -89,21 +91,21 @@ export function DashboardPage() {
           <div className="space-y-6">
             <MetricStrip
               metrics={[
-                { label: 'Requests', value: fmtInt(data.summary.requests) },
-                { label: 'Spend', value: fmtUSD(data.summary.cost_usd) },
+                { label: t('dashboard.requests'), value: fmtInt(data.summary.requests) },
+                { label: t('dashboard.spend'), value: fmtUSD(data.summary.cost_usd) },
                 {
-                  label: 'Tokens in/out',
+                  label: t('dashboard.tokensInOut'),
                   value: `${fmtTokens(data.summary.input_tokens)} / ${fmtTokens(data.summary.output_tokens)}`,
                 },
                 {
-                  label: 'Errors',
+                  label: t('dashboard.errors'),
                   value: fmtInt(data.summary.errors),
                   tone: data.summary.errors > 0 ? 'danger' : undefined,
                 },
               ]}
             />
 
-            <Card title="Daily spend (USD)">
+            <Card title={t('dashboard.dailySpend')}>
               <ResponsiveContainer width="100%" height={240}>
                 <AreaChart data={data.daily} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <defs>
@@ -116,7 +118,7 @@ export function DashboardPage() {
                   <XAxis dataKey="day" tickFormatter={fmtDay} fontSize={11} stroke={cc.axis} />
                   <YAxis tickFormatter={(v) => `$${v}`} fontSize={11} stroke={cc.axis} width={48} />
                   <Tooltip
-                    formatter={(v: number) => [fmtUSD(v), 'Spend']}
+                    formatter={(v: number) => [fmtUSD(v), t('dashboard.spend')]}
                     labelFormatter={(l) => fmtDay(l as string)}
                   />
                   <Area type="monotone" dataKey="cost_usd" stroke={cc.brand} fill="url(#spend)" strokeWidth={2} />
@@ -124,14 +126,14 @@ export function DashboardPage() {
               </ResponsiveContainer>
             </Card>
 
-            <Card title="Daily requests">
+            <Card title={t('dashboard.dailyRequests')}>
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={data.daily} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={cc.grid} vertical={false} />
                   <XAxis dataKey="day" tickFormatter={fmtDay} fontSize={11} stroke={cc.axis} />
                   <YAxis fontSize={11} stroke={cc.axis} width={48} allowDecimals={false} />
                   <Tooltip
-                    formatter={(v: number) => [fmtInt(v), 'Requests']}
+                    formatter={(v: number) => [fmtInt(v), t('dashboard.requests')]}
                     labelFormatter={(l) => fmtDay(l as string)}
                   />
                   <Bar dataKey="requests" fill={cc.brand} radius={[2, 2, 0, 0]} />
@@ -139,9 +141,9 @@ export function DashboardPage() {
               </ResponsiveContainer>
             </Card>
 
-            <Card title="Spend by model">
+            <Card title={t('dashboard.spendByModel')}>
               {data.by_model.length === 0 ? (
-                <p className="py-8 text-center text-sm text-muted">No traffic in this window.</p>
+                <p className="py-8 text-center text-sm text-muted">{t('dashboard.noTraffic')}</p>
               ) : (
                 <ModelBreakdown models={data.by_model} />
               )}
@@ -154,6 +156,7 @@ export function DashboardPage() {
 }
 
 function ModelBreakdown({ models }: { models: ModelUsage[] }) {
+  const { t } = useI18n()
   const cc = useChartColors()
   // Top 8 by cost for the chart; the table below lists them all.
   const top = models.slice(0, 8)
@@ -163,7 +166,7 @@ function ModelBreakdown({ models }: { models: ModelUsage[] }) {
         <BarChart data={top} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
           <XAxis type="number" tickFormatter={(v) => `$${v}`} fontSize={11} stroke={cc.axis} />
           <YAxis type="category" dataKey="model" width={150} fontSize={11} stroke={cc.axis} />
-          <Tooltip formatter={(v: number) => [fmtUSD(v), 'Spend']} />
+          <Tooltip formatter={(v: number) => [fmtUSD(v), t('dashboard.spend')]} />
           <Bar dataKey="cost_usd" radius={[0, 2, 2, 0]}>
             {top.map((_, i) => (
               <Cell key={i} fill={cc.brand} />
@@ -176,11 +179,11 @@ function ModelBreakdown({ models }: { models: ModelUsage[] }) {
         <table className="w-full text-left text-sm">
           <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-muted">
             <tr>
-              <Th>Model</Th>
-              <Th className="text-right">Requests</Th>
-              <Th className="text-right">Spend</Th>
-              <Th className="text-right">In</Th>
-              <Th className="text-right">Out</Th>
+              <Th>{t('dashboard.model')}</Th>
+              <Th className="text-right">{t('dashboard.requests')}</Th>
+              <Th className="text-right">{t('dashboard.spend')}</Th>
+              <Th className="text-right">{t('dashboard.in')}</Th>
+              <Th className="text-right">{t('dashboard.out')}</Th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">

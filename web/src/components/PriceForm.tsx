@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { toPerMillion, toPerToken, type ModelPrice, type PriceInput } from '../lib/prices'
+import { useI18n } from '../lib/i18n'
 
 // PriceForm drives create and edit. All money fields are entered as USD
 // per MILLION tokens (what vendor pages show) and converted to per-token
@@ -18,6 +19,7 @@ const FIELD =
   'field'
 
 export function PriceForm({ price, submitting, error, onCancel, onSubmit }: PriceFormProps) {
+  const { t } = useI18n()
   const isEdit = price != null
   const [model, setModel] = useState(price?.model ?? '')
   const [input, setInput] = useState(mtokStr(price?.input_cost_per_token))
@@ -33,12 +35,12 @@ export function PriceForm({ price, submitting, error, onCancel, onSubmit }: Pric
     e.preventDefault()
     setLocalErr(null)
     if (!isEdit && !model.trim()) {
-      setLocalErr('Model name is required.')
+      setLocalErr(t('priceForm.modelNameRequired'))
       return
     }
     const fields = [input, output, cacheWrite5m, cacheWrite1h, cacheRead]
     if (fields.some((v) => Number(v) < 0)) {
-      setLocalErr('Costs cannot be negative.')
+      setLocalErr(t('priceForm.costsNegative'))
       return
     }
     const inputBody: PriceInput = {
@@ -54,44 +56,43 @@ export function PriceForm({ price, submitting, error, onCancel, onSubmit }: Pric
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <Field label="Model name">
+      <Field label={t('priceForm.modelName')}>
         <input
           className={FIELD + (isEdit ? ' opacity-60' : '')}
           value={model}
           onChange={(e) => setModel(e.target.value)}
           readOnly={isEdit}
           autoFocus={!isEdit}
-          placeholder="gpt-5.2 (prefix-matched: gpt-5.2 also prices gpt-5.2-2025-12-11)"
+          placeholder={t('priceForm.modelNamePlaceholder')}
         />
       </Field>
 
-      <p className="text-xs text-muted">All costs are USD per 1,000,000 tokens.</p>
+      <p className="text-xs text-muted">{t('priceForm.costsUnit')}</p>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Input">
+        <Field label={t('priceForm.input')}>
           <Money value={input} onChange={setInput} />
         </Field>
-        <Field label="Output">
+        <Field label={t('priceForm.output')}>
           <Money value={output} onChange={setOutput} />
         </Field>
       </div>
 
       <details className="rounded-lg border border-line p-3">
-        <summary className="cursor-pointer text-sm text-muted">Cache rates (optional)</summary>
+        <summary className="cursor-pointer text-sm text-muted">{t('priceForm.cacheRates')}</summary>
         <div className="mt-3 grid grid-cols-3 gap-4">
-          <Field label="Cache write 5m">
+          <Field label={t('priceForm.cacheWrite5m')}>
             <Money value={cacheWrite5m} onChange={setCacheWrite5m} />
           </Field>
-          <Field label="Cache write 1h">
+          <Field label={t('priceForm.cacheWrite1h')}>
             <Money value={cacheWrite1h} onChange={setCacheWrite1h} />
           </Field>
-          <Field label="Cache read">
+          <Field label={t('priceForm.cacheRead')}>
             <Money value={cacheRead} onChange={setCacheRead} />
           </Field>
         </div>
         <p className="mt-2 text-xs text-muted">
-          Leave a cache rate blank/0 and the engine falls back to Anthropic ratios off the input
-          price (5m 1.25×, 1h 2×, read 0.10×).
+          {t('priceForm.cacheFallback')}
         </p>
       </details>
 
@@ -105,14 +106,14 @@ export function PriceForm({ price, submitting, error, onCancel, onSubmit }: Pric
           onClick={onCancel}
           className="btn btn-secondary"
         >
-          Cancel
+          {t('common.cancel')}
         </button>
         <button
           type="submit"
           disabled={submitting}
           className="btn btn-primary"
         >
-          {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Add price'}
+          {submitting ? t('common.saving') : isEdit ? t('common.saveChanges') : t('priceForm.addPrice')}
         </button>
       </div>
     </form>

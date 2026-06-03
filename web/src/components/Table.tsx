@@ -2,6 +2,8 @@
 // and the enabled/disabled status pill. Tables stay legible dense — the
 // price table renders 2,000+ rows.
 
+import { useI18n } from '../lib/i18n'
+
 export function Th({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
     <th className={`px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-muted ${className}`}>
@@ -15,6 +17,7 @@ export function Td({ children, className = '' }: { children: React.ReactNode; cl
 }
 
 export function StatusBadge({ enabled }: { enabled: boolean }) {
+  const { t } = useI18n()
   return (
     <span className={`badge ${enabled ? 'badge-success' : 'badge-neutral'}`}>
       <span
@@ -22,7 +25,7 @@ export function StatusBadge({ enabled }: { enabled: boolean }) {
         style={{ background: 'currentColor' }}
         aria-hidden
       />
-      {enabled ? 'Enabled' : 'Disabled'}
+      {enabled ? t('common.enabled') : t('common.disabled')}
     </span>
   )
 }

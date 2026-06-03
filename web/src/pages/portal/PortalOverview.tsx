@@ -3,10 +3,12 @@ import { PortalLayout } from '../../components/PortalLayout'
 import { Td, Th } from '../../components/Table'
 import { ApiError } from '../../lib/portalApi'
 import { usePortalUsage } from '../../lib/portalData'
+import { useI18n } from '../../lib/i18n'
 
 const WINDOWS = [7, 14, 30, 90]
 
 export function PortalOverviewPage() {
+  const { t } = useI18n()
   const [days, setDays] = useState(7)
   const { data, isLoading, error } = usePortalUsage(days)
 
@@ -15,8 +17,8 @@ export function PortalOverviewPage() {
       <main className="mx-auto max-w-5xl px-6 py-8">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-semibold">Your usage</h2>
-            <p className="text-sm text-muted">Requests and spend across your API keys.</p>
+            <h2 className="text-xl font-semibold">{t('portalOverview.title')}</h2>
+            <p className="text-sm text-muted">{t('portalOverview.subtitle')}</p>
           </div>
           <div className="flex gap-1 rounded-full border border-line p-0.5 text-sm">
             {WINDOWS.map((w) => (
@@ -35,45 +37,45 @@ export function PortalOverviewPage() {
           </div>
         </div>
 
-        {isLoading && <p className="text-sm text-muted">Loading…</p>}
+        {isLoading && <p className="text-sm text-muted">{t('common.loading')}</p>}
         {error && (
           <p className="text-sm text-danger">
-            {error instanceof ApiError ? error.message : 'Could not load usage.'}
+            {error instanceof ApiError ? error.message : t('portalOverview.loadError')}
           </p>
         )}
 
         {data && (
           <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <Stat label="Requests" value={fmtInt(data.summary.requests)} />
-              <Stat label="Spend" value={fmtUSD(data.summary.cost_usd)} />
+              <Stat label={t('portalOverview.requests')} value={fmtInt(data.summary.requests)} />
+              <Stat label={t('portalOverview.spend')} value={fmtUSD(data.summary.cost_usd)} />
               <Stat
-                label="Tokens (in / out)"
+                label={t('portalOverview.tokensInOut')}
                 value={`${fmtTokens(data.summary.input_tokens)} / ${fmtTokens(data.summary.output_tokens)}`}
               />
               <Stat
-                label="Errors"
+                label={t('portalOverview.errors')}
                 value={fmtInt(data.summary.errors)}
                 accent={data.summary.errors > 0 ? 'text-danger' : undefined}
               />
             </div>
 
             <section className="card p-4">
-              <h3 className="mb-3 text-sm font-medium text-muted">By model</h3>
+              <h3 className="mb-3 text-sm font-medium text-muted">{t('portalOverview.byModel')}</h3>
               {data.by_model.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted">
-                  No traffic yet. Create a key and start sending requests.
+                  {t('portalOverview.noTraffic')}
                 </p>
               ) : (
                 <div className="overflow-x-auto rounded-xl border border-line bg-surface">
                   <table className="w-full text-left text-sm">
                     <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-muted">
                       <tr>
-                        <Th>Model</Th>
-                        <Th className="text-right">Requests</Th>
-                        <Th className="text-right">Spend</Th>
-                        <Th className="text-right">In</Th>
-                        <Th className="text-right">Out</Th>
+                        <Th>{t('portalOverview.model')}</Th>
+                        <Th className="text-right">{t('portalOverview.requests')}</Th>
+                        <Th className="text-right">{t('portalOverview.spend')}</Th>
+                        <Th className="text-right">{t('portalOverview.in')}</Th>
+                        <Th className="text-right">{t('portalOverview.out')}</Th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-line">

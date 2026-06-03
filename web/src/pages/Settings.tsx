@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import { Layout } from '../components/Layout'
 import { ErrorNotice, PageHeader } from '../components/PageChrome'
 import { ApiError } from '../lib/api'
+import { useI18n } from '../lib/i18n'
 import { useSettings, useUpdateSettings, type PortalSettings } from '../lib/settings'
 
 // Settings is the admin control for the end-user portal policy: whether
 // open registration is allowed, and the default / ceiling limits clamped
 // onto keys that portal users create for themselves.
 export function SettingsPage() {
+  const { t } = useI18n()
   const { data, isLoading, error } = useSettings()
   const update = useUpdateSettings()
   const [form, setForm] = useState<PortalSettings | null>(null)
@@ -35,14 +37,14 @@ export function SettingsPage() {
     <Layout>
       <main className="mx-auto w-full max-w-3xl px-6 py-8">
         <PageHeader
-          eyebrow="PORTAL"
-          context="Policy"
-          title="Portal settings"
-          description="Control whether the portal accepts open registration, and the default and ceiling limits clamped onto keys users create for themselves."
+          eyebrow={t('settings.eyebrow')}
+          context={t('settings.context')}
+          title={t('settings.title')}
+          description={t('settings.description')}
         />
 
-        {isLoading && <p className="text-sm text-muted">Loading…</p>}
-        {error && <ErrorNotice>{error instanceof ApiError ? error.message : 'Could not load settings.'}</ErrorNotice>}
+        {isLoading && <p className="text-sm text-muted">{t('common.loading')}</p>}
+        {error && <ErrorNotice>{error instanceof ApiError ? error.message : t('settings.loadError')}</ErrorNotice>}
 
         {form && (
           <form onSubmit={save} className="space-y-6">
@@ -55,9 +57,9 @@ export function SettingsPage() {
                   onChange={(e) => setForm({ ...form, signup_enabled: e.target.checked })}
                 />
                 <span>
-                  <span className="text-sm font-medium">Allow open registration</span>
+                  <span className="text-sm font-medium">{t('settings.allowOpenRegistration')}</span>
                   <span className="block text-xs text-muted">
-                    When off, only an admin can create users; the portal signup form is closed.
+                    {t('settings.allowOpenRegistrationHint')}
                   </span>
                 </span>
               </label>
@@ -65,39 +67,39 @@ export function SettingsPage() {
 
             <section className="card space-y-4 p-5">
               <div>
-                <h3 className="text-sm font-medium">User key limits</h3>
+                <h3 className="text-sm font-medium">{t('settings.userKeyLimits')}</h3>
                 <p className="text-xs text-muted">
-                  Applied when a portal user creates a key. Leave blank for no default / no cap.
+                  {t('settings.userKeyLimitsHint')}
                 </p>
               </div>
               <div className="grid grid-cols-3 gap-4">
-                <Field label="Default daily USD">
+                <Field label={t('settings.defaultDailyUsd')}>
                   <input
                     className="field"
                     type="number"
                     step="0.01"
                     value={form.key_daily_usd_default ?? ''}
                     onChange={(e) => setForm({ ...form, key_daily_usd_default: num(e.target.value) })}
-                    placeholder="none"
+                    placeholder={t('common.none')}
                   />
                 </Field>
-                <Field label="Max daily USD">
+                <Field label={t('settings.maxDailyUsd')}>
                   <input
                     className="field"
                     type="number"
                     step="0.01"
                     value={form.key_daily_usd_max ?? ''}
                     onChange={(e) => setForm({ ...form, key_daily_usd_max: num(e.target.value) })}
-                    placeholder="no cap"
+                    placeholder={t('common.noCap')}
                   />
                 </Field>
-                <Field label="Max RPM">
+                <Field label={t('settings.maxRpm')}>
                   <input
                     className="field"
                     type="number"
                     value={form.key_rpm_max ?? ''}
                     onChange={(e) => setForm({ ...form, key_rpm_max: num(e.target.value) })}
-                    placeholder="no cap"
+                    placeholder={t('common.noCap')}
                   />
                 </Field>
               </div>
@@ -105,14 +107,14 @@ export function SettingsPage() {
 
             {update.error && (
               <p className="text-sm text-danger">
-                {update.error instanceof ApiError ? update.error.message : 'Could not save.'}
+                {update.error instanceof ApiError ? update.error.message : t('settings.saveError')}
               </p>
             )}
             <div className="flex items-center gap-3">
               <button type="submit" disabled={update.isPending} className="btn btn-primary">
-                {update.isPending ? 'Saving…' : 'Save settings'}
+                {update.isPending ? t('common.saving') : t('settings.saveSettings')}
               </button>
-              {saved && !update.isPending && <span className="text-sm text-muted">Saved.</span>}
+              {saved && !update.isPending && <span className="text-sm text-muted">{t('common.saved')}</span>}
             </div>
           </form>
         )}

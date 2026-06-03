@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ApiError } from '../lib/api'
+import { useI18n } from '../lib/i18n'
 import { useGroups } from '../lib/groups'
 import {
   useTestAccount,
@@ -34,9 +35,17 @@ export interface AccountFormProps {
 const FIELD =
   'field'
 
-// DAY_LABELS index 0..6 = Sunday..Saturday, matching the server's
-// ActiveWindow.Days encoding.
-const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+// DAY_KEYS index 0..6 = Sunday..Saturday, matching the server's
+// ActiveWindow.Days encoding. Resolved to labels via t() at render time.
+const DAY_KEYS = [
+  'accountForm.daySun',
+  'accountForm.dayMon',
+  'accountForm.dayTue',
+  'accountForm.dayWed',
+  'accountForm.dayThu',
+  'accountForm.dayFri',
+  'accountForm.daySat',
+]
 
 export function AccountForm({
   account,
@@ -45,6 +54,7 @@ export function AccountForm({
   onCancel,
   onSubmit,
 }: AccountFormProps) {
+  const { t } = useI18n()
   const isEdit = account != null
   const [name, setName] = useState(account?.name ?? '')
   const [provider, setProvider] = useState(account?.provider ?? '')
@@ -157,7 +167,7 @@ export function AccountForm({
       if (k && row.value) credentials[k] = row.value
     }
     if (!provider.trim()) {
-      setLocalErr('Choose a provider before testing.')
+      setLocalErr(t('accountForm.errChooseProvider'))
       return
     }
     if (Object.keys(credentials).length > 0) {
@@ -165,7 +175,7 @@ export function AccountForm({
     } else if (isEdit && account) {
       testById.mutate(account.id)
     } else {
-      setLocalErr('Enter the API key to test the connection.')
+      setLocalErr(t('accountForm.errEnterApiKey'))
     }
   }
 
@@ -184,7 +194,7 @@ export function AccountForm({
     setLocalErr(null)
 
     if (!name.trim() || !provider.trim()) {
-      setLocalErr('Name and provider are required.')
+      setLocalErr(t('accountForm.errNameProviderRequired'))
       return
     }
 
@@ -195,7 +205,7 @@ export function AccountForm({
       const k = row.key.trim()
       if (!k) continue
       if (!row.value) {
-        setLocalErr(`Credential "${k}" has no value.`)
+        setLocalErr(t('accountForm.errCredentialNoValue', { key: k }))
         return
       }
       credentials[k] = row.value
@@ -203,7 +213,7 @@ export function AccountForm({
     const hasCreds = Object.keys(credentials).length > 0
 
     if (!isEdit && !hasCreds) {
-      setLocalErr('At least one credential (e.g. api_key) is required.')
+      setLocalErr(t('accountForm.errCredentialRequired'))
       return
     }
 
@@ -214,7 +224,7 @@ export function AccountForm({
       const target = r.target.trim()
       if (!source && !target) continue
       if (!source || !target) {
-        setLocalErr('A model redirect needs both a source and a target.')
+        setLocalErr(t('accountForm.errRedirectSourceTarget'))
         return
       }
       cleanRedirects.push({ match_type: r.match_type, source, target })
@@ -269,10 +279,10 @@ export function AccountForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Name">
+        <Field label={t('common.name')}>
           <input className={FIELD} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </Field>
-        <Field label="Provider">
+        <Field label={t('accountForm.provider')}>
           <input
             className={FIELD}
             value={provider}
@@ -282,31 +292,29 @@ export function AccountForm({
         </Field>
       </div>
 
-      <Field label="Base URL (optional)">
+      <Field label={t('accountForm.baseUrlOptional')}>
         <input
           className={FIELD}
           value={baseURL}
           onChange={(e) => setBaseURL(e.target.value)}
-          placeholder="leave blank for the provider default"
+          placeholder={t('accountForm.baseUrlPlaceholder')}
         />
       </Field>
 
       <details className="rounded-lg border border-line p-3" open={endpoints.length > 0 || proxyURL !== ''}>
-        <summary className="cursor-pointer text-sm text-muted">Network: failover & proxy (optional)</summary>
+        <summary className="cursor-pointer text-sm text-muted">{t('accountForm.networkSummary')}</summary>
         <div className="mt-3">
-          <Field label="Outbound proxy URL">
+          <Field label={t('accountForm.proxyUrl')}>
             <input
               className={FIELD}
               value={proxyURL}
               onChange={(e) => setProxyURL(e.target.value)}
-              placeholder="http://, https://, socks5:// — blank for direct"
+              placeholder={t('accountForm.proxyUrlPlaceholder')}
             />
           </Field>
         </div>
         <p className="mt-3 text-xs text-muted">
-          Failover endpoints: additional base URLs (same credentials) tried in order after the Base
-          URL when a request fails with a transport error or a retriable status (5xx / 429), before
-          failing over to another account.
+          {t('accountForm.failoverHelp')}
         </p>
         <div className="mt-3 space-y-2">
           {endpoints.map((url, i) => (
@@ -323,19 +331,19 @@ export function AccountForm({
             </div>
           ))}
           <button type="button" onClick={addEndpoint} className="text-sm text-muted hover:text-ink">
-            + add endpoint
+            {t('accountForm.addEndpoint')}
           </button>
         </div>
       </details>
 
       <div className="grid grid-cols-3 gap-4">
-        <Field label="Weight">
+        <Field label={t('accountForm.weight')}>
           <input className={FIELD} type="number" value={weight} onChange={(e) => setWeight(e.target.value)} />
         </Field>
-        <Field label="Priority">
+        <Field label={t('accountForm.priority')}>
           <input className={FIELD} type="number" value={priority} onChange={(e) => setPriority(e.target.value)} />
         </Field>
-        <Field label="Cost multiplier">
+        <Field label={t('accountForm.costMultiplier')}>
           <input
             className={FIELD}
             type="number"
@@ -347,9 +355,9 @@ export function AccountForm({
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Group (optional)">
+        <Field label={t('accountForm.groupOptional')}>
           <select className={FIELD} value={groupID} onChange={(e) => setGroupID(e.target.value)}>
-            <option value="">Ungrouped</option>
+            <option value="">{t('accountForm.ungrouped')}</option>
             {(groups ?? []).map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name} (×{g.cost_multiplier})
@@ -357,26 +365,25 @@ export function AccountForm({
             ))}
           </select>
         </Field>
-        <Field label="Active health probe">
+        <Field label={t('accountForm.activeHealthProbe')}>
           <select className={FIELD} value={healthProbe} onChange={(e) => setHealthProbe(e.target.value)}>
-            <option value="">Inherit default</option>
-            <option value="true">Enabled</option>
-            <option value="false">Disabled</option>
+            <option value="">{t('accountForm.inheritDefault')}</option>
+            <option value="true">{t('common.enabled')}</option>
+            <option value="false">{t('common.disabled')}</option>
           </select>
         </Field>
       </div>
 
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-        Enabled (routable)
+        {t('accountForm.enabledRoutable')}
       </label>
 
       <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">Credentials</legend>
+        <legend className="text-sm font-medium">{t('accountForm.credentials')}</legend>
         {isEdit && account!.credential_keys.length > 0 && (
           <p className="text-xs text-muted">
-            Currently set: {account!.credential_keys.join(', ')}. Re-enter only to change them;
-            leave blank to keep.
+            {t('accountForm.credentialsCurrentlySet', { keys: account!.credential_keys.join(', ') })}
           </p>
         )}
         {creds.map((row, i) => (
@@ -385,14 +392,14 @@ export function AccountForm({
               className={FIELD + ' flex-1'}
               value={row.key}
               onChange={(e) => updateCred(i, { key: e.target.value })}
-              placeholder="key (e.g. api_key)"
+              placeholder={t('accountForm.credKeyPlaceholder')}
             />
             <input
               className={FIELD + ' flex-1'}
               type="password"
               value={row.value}
               onChange={(e) => updateCred(i, { value: e.target.value })}
-              placeholder="value"
+              placeholder={t('accountForm.valuePlaceholder')}
             />
             <button
               type="button"
@@ -408,17 +415,16 @@ export function AccountForm({
           onClick={addCred}
           className="text-sm text-muted hover:text-ink"
         >
-          + add credential
+          {t('accountForm.addCredential')}
         </button>
       </fieldset>
 
       <details className="rounded-lg border border-line p-3" open={redirects.length > 0}>
         <summary className="cursor-pointer text-sm text-muted">
-          Model redirects (optional)
+          {t('accountForm.modelRedirectsSummary')}
         </summary>
         <p className="mt-2 text-xs text-muted">
-          Rewrite the requested model to a different upstream model before sending. Rules run
-          top-to-bottom; the first match wins.
+          {t('accountForm.modelRedirectsHelp')}
         </p>
         <div className="mt-3 space-y-2">
           {redirects.map((row, i) => (
@@ -428,24 +434,24 @@ export function AccountForm({
                 value={row.match_type}
                 onChange={(e) => updateRedirect(i, { match_type: e.target.value as ModelRedirectMatch })}
               >
-                <option value="exact">exact</option>
-                <option value="prefix">prefix</option>
-                <option value="suffix">suffix</option>
-                <option value="contains">contains</option>
-                <option value="regex">regex</option>
+                <option value="exact">{t('accountForm.matchExact')}</option>
+                <option value="prefix">{t('accountForm.matchPrefix')}</option>
+                <option value="suffix">{t('accountForm.matchSuffix')}</option>
+                <option value="contains">{t('accountForm.matchContains')}</option>
+                <option value="regex">{t('accountForm.matchRegex')}</option>
               </select>
               <input
                 className={FIELD + ' flex-1'}
                 value={row.source}
                 onChange={(e) => updateRedirect(i, { source: e.target.value })}
-                placeholder="source (requested)"
+                placeholder={t('accountForm.redirectSourcePlaceholder')}
               />
               <span className="self-center text-muted">→</span>
               <input
                 className={FIELD + ' flex-1'}
                 value={row.target}
                 onChange={(e) => updateRedirect(i, { target: e.target.value })}
-                placeholder="target (upstream)"
+                placeholder={t('accountForm.redirectTargetPlaceholder')}
               />
               <button type="button" onClick={() => removeRedirect(i)} className="btn btn-secondary px-2">
                 ✕
@@ -453,18 +459,17 @@ export function AccountForm({
             </div>
           ))}
           <button type="button" onClick={addRedirect} className="text-sm text-muted hover:text-ink">
-            + add redirect
+            {t('accountForm.addRedirect')}
           </button>
         </div>
       </details>
 
       <details className="rounded-lg border border-line p-3" open={headers.length > 0}>
         <summary className="cursor-pointer text-sm text-muted">
-          Custom headers (optional)
+          {t('accountForm.customHeadersSummary')}
         </summary>
         <p className="mt-2 text-xs text-muted">
-          Extra HTTP headers sent on every upstream request for this account (org id, beta flags,
-          routing hints). Forwarded-for and encoding headers are always enforced by the gateway.
+          {t('accountForm.customHeadersHelp')}
         </p>
         <div className="mt-3 space-y-2">
           {headers.map((row, i) => (
@@ -473,13 +478,13 @@ export function AccountForm({
                 className={FIELD + ' flex-1'}
                 value={row.key}
                 onChange={(e) => updateHeader(i, { key: e.target.value })}
-                placeholder="header name (e.g. X-Org-Id)"
+                placeholder={t('accountForm.headerNamePlaceholder')}
               />
               <input
                 className={FIELD + ' flex-1'}
                 value={row.value}
                 onChange={(e) => updateHeader(i, { value: e.target.value })}
-                placeholder="value"
+                placeholder={t('accountForm.valuePlaceholder')}
               />
               <button type="button" onClick={() => removeHeader(i)} className="btn btn-secondary px-2">
                 ✕
@@ -487,21 +492,20 @@ export function AccountForm({
             </div>
           ))}
           <button type="button" onClick={addHeader} className="text-sm text-muted hover:text-ink">
-            + add header
+            {t('accountForm.addHeader')}
           </button>
         </div>
       </details>
 
       <details className="rounded-lg border border-line p-3" open={dailyLimit !== '' || totalLimit !== ''}>
         <summary className="cursor-pointer text-sm text-muted">
-          Spend caps (optional)
+          {t('accountForm.spendCapsSummary')}
         </summary>
         <p className="mt-2 text-xs text-muted">
-          Stop routing to this account once its spend reaches a cap. Daily is a rolling 24-hour
-          window; total is lifetime. Leave blank for no cap.
+          {t('accountForm.spendCapsHelp')}
         </p>
         <div className="mt-3 grid grid-cols-2 gap-4">
-          <Field label="Daily USD limit">
+          <Field label={t('accountForm.dailyUsdLimit')}>
             <input
               className={FIELD}
               type="number"
@@ -509,10 +513,10 @@ export function AccountForm({
               min="0"
               value={dailyLimit}
               onChange={(e) => setDailyLimit(e.target.value)}
-              placeholder="no cap"
+              placeholder={t('common.noCap')}
             />
           </Field>
-          <Field label="Total USD limit">
+          <Field label={t('accountForm.totalUsdLimit')}>
             <input
               className={FIELD}
               type="number"
@@ -520,7 +524,7 @@ export function AccountForm({
               min="0"
               value={totalLimit}
               onChange={(e) => setTotalLimit(e.target.value)}
-              placeholder="no cap"
+              placeholder={t('common.noCap')}
             />
           </Field>
         </div>
@@ -530,44 +534,42 @@ export function AccountForm({
         className="rounded-lg border border-line p-3"
         open={ovMaxTokens !== '' || ovTemperature !== '' || ovTopP !== '' || ovThinking !== ''}
       >
-        <summary className="cursor-pointer text-sm text-muted">Parameter overrides (optional)</summary>
+        <summary className="cursor-pointer text-sm text-muted">{t('accountForm.paramOverridesSummary')}</summary>
         <p className="mt-2 text-xs text-muted">
-          Force these generation parameters on every request routed through this account (the
-          client's values are replaced). Leave blank to pass the client's value through.
+          {t('accountForm.paramOverridesHelp')}
         </p>
         <div className="mt-3 grid grid-cols-2 gap-4">
-          <Field label="Max tokens">
+          <Field label={t('accountForm.maxTokens')}>
             <input className={FIELD} type="number" min="1" value={ovMaxTokens}
-              onChange={(e) => setOvMaxTokens(e.target.value)} placeholder="passthrough" />
+              onChange={(e) => setOvMaxTokens(e.target.value)} placeholder={t('accountForm.passthrough')} />
           </Field>
-          <Field label="Temperature (0–2)">
+          <Field label={t('accountForm.temperature')}>
             <input className={FIELD} type="number" step="0.1" min="0" max="2" value={ovTemperature}
-              onChange={(e) => setOvTemperature(e.target.value)} placeholder="passthrough" />
+              onChange={(e) => setOvTemperature(e.target.value)} placeholder={t('accountForm.passthrough')} />
           </Field>
-          <Field label="Top P (0–1)">
+          <Field label={t('accountForm.topP')}>
             <input className={FIELD} type="number" step="0.05" min="0" max="1" value={ovTopP}
-              onChange={(e) => setOvTopP(e.target.value)} placeholder="passthrough" />
+              onChange={(e) => setOvTopP(e.target.value)} placeholder={t('accountForm.passthrough')} />
           </Field>
-          <Field label="Thinking budget (tokens)">
+          <Field label={t('accountForm.thinkingBudget')}>
             <input className={FIELD} type="number" min="1" value={ovThinking}
-              onChange={(e) => setOvThinking(e.target.value)} placeholder="off" />
+              onChange={(e) => setOvThinking(e.target.value)} placeholder={t('accountForm.off')} />
           </Field>
         </div>
       </details>
 
       <details className="rounded-lg border border-line p-3" open={windows.length > 0}>
-        <summary className="cursor-pointer text-sm text-muted">Active time windows (optional)</summary>
+        <summary className="cursor-pointer text-sm text-muted">{t('accountForm.activeWindowsSummary')}</summary>
         <p className="mt-2 text-xs text-muted">
-          Route to this account only during these windows. No windows = always active. Times are
-          HH:MM in the timezone below; a window whose start is after its end wraps past midnight.
+          {t('accountForm.activeWindowsHelp')}
         </p>
         <div className="mt-3">
-          <Field label="Timezone (IANA, blank = UTC)">
+          <Field label={t('accountForm.timezone')}>
             <input
               className={FIELD}
               value={timezone}
               onChange={(e) => setTimezone(e.target.value)}
-              placeholder="e.g. America/New_York"
+              placeholder={t('accountForm.timezonePlaceholder')}
             />
           </Field>
         </div>
@@ -597,7 +599,7 @@ export function AccountForm({
                 </button>
               </div>
               <div className="mt-2 flex flex-wrap gap-1">
-                {DAY_LABELS.map((d, day) => {
+                {DAY_KEYS.map((dayKey, day) => {
                   const on = (w.days ?? []).includes(day)
                   return (
                     <button
@@ -609,52 +611,52 @@ export function AccountForm({
                         (on ? 'bg-ink text-bg' : 'border border-line text-muted hover:text-ink')
                       }
                     >
-                      {d}
+                      {t(dayKey)}
                     </button>
                   )
                 })}
                 <span className="ml-1 self-center text-xs text-muted">
-                  {(w.days ?? []).length === 0 ? 'every day' : ''}
+                  {(w.days ?? []).length === 0 ? t('accountForm.everyDay') : ''}
                 </span>
               </div>
             </div>
           ))}
           <button type="button" onClick={addWindow} className="text-sm text-muted hover:text-ink">
-            + add window
+            {t('accountForm.addWindow')}
           </button>
         </div>
       </details>
 
       <details className="rounded-lg border border-line p-3">
         <summary className="cursor-pointer text-sm text-muted">
-          Circuit-breaker overrides (optional)
+          {t('accountForm.circuitBreakerSummary')}
         </summary>
         <div className="mt-3 grid grid-cols-3 gap-4">
-          <Field label="Failure threshold">
+          <Field label={t('accountForm.failureThreshold')}>
             <input
               className={FIELD}
               type="number"
               value={failureThreshold}
               onChange={(e) => setFailureThreshold(e.target.value)}
-              placeholder="default"
+              placeholder={t('accountForm.defaultPlaceholder')}
             />
           </Field>
-          <Field label="Open duration (ms)">
+          <Field label={t('accountForm.openDuration')}>
             <input
               className={FIELD}
               type="number"
               value={openDurationMs}
               onChange={(e) => setOpenDurationMs(e.target.value)}
-              placeholder="default"
+              placeholder={t('accountForm.defaultPlaceholder')}
             />
           </Field>
-          <Field label="Half-open success">
+          <Field label={t('accountForm.halfOpenSuccess')}>
             <input
               className={FIELD}
               type="number"
               value={halfOpenSuccess}
               onChange={(e) => setHalfOpenSuccess(e.target.value)}
-              placeholder="default"
+              placeholder={t('accountForm.defaultPlaceholder')}
             />
           </Field>
         </div>
@@ -667,7 +669,7 @@ export function AccountForm({
       {(testResult || testErr) && (
         <TestVerdict
           result={testResult}
-          error={testErr ? (testErr instanceof ApiError ? testErr.message : 'Test failed.') : null}
+          error={testErr ? (testErr instanceof ApiError ? testErr.message : t('accountForm.testFailed')) : null}
         />
       )}
 
@@ -678,7 +680,7 @@ export function AccountForm({
           disabled={testing}
           className="btn btn-secondary"
         >
-          {testing ? 'Testing…' : 'Test connection'}
+          {testing ? t('accountForm.testing') : t('accountForm.testConnection')}
         </button>
         <div className="flex gap-2">
         <button
@@ -686,14 +688,14 @@ export function AccountForm({
           onClick={onCancel}
           className="btn btn-secondary"
         >
-          Cancel
+          {t('common.cancel')}
         </button>
         <button
           type="submit"
           disabled={submitting}
           className="btn btn-primary"
         >
-          {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create account'}
+          {submitting ? t('common.saving') : isEdit ? t('common.saveChanges') : t('accountForm.createAccount')}
         </button>
         </div>
       </div>

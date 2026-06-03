@@ -2,10 +2,12 @@ import { FormEvent, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { ApiError } from '../../lib/portalApi'
 import { usePortalAuth } from '../../lib/portalAuth'
+import { useI18n } from '../../lib/i18n'
 
 // PortalLogin handles both sign in and open registration, toggled in
 // place. Registration succeeds straight into a session.
 export function PortalLoginPage({ initialMode = 'login' }: { initialMode?: 'login' | 'signup' }) {
+  const { t } = useI18n()
   const { me, login, signup } = usePortalAuth()
   const navigate = useNavigate()
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode)
@@ -25,7 +27,7 @@ export function PortalLoginPage({ initialMode = 'login' }: { initialMode?: 'logi
       else await login(username, password)
       navigate('/portal', { replace: true })
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong.')
+      setError(err instanceof ApiError ? err.message : t('portalLogin.genericError'))
     } finally {
       setBusy(false)
     }
@@ -52,16 +54,16 @@ export function PortalLoginPage({ initialMode = 'login' }: { initialMode?: 'logi
             <span className="text-lg font-semibold tracking-tight">OmniHub</span>
           </div>
           <p className="text-sm text-muted">
-            {isSignup ? 'Create an account to get an API key.' : 'Sign in to your account.'}
+            {isSignup ? t('portalLogin.signupSubtitle') : t('portalLogin.loginSubtitle')}
           </p>
         </header>
 
         <label className="block space-y-1">
-          <span className="text-sm font-medium">Username</span>
+          <span className="text-sm font-medium">{t('portalLogin.username')}</span>
           <input className="field" autoFocus autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
         </label>
         <label className="block space-y-1">
-          <span className="text-sm font-medium">Password</span>
+          <span className="text-sm font-medium">{t('portalLogin.password')}</span>
           <input
             className="field"
             type="password"
@@ -70,17 +72,17 @@ export function PortalLoginPage({ initialMode = 'login' }: { initialMode?: 'logi
             onChange={(e) => setPassword(e.target.value)}
             required
           />
-          {isSignup && <span className="text-xs text-muted">At least 8 characters.</span>}
+          {isSignup && <span className="text-xs text-muted">{t('portalLogin.passwordHint')}</span>}
         </label>
 
         {error && <p className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
 
         <button type="submit" disabled={busy} className="btn btn-primary w-full py-2">
-          {busy ? 'Please wait…' : isSignup ? 'Create account' : 'Sign in'}
+          {busy ? t('portalLogin.pleaseWait') : isSignup ? t('portalLogin.createAccount') : t('portalLogin.signIn')}
         </button>
 
         <p className="text-center text-sm text-muted">
-          {isSignup ? 'Already have an account?' : 'New here?'}{' '}
+          {isSignup ? t('portalLogin.alreadyHaveAccount') : t('portalLogin.newHere')}{' '}
           <button
             type="button"
             onClick={() => {
@@ -89,7 +91,7 @@ export function PortalLoginPage({ initialMode = 'login' }: { initialMode?: 'logi
             }}
             className="font-medium text-brand hover:underline"
           >
-            {isSignup ? 'Sign in' : 'Create one'}
+            {isSignup ? t('portalLogin.signIn') : t('portalLogin.createOne')}
           </button>
         </p>
       </form>

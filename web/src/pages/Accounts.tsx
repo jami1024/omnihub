@@ -5,6 +5,7 @@ import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '
 import { StatusBadge, Td, Th } from '../components/Table'
 import { AccountForm } from '../components/AccountForm'
 import { ApiError } from '../lib/api'
+import { useI18n } from '../lib/i18n'
 import {
   useAccounts,
   useCreateAccount,
@@ -20,6 +21,7 @@ import {
 type Editing = 'new' | Account | null
 
 export function AccountsPage() {
+  const { t } = useI18n()
   const { data: accounts, isLoading, error } = useAccounts()
   const create = useCreateAccount()
   const update = useUpdateAccount()
@@ -47,7 +49,7 @@ export function AccountsPage() {
   function handleSubmit(input: AccountInput) {
     setFormErr(null)
     const onError = (err: unknown) =>
-      setFormErr(err instanceof ApiError ? err.message : 'Request failed.')
+      setFormErr(err instanceof ApiError ? err.message : t('accounts.requestFailed'))
     if (editing === 'new') {
       create.mutate(input, { onSuccess: close, onError })
     } else if (editing) {
@@ -56,7 +58,7 @@ export function AccountsPage() {
   }
 
   function handleDelete(a: Account) {
-    if (!confirm(`Delete account "${a.name}"? This cannot be undone.`)) return
+    if (!confirm(t('accounts.deleteConfirm', { name: a.name }))) return
     del.mutate(a.id)
   }
 
@@ -64,23 +66,23 @@ export function AccountsPage() {
     <Layout>
       <main className="mx-auto w-full max-w-7xl px-6 py-8">
         <PageHeader
-          eyebrow="UPSTREAM"
-          context="Provider account routing"
-          title="Accounts"
-          description="Manage provider credentials, routing weight, priority, and circuit behavior for upstream model traffic."
+          eyebrow={t('accounts.eyebrow')}
+          context={t('accounts.context')}
+          title={t('accounts.title')}
+          description={t('accounts.description')}
           action={
             <button onClick={openNew} className="btn btn-primary h-10">
-              New account
+              {t('accounts.newAccount')}
             </button>
           }
         />
 
         <MetricStrip
           metrics={[
-            { label: 'Total', value: accountCount },
-            { label: 'Enabled', value: enabledCount },
-            { label: 'Providers', value: providerCount },
-            { label: 'Secrets', value: credentialCount },
+            { label: t('accounts.total'), value: accountCount },
+            { label: t('common.enabled'), value: enabledCount },
+            { label: t('accounts.providers'), value: providerCount },
+            { label: t('accounts.secrets'), value: credentialCount },
           ]}
         />
 
@@ -89,7 +91,7 @@ export function AccountsPage() {
         {isLoading && <LoadingTable />}
         {error && (
           <ErrorNotice>
-            {error instanceof ApiError ? error.message : 'Could not load accounts.'}
+            {error instanceof ApiError ? error.message : t('accounts.loadError')}
           </ErrorNotice>
         )}
 
@@ -100,14 +102,14 @@ export function AccountsPage() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-muted">
                 <tr>
-                  <Th>Name</Th>
-                  <Th>Provider</Th>
-                  <Th>Status</Th>
-                  <Th className="text-right">Weight</Th>
-                  <Th className="text-right">Priority</Th>
-                  <Th className="text-right">Cost ×</Th>
-                  <Th>Credentials</Th>
-                  <Th className="text-right">Actions</Th>
+                  <Th>{t('common.name')}</Th>
+                  <Th>{t('accounts.provider')}</Th>
+                  <Th>{t('common.status')}</Th>
+                  <Th className="text-right">{t('accounts.weight')}</Th>
+                  <Th className="text-right">{t('accounts.priority')}</Th>
+                  <Th className="text-right">{t('accounts.costMultiplierShort')}</Th>
+                  <Th>{t('accounts.credentials')}</Th>
+                  <Th className="text-right">{t('common.actions')}</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
@@ -130,14 +132,14 @@ export function AccountsPage() {
                         onClick={() => openEdit(a)}
                         className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
                       >
-                        Edit
+                        {t('common.edit')}
                       </button>
                       <button
                         onClick={() => handleDelete(a)}
                         disabled={del.isPending}
                         className="btn-danger hover:underline disabled:opacity-50"
                       >
-                        Delete
+                        {t('common.delete')}
                       </button>
                     </Td>
                   </tr>
@@ -150,14 +152,14 @@ export function AccountsPage() {
         {del.error && (
           <div className="mt-3">
             <ErrorNotice>
-            {del.error instanceof ApiError ? del.error.message : 'Delete failed.'}
+            {del.error instanceof ApiError ? del.error.message : t('accounts.deleteFailed')}
             </ErrorNotice>
           </div>
         )}
       </main>
 
       {editing && (
-        <Modal title={editing === 'new' ? 'New account' : `Edit ${editing.name}`} onClose={close}>
+        <Modal title={editing === 'new' ? t('accounts.newAccount') : t('accounts.editTitle', { name: editing.name })} onClose={close}>
           <AccountForm
             account={editing === 'new' ? undefined : editing}
             submitting={create.isPending || update.isPending}
@@ -172,6 +174,7 @@ export function AccountsPage() {
 }
 
 function AccountsGlyph() {
+  const { t } = useI18n()
   return (
     <div className="relative overflow-hidden rounded-lg bg-surface-2 p-5" aria-hidden>
       <svg viewBox="0 0 300 128" className="h-32 w-full text-ink">
@@ -193,21 +196,22 @@ function AccountsGlyph() {
         <circle cx="237" cy="98" r="3" fill="var(--brand)" />
       </svg>
       <div className="absolute left-4 top-4 font-mono text-[10px] uppercase tracking-[0.16em] text-muted">
-        route map
+        {t('accounts.routeMap')}
       </div>
     </div>
   )
 }
 
 function EmptyAccounts({ onCreate }: { onCreate: () => void }) {
+  const { t } = useI18n()
   return (
     <EmptyState
-      eyebrow="No upstreams configured"
-      title="Add the first provider account to start routing traffic."
-      description="Store the account credential once, then tune routing weight, priority, and circuit-breaker overrides without touching client keys."
+      eyebrow={t('accounts.emptyEyebrow')}
+      title={t('accounts.emptyTitle')}
+      description={t('accounts.emptyDescription')}
       action={
         <button onClick={onCreate} className="btn btn-primary h-10">
-          New account
+          {t('accounts.newAccount')}
         </button>
       }
       visual={<AccountsGlyph />}
@@ -219,6 +223,7 @@ function EmptyAccounts({ onCreate }: { onCreate: () => void }) {
 // stored credentials and shows a traffic-light dot with the latency /
 // message on hover.
 function RowTest({ id }: { id: number }) {
+  const { t } = useI18n()
   const test = useTestAccountById()
   const r = test.data
   const tone = !r
@@ -231,10 +236,10 @@ function RowTest({ id }: { id: number }) {
   const title = test.error
     ? test.error instanceof ApiError
       ? test.error.message
-      : 'Test failed'
+      : t('accounts.testFailed')
     : r
       ? `${r.message}${r.http_status ? ` · HTTP ${r.http_status}` : ''} · ${r.latency_ms}ms`
-      : 'Test connectivity'
+      : t('accounts.testConnectivity')
   return (
     <button
       onClick={() => test.mutate(id)}
@@ -243,7 +248,7 @@ function RowTest({ id }: { id: number }) {
       className="mr-3 inline-flex items-center gap-1.5 text-muted underline-offset-4 hover:text-ink hover:underline disabled:opacity-50"
     >
       <span className={`inline-block h-2 w-2 rounded-full ${test.error ? 'bg-danger' : tone}`} />
-      {test.isPending ? 'Testing…' : 'Test'}
+      {test.isPending ? t('accounts.testing') : t('accounts.test')}
     </button>
   )
 }

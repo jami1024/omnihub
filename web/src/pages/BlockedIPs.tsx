@@ -5,6 +5,7 @@ import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '
 import { Td, Th } from '../components/Table'
 import { BlockedIPForm } from '../components/BlockedIPForm'
 import { ApiError } from '../lib/api'
+import { useI18n } from '../lib/i18n'
 import {
   useBlockedIPs,
   useCreateBlockedIP,
@@ -17,6 +18,7 @@ import {
 type Editing = 'new' | BlockedIP | null
 
 export function BlockedIPsPage() {
+  const { t } = useI18n()
   const { data: rows, isLoading, error } = useBlockedIPs()
   const create = useCreateBlockedIP()
   const update = useUpdateBlockedIP()
@@ -41,7 +43,7 @@ export function BlockedIPsPage() {
   function handleSubmit(input: BlockedIPInput) {
     setFormErr(null)
     const onError = (err: unknown) =>
-      setFormErr(err instanceof ApiError ? err.message : 'Request failed.')
+      setFormErr(err instanceof ApiError ? err.message : t('blockedIps.requestFailed'))
     if (editing === 'new') {
       create.mutate(input, { onSuccess: close, onError })
     } else if (editing) {
@@ -50,7 +52,7 @@ export function BlockedIPsPage() {
   }
 
   function handleDelete(row: BlockedIP) {
-    if (!confirm(`Unblock ${row.ip}?`)) return
+    if (!confirm(t('blockedIps.unblockConfirm', { ip: row.ip }))) return
     del.mutate(row.ip)
   }
 
@@ -58,23 +60,23 @@ export function BlockedIPsPage() {
     <Layout>
       <main className="mx-auto w-full max-w-7xl px-6 py-8">
         <PageHeader
-          eyebrow="EDGE"
-          context="Pre-auth traffic policy"
-          title="Blocked IPs"
-          description="Apply hard blocks and per-IP rate caps before authentication, so noisy traffic is stopped at the gateway edge."
+          eyebrow={t('blockedIps.eyebrow')}
+          context={t('blockedIps.context')}
+          title={t('blockedIps.title')}
+          description={t('blockedIps.description')}
           action={
             <button onClick={openNew} className="btn btn-primary h-10">
-              Block an IP
+              {t('blockedIps.blockAnIp')}
             </button>
           }
         />
 
         <MetricStrip
           metrics={[
-            { label: 'Total', value: rowCount },
-            { label: 'Hard blocks', value: hardBlockCount, tone: hardBlockCount > 0 ? 'danger' : undefined },
-            { label: 'Rate caps', value: rateCapCount },
-            { label: 'Concurrent caps', value: concurrentCount },
+            { label: t('blockedIps.total'), value: rowCount },
+            { label: t('blockedIps.hardBlocks'), value: hardBlockCount, tone: hardBlockCount > 0 ? 'danger' : undefined },
+            { label: t('blockedIps.rateCaps'), value: rateCapCount },
+            { label: t('blockedIps.concurrentCaps'), value: concurrentCount },
           ]}
         />
 
@@ -83,18 +85,18 @@ export function BlockedIPsPage() {
         {isLoading && <LoadingTable />}
         {error && (
           <ErrorNotice>
-            {error instanceof ApiError ? error.message : 'Could not load blocked IPs.'}
+            {error instanceof ApiError ? error.message : t('blockedIps.loadError')}
           </ErrorNotice>
         )}
 
         {rows && rows.length === 0 && (
           <EmptyState
-            eyebrow="No IP policy rows"
-            title="No addresses are currently blocked or capped."
-            description="Add a hard block for abusive traffic, or set request, token, and concurrency caps for noisy clients."
+            eyebrow={t('blockedIps.emptyEyebrow')}
+            title={t('blockedIps.emptyTitle')}
+            description={t('blockedIps.emptyDescription')}
             action={
               <button onClick={openNew} className="btn btn-primary h-10">
-                Block an IP
+                {t('blockedIps.blockAnIp')}
               </button>
             }
           />
@@ -105,14 +107,14 @@ export function BlockedIPsPage() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-muted">
                 <tr>
-                  <Th>IP</Th>
-                  <Th>Policy</Th>
-                  <Th className="text-right">RPM</Th>
-                  <Th className="text-right">TPM</Th>
-                  <Th className="text-right">Concurrent</Th>
-                  <Th>Reason</Th>
-                  <Th>Added by</Th>
-                  <Th className="text-right">Actions</Th>
+                  <Th>{t('blockedIps.colIp')}</Th>
+                  <Th>{t('blockedIps.colPolicy')}</Th>
+                  <Th className="text-right">{t('blockedIps.colRpm')}</Th>
+                  <Th className="text-right">{t('blockedIps.colTpm')}</Th>
+                  <Th className="text-right">{t('blockedIps.colConcurrent')}</Th>
+                  <Th>{t('blockedIps.colReason')}</Th>
+                  <Th>{t('blockedIps.colAddedBy')}</Th>
+                  <Th className="text-right">{t('common.actions')}</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
@@ -135,14 +137,14 @@ export function BlockedIPsPage() {
                         }}
                         className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
                       >
-                        Edit
+                        {t('common.edit')}
                       </button>
                       <button
                         onClick={() => handleDelete(row)}
                         disabled={del.isPending}
                         className="btn-danger hover:underline disabled:opacity-50"
                       >
-                        Unblock
+                        {t('blockedIps.unblock')}
                       </button>
                     </Td>
                   </tr>
@@ -155,14 +157,14 @@ export function BlockedIPsPage() {
         {del.error && (
           <div className="mt-3">
             <ErrorNotice>
-              {del.error instanceof ApiError ? del.error.message : 'Unblock failed.'}
+              {del.error instanceof ApiError ? del.error.message : t('blockedIps.unblockFailed')}
             </ErrorNotice>
           </div>
         )}
       </main>
 
       {editing && (
-        <Modal title={editing === 'new' ? 'Block an IP' : `Edit ${editing.ip}`} onClose={close}>
+        <Modal title={editing === 'new' ? t('blockedIps.blockAnIp') : t('blockedIps.editTitle', { ip: editing.ip })} onClose={close}>
           <BlockedIPForm
             entry={editing === 'new' ? undefined : editing}
             submitting={create.isPending || update.isPending}
@@ -177,13 +179,14 @@ export function BlockedIPsPage() {
 }
 
 function PolicyBadge({ blocked }: { blocked: boolean }) {
+  const { t } = useI18n()
   return blocked ? (
     <span className="badge badge-danger">
-      Hard block
+      {t('blockedIps.policyHardBlock')}
     </span>
   ) : (
     <span className="badge badge-warning">
-      Rate cap
+      {t('blockedIps.policyRateCap')}
     </span>
   )
 }

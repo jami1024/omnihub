@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { BlockedIP, BlockedIPInput } from '../lib/blockedIps'
+import { useI18n } from '../lib/i18n'
 
 // BlockedIPForm drives both create and edit. Leaving every limit blank
 // makes the row a hard block (403); setting any limit turns it into a
@@ -18,6 +19,7 @@ const FIELD =
   'field'
 
 export function BlockedIPForm({ entry, submitting, error, onCancel, onSubmit }: BlockedIPFormProps) {
+  const { t } = useI18n()
   const isEdit = entry != null
   const [ip, setIp] = useState(entry?.ip ?? '')
   const [reason, setReason] = useState(entry?.reason ?? '')
@@ -36,7 +38,7 @@ export function BlockedIPForm({ entry, submitting, error, onCancel, onSubmit }: 
     setLocalErr(null)
 
     if (!isEdit && !ip.trim()) {
-      setLocalErr('IP address is required.')
+      setLocalErr(t('blockedIpForm.ipRequired'))
       return
     }
     for (const [label, v] of [
@@ -45,7 +47,7 @@ export function BlockedIPForm({ entry, submitting, error, onCancel, onSubmit }: 
       ['Concurrent', concurrentVal],
     ] as const) {
       if (v != null && v <= 0) {
-        setLocalErr(`${label} limit must be greater than 0 (leave blank for no cap).`)
+        setLocalErr(t('blockedIpForm.limitPositive', { label }))
         return
       }
     }
@@ -62,7 +64,7 @@ export function BlockedIPForm({ entry, submitting, error, onCancel, onSubmit }: 
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <Field label="IP address">
+      <Field label={t('blockedIpForm.ipAddress')}>
         <input
           className={FIELD + (isEdit ? ' opacity-60' : '')}
           value={ip}
@@ -73,29 +75,29 @@ export function BlockedIPForm({ entry, submitting, error, onCancel, onSubmit }: 
         />
       </Field>
 
-      <Field label="Reason (optional)">
+      <Field label={t('blockedIpForm.reasonOptional')}>
         <input
           className={FIELD}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="note for other operators"
+          placeholder={t('blockedIpForm.reasonPlaceholder')}
         />
       </Field>
 
       <div className="grid grid-cols-3 gap-4">
-        <Field label="RPM cap">
-          <input className={FIELD} type="number" value={rpm} onChange={(e) => setRpm(e.target.value)} placeholder="none" />
+        <Field label={t('blockedIpForm.rpmCap')}>
+          <input className={FIELD} type="number" value={rpm} onChange={(e) => setRpm(e.target.value)} placeholder={t('common.none')} />
         </Field>
-        <Field label="TPM cap">
-          <input className={FIELD} type="number" value={tpm} onChange={(e) => setTpm(e.target.value)} placeholder="none" />
+        <Field label={t('blockedIpForm.tpmCap')}>
+          <input className={FIELD} type="number" value={tpm} onChange={(e) => setTpm(e.target.value)} placeholder={t('common.none')} />
         </Field>
-        <Field label="Concurrent cap">
+        <Field label={t('blockedIpForm.concurrentCap')}>
           <input
             className={FIELD}
             type="number"
             value={concurrent}
             onChange={(e) => setConcurrent(e.target.value)}
-            placeholder="none"
+            placeholder={t('common.none')}
           />
         </Field>
       </div>
@@ -108,8 +110,8 @@ export function BlockedIPForm({ entry, submitting, error, onCancel, onSubmit }: 
         }`}
       >
         {isHardBlock
-          ? 'No caps set → this IP is hard-blocked (every request gets 403).'
-          : 'At least one cap set → this IP is allowed but rate-limited (429 when exceeded).'}
+          ? t('blockedIpForm.hardBlockHint')
+          : t('blockedIpForm.softCapHint')}
       </p>
 
       {(localErr || error) && (
@@ -122,14 +124,14 @@ export function BlockedIPForm({ entry, submitting, error, onCancel, onSubmit }: 
           onClick={onCancel}
           className="btn btn-secondary"
         >
-          Cancel
+          {t('common.cancel')}
         </button>
         <button
           type="submit"
           disabled={submitting}
           className="btn btn-primary"
         >
-          {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Block IP'}
+          {submitting ? t('common.saving') : isEdit ? t('common.saveChanges') : t('blockedIpForm.blockIp')}
         </button>
       </div>
     </form>

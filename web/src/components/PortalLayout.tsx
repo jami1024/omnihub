@@ -1,18 +1,21 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { usePortalAuth } from '../lib/portalAuth'
+import { useI18n } from '../lib/i18n'
 import { getTheme, nextTheme, setTheme, type Theme } from '../lib/theme'
+import { LangSwitch } from './LangSwitch'
 
 // PortalLayout is the end-user shell: the same top-header chrome as the
 // admin console, but with the portal's own nav (Overview, API keys) and
 // the portal session controls.
 const NAV = [
-  { to: '/portal', label: 'Overview' },
-  { to: '/portal/keys', label: 'API keys' },
+  { to: '/portal', labelKey: 'portalNav.overview' },
+  { to: '/portal/keys', labelKey: 'portalNav.apiKeys' },
 ]
 
 export function PortalLayout({ children }: { children: React.ReactNode }) {
   const { me, logout } = usePortalAuth()
+  const { t } = useI18n()
   return (
     <div className="min-h-screen bg-bg text-ink">
       <header className="sticky top-0 z-40 border-b border-line bg-surface/80 backdrop-blur supports-[backdrop-filter]:bg-surface/60">
@@ -36,16 +39,17 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
                     }) as React.CSSProperties
                   }
                 >
-                  {n.label}
+                  {t(n.labelKey)}
                 </NavLink>
               ))}
             </nav>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <LangSwitch />
             <ThemeToggle />
             <span className="hidden text-sm text-muted sm:inline">{me?.username}</span>
             <button onClick={logout} className="btn btn-secondary h-8">
-              Sign out
+              {t('common.signOut')}
             </button>
           </div>
         </div>

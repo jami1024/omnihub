@@ -4,6 +4,7 @@ import { Modal } from '../components/Modal'
 import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { Td, Th } from '../components/Table'
 import { ApiError } from '../lib/api'
+import { useI18n } from '../lib/i18n'
 import {
   useCreateGroup,
   useDeleteGroup,
@@ -16,6 +17,7 @@ import {
 type Editing = 'new' | ProviderGroup | null
 
 export function GroupsPage() {
+  const { t } = useI18n()
   const { data: groups, isLoading, error } = useGroups()
   const create = useCreateGroup()
   const update = useUpdateGroup()
@@ -34,7 +36,7 @@ export function GroupsPage() {
   function submit(input: GroupInput) {
     setFormErr(null)
     const onError = (e: unknown) =>
-      setFormErr(e instanceof ApiError ? e.message : 'Could not save the group.')
+      setFormErr(e instanceof ApiError ? e.message : t('groups.saveError'))
     if (editing === 'new') {
       create.mutate(input, { onSuccess: close, onError })
     } else if (editing) {
@@ -43,7 +45,7 @@ export function GroupsPage() {
   }
 
   function remove(g: ProviderGroup) {
-    if (!confirm(`Delete group "${g.name}"? Its ${g.account_count} account(s) become ungrouped.`)) return
+    if (!confirm(t('groups.deleteConfirm', { name: g.name, n: g.account_count }))) return
     del.mutate(g.id)
   }
 
@@ -52,21 +54,21 @@ export function GroupsPage() {
       <main className="mx-auto w-full max-w-7xl px-6 py-8">
         <div className="flex items-start justify-between gap-4">
           <PageHeader
-            eyebrow="UPSTREAM"
-            context="Account grouping"
-            title="Groups"
-            description="Bundle upstream accounts under a shared cost multiplier. A group's multiplier stacks on top of each account's own — mark up or subsidise a whole set at once."
+            eyebrow={t('groups.eyebrow')}
+            context={t('groups.context')}
+            title={t('groups.title')}
+            description={t('groups.description')}
           />
           <button onClick={() => setEditing('new')} className="btn btn-primary h-10 shrink-0">
-            New group
+            {t('groups.newGroup')}
           </button>
         </div>
 
         {groups && groups.length > 0 && (
           <MetricStrip
             metrics={[
-              { label: 'Groups', value: count },
-              { label: 'Grouped accounts', value: grouped },
+              { label: t('groups.metricGroups'), value: count },
+              { label: t('groups.metricGroupedAccounts'), value: grouped },
             ]}
           />
         )}
@@ -74,16 +76,16 @@ export function GroupsPage() {
         <div className="mt-6" />
 
         {isLoading && <LoadingTable columns={4} />}
-        {error && <ErrorNotice>{error instanceof ApiError ? error.message : 'Could not load groups.'}</ErrorNotice>}
+        {error && <ErrorNotice>{error instanceof ApiError ? error.message : t('groups.loadError')}</ErrorNotice>}
 
         {groups && groups.length === 0 && (
           <EmptyState
-            eyebrow="No groups yet"
-            title="Group accounts to share a cost multiplier."
-            description="Create a group, set its multiplier, then assign accounts to it from the account editor."
+            eyebrow={t('groups.emptyEyebrow')}
+            title={t('groups.emptyTitle')}
+            description={t('groups.emptyDescription')}
             action={
               <button onClick={() => setEditing('new')} className="btn btn-primary h-10">
-                New group
+                {t('groups.newGroup')}
               </button>
             }
           />
@@ -94,11 +96,11 @@ export function GroupsPage() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-muted">
                 <tr>
-                  <Th>Name</Th>
-                  <Th className="text-right">Cost ×</Th>
-                  <Th className="text-right">Accounts</Th>
-                  <Th>Description</Th>
-                  <Th className="text-right">Actions</Th>
+                  <Th>{t('common.name')}</Th>
+                  <Th className="text-right">{t('groups.colCost')}</Th>
+                  <Th className="text-right">{t('groups.colAccounts')}</Th>
+                  <Th>{t('groups.colDescription')}</Th>
+                  <Th className="text-right">{t('common.actions')}</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
@@ -113,14 +115,14 @@ export function GroupsPage() {
                         onClick={() => setEditing(g)}
                         className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
                       >
-                        Edit
+                        {t('common.edit')}
                       </button>
                       <button
                         onClick={() => remove(g)}
                         disabled={del.isPending}
                         className="btn-danger hover:underline disabled:opacity-50"
                       >
-                        Delete
+                        {t('common.delete')}
                       </button>
                     </Td>
                   </tr>
@@ -132,12 +134,12 @@ export function GroupsPage() {
 
         {del.error && (
           <div className="mt-3">
-            <ErrorNotice>{del.error instanceof ApiError ? del.error.message : 'Delete failed.'}</ErrorNotice>
+            <ErrorNotice>{del.error instanceof ApiError ? del.error.message : t('groups.deleteError')}</ErrorNotice>
           </div>
         )}
 
         {editing && (
-          <Modal title={editing === 'new' ? 'New group' : `Edit ${editing.name}`} onClose={close}>
+          <Modal title={editing === 'new' ? t('groups.newGroup') : t('groups.editGroup', { name: editing.name })} onClose={close}>
             <GroupForm
               group={editing === 'new' ? undefined : editing}
               submitting={create.isPending || update.isPending}
@@ -167,6 +169,7 @@ function GroupForm({
   onCancel: () => void
   onSubmit: (input: GroupInput) => void
 }) {
+  const { t } = useI18n()
   const [name, setName] = useState(group?.name ?? '')
   const [mult, setMult] = useState(String(group?.cost_multiplier ?? 1))
   const [description, setDescription] = useState(group?.description ?? '')
@@ -176,12 +179,12 @@ function GroupForm({
     e.preventDefault()
     setLocalErr(null)
     if (!name.trim()) {
-      setLocalErr('Name is required.')
+      setLocalErr(t('groups.nameRequired'))
       return
     }
     const m = Number(mult)
     if (!Number.isFinite(m) || m < 0) {
-      setLocalErr('Cost multiplier must be a non-negative number.')
+      setLocalErr(t('groups.multiplierInvalid'))
       return
     }
     onSubmit({ name: name.trim(), cost_multiplier: m, description: description.trim() })
@@ -190,11 +193,11 @@ function GroupForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <label className="block space-y-1">
-        <span className="text-sm text-muted">Name</span>
+        <span className="text-sm text-muted">{t('common.name')}</span>
         <input className={FIELD} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
       </label>
       <label className="block space-y-1">
-        <span className="text-sm text-muted">Cost multiplier</span>
+        <span className="text-sm text-muted">{t('groups.costMultiplier')}</span>
         <input
           className={FIELD}
           type="number"
@@ -205,7 +208,7 @@ function GroupForm({
         />
       </label>
       <label className="block space-y-1">
-        <span className="text-sm text-muted">Description (optional)</span>
+        <span className="text-sm text-muted">{t('groups.descriptionOptional')}</span>
         <input className={FIELD} value={description} onChange={(e) => setDescription(e.target.value)} />
       </label>
 
@@ -213,10 +216,10 @@ function GroupForm({
 
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onCancel} className="btn btn-secondary">
-          Cancel
+          {t('common.cancel')}
         </button>
         <button type="submit" disabled={submitting} className="btn btn-primary">
-          {submitting ? 'Saving…' : group ? 'Save changes' : 'Create group'}
+          {submitting ? t('common.saving') : group ? t('common.saveChanges') : t('groups.createGroup')}
         </button>
       </div>
     </form>

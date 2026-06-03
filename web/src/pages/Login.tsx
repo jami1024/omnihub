@@ -2,8 +2,10 @@ import { FormEvent, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { ApiError } from '../lib/api'
 import { useAuth } from '../lib/auth'
+import { useI18n } from '../lib/i18n'
 
 export function LoginPage() {
+  const { t } = useI18n()
   const { me, login } = useAuth()
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
@@ -26,7 +28,7 @@ export function LoginPage() {
       if (err instanceof ApiError) {
         setError(err.message)
       } else {
-        setError('Unexpected sign-in error. Try again.')
+        setError(t('login.unexpectedError'))
       }
     } finally {
       setBusy(false)
@@ -53,22 +55,21 @@ export function LoginPage() {
             <BrandMark />
             <div>
               <p className="text-sm font-semibold tracking-tight">OmniHub</p>
-              <p className="text-xs text-muted">AI gateway control plane</p>
+              <p className="text-xs text-muted">{t('login.gatewayControlPlane')}</p>
             </div>
           </div>
 
           <p className="mb-4 text-xs font-medium uppercase tracking-[0.18em] text-muted">
-            Operator access
+            {t('login.operatorAccess')}
           </p>
           <h1
             id="login-intro-title"
             className="max-w-[12ch] text-5xl font-semibold leading-[0.98] tracking-[-0.045em]"
           >
-            Control AI traffic without losing the signal.
+            {t('login.heroTitle')}
           </h1>
           <p className="mt-6 max-w-md text-base leading-7 text-muted">
-            Manage model routing, virtual keys, IP policy, spend, and circuit
-            health from a quiet console built for operators.
+            {t('login.heroSubtitle')}
           </p>
 
           <GatewayPath />
@@ -79,7 +80,7 @@ export function LoginPage() {
             <BrandMark />
             <div>
               <p className="text-sm font-semibold tracking-tight">OmniHub</p>
-              <p className="text-xs text-muted">Admin console</p>
+              <p className="text-xs text-muted">{t('login.adminConsole')}</p>
             </div>
           </div>
 
@@ -90,17 +91,17 @@ export function LoginPage() {
           >
             <header className="mb-6">
               <p className="mb-2 text-xs font-medium uppercase tracking-[0.16em] text-muted">
-                Secure sign in
+                {t('login.secureSignIn')}
               </p>
-              <h2 className="text-2xl font-semibold tracking-tight">Enter the control plane</h2>
+              <h2 className="text-2xl font-semibold tracking-tight">{t('login.enterControlPlane')}</h2>
               <p className="mt-2 text-sm leading-6 text-muted">
-                Use your operator account to manage OmniHub.
+                {t('login.formSubtitle')}
               </p>
             </header>
 
             <div className="space-y-4">
               <label className="block">
-                <span className="text-sm font-medium">Username</span>
+                <span className="text-sm font-medium">{t('login.username')}</span>
                 <input
                   type="text"
                   autoFocus
@@ -108,13 +109,13 @@ export function LoginPage() {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="field mt-1.5 h-10"
-                  placeholder="operator"
+                  placeholder={t('login.usernamePlaceholder')}
                   required
                 />
               </label>
 
               <label className="block">
-                <span className="text-sm font-medium">Password</span>
+                <span className="text-sm font-medium">{t('login.password')}</span>
                 <input
                   type="password"
                   autoComplete="current-password"
@@ -142,14 +143,14 @@ export function LoginPage() {
               disabled={busy}
               className="btn btn-primary mt-6 h-10 w-full"
             >
-              {busy ? 'Checking credentials…' : 'Sign in'}
+              {busy ? t('login.checkingCredentials') : t('login.signIn')}
             </button>
 
             <div className="mt-5 flex items-center justify-between border-t border-line pt-4 text-xs text-muted">
-              <span>Protected admin session</span>
+              <span>{t('login.protectedSession')}</span>
               <span className="inline-flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                Ready
+                {t('login.ready')}
               </span>
             </div>
           </form>
@@ -181,21 +182,22 @@ function BrandMark() {
 }
 
 function GatewayPath() {
+  const { t } = useI18n()
   const steps = [
-    ['AUTH', 'Verify operator session'],
-    ['POLICY', 'Apply keys, IP rules, and limits'],
-    ['ROUTE', 'Select healthy upstream accounts'],
-    ['OBSERVE', 'Track usage, spend, and breaker state'],
+    ['AUTH', 'login.stepAuth'],
+    ['POLICY', 'login.stepPolicy'],
+    ['ROUTE', 'login.stepRoute'],
+    ['OBSERVE', 'login.stepObserve'],
   ] as const
 
   return (
     <div className="mt-10 max-w-lg border-y border-line py-2">
-      {steps.map(([label, value]) => (
+      {steps.map(([label, valueKey]) => (
         <div key={label} className="grid grid-cols-[5rem_1fr] items-center gap-4 py-3">
           <span className="font-mono text-[11px] font-medium tracking-[0.16em] text-muted">
             {label}
           </span>
-          <span className="text-sm text-ink">{value}</span>
+          <span className="text-sm text-ink">{t(valueKey)}</span>
         </div>
       ))}
     </div>

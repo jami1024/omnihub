@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Key, KeyInput } from '../lib/keys'
+import { useI18n } from '../lib/i18n'
 
 // KeyForm drives both create and edit. There is no secret-value field:
 // the server always generates the key and returns the cleartext once on
@@ -17,6 +18,7 @@ const FIELD =
   'field'
 
 export function KeyForm({ apiKey, submitting, error, onCancel, onSubmit }: KeyFormProps) {
+  const { t } = useI18n()
   const isEdit = apiKey != null
   const [name, setName] = useState(apiKey?.name ?? '')
   const [label, setLabel] = useState(apiKey?.label ?? '')
@@ -31,17 +33,17 @@ export function KeyForm({ apiKey, submitting, error, onCancel, onSubmit }: KeyFo
     setLocalErr(null)
 
     if (!name.trim()) {
-      setLocalErr('Name is required.')
+      setLocalErr(t('keyForm.nameRequired'))
       return
     }
     const rpmVal = strToNum(rpm)
     if (rpmVal != null && rpmVal <= 0) {
-      setLocalErr('RPM limit must be greater than 0 (leave blank for no limit).')
+      setLocalErr(t('keyForm.rpmInvalid'))
       return
     }
     const dailyVal = strToNum(dailyUSD)
     if (dailyVal != null && dailyVal < 0) {
-      setLocalErr('Daily USD limit cannot be negative (leave blank for no limit).')
+      setLocalErr(t('keyForm.dailyNegative'))
       return
     }
 
@@ -62,59 +64,58 @@ export function KeyForm({ apiKey, submitting, error, onCancel, onSubmit }: KeyFo
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Name">
+        <Field label={t('common.name')}>
           <input className={FIELD} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </Field>
-        <Field label="Label (shown in logs)">
+        <Field label={t('keyForm.labelField')}>
           <input
             className={FIELD}
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            placeholder="defaults to the name"
+            placeholder={t('keyForm.labelPlaceholder')}
           />
         </Field>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Daily USD limit">
+        <Field label={t('keyForm.dailyUsdLimit')}>
           <input
             className={FIELD}
             type="number"
             step="0.01"
             value={dailyUSD}
             onChange={(e) => setDailyUSD(e.target.value)}
-            placeholder="no limit"
+            placeholder={t('keyForm.noLimit')}
           />
         </Field>
-        <Field label="RPM limit">
+        <Field label={t('keyForm.rpmLimit')}>
           <input
             className={FIELD}
             type="number"
             value={rpm}
             onChange={(e) => setRpm(e.target.value)}
-            placeholder="no limit"
+            placeholder={t('keyForm.noLimit')}
           />
         </Field>
       </div>
 
-      <Field label="Allowed models (comma-separated)">
+      <Field label={t('keyForm.allowedModels')}>
         <input
           className={FIELD}
           value={models}
           onChange={(e) => setModels(e.target.value)}
-          placeholder="blank = all models"
+          placeholder={t('keyForm.allowedModelsPlaceholder')}
         />
       </Field>
 
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-        Enabled
+        {t('common.enabled')}
       </label>
 
       {!isEdit && (
         <p className="rounded-md bg-warning-bg px-3 py-2 text-xs text-warning">
-          The key is generated on the server and shown to you once after creation.
-          Store it somewhere safe — it cannot be retrieved again.
+          {t('keyForm.generatedNotice')}
         </p>
       )}
 
@@ -128,14 +129,14 @@ export function KeyForm({ apiKey, submitting, error, onCancel, onSubmit }: KeyFo
           onClick={onCancel}
           className="btn btn-secondary"
         >
-          Cancel
+          {t('common.cancel')}
         </button>
         <button
           type="submit"
           disabled={submitting}
           className="btn btn-primary"
         >
-          {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create key'}
+          {submitting ? t('common.saving') : isEdit ? t('common.saveChanges') : t('keyForm.createKey')}
         </button>
       </div>
     </form>

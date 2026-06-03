@@ -1,4 +1,5 @@
 import type React from 'react'
+import { useI18n } from '../lib/i18n'
 
 // Shared page chrome for admin surfaces. The goal is a compact control
 // plane rhythm: clear page title, one primary action, optional summary
@@ -66,8 +67,9 @@ export function MetricStrip({
 }
 
 export function LoadingTable({ rows = 3, columns = 4 }: { rows?: number; columns?: number }) {
+  const { t } = useI18n()
   return (
-    <div className="overflow-hidden rounded-xl border border-line bg-surface" aria-label="Loading">
+    <div className="overflow-hidden rounded-xl border border-line bg-surface" aria-label={t('common.loading')}>
       <div className="border-b border-line bg-surface-2 px-4 py-3">
         <div className="h-3 w-44 animate-pulse rounded-full bg-line-strong" />
       </div>

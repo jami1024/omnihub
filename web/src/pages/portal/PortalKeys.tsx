@@ -3,6 +3,7 @@ import { PortalLayout } from '../../components/PortalLayout'
 import { Modal } from '../../components/Modal'
 import { StatusBadge, Td, Th } from '../../components/Table'
 import { ApiError } from '../../lib/portalApi'
+import { useI18n } from '../../lib/i18n'
 import {
   useCreatePortalKey,
   useDeletePortalKey,
@@ -12,6 +13,7 @@ import {
 } from '../../lib/portalData'
 
 export function PortalKeysPage() {
+  const { t } = useI18n()
   const { data: keys, isLoading, error } = usePortalKeys()
   const create = useCreatePortalKey()
   const del = useDeletePortalKey()
@@ -19,7 +21,7 @@ export function PortalKeysPage() {
   const [revealed, setRevealed] = useState<CreatePortalKeyResult | null>(null)
 
   function handleDelete(k: PortalKey) {
-    if (!confirm(`Delete key "${k.name}"? Anything using it stops working immediately.`)) return
+    if (!confirm(t('portalKeys.deleteConfirm', { name: k.name }))) return
     del.mutate(k.id)
   }
 
@@ -28,24 +30,24 @@ export function PortalKeysPage() {
       <main className="mx-auto max-w-5xl px-6 py-8">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-semibold">API keys</h2>
-            <p className="text-sm text-muted">Use a key as the Bearer token against the gateway.</p>
+            <h2 className="text-xl font-semibold">{t('portalKeys.title')}</h2>
+            <p className="text-sm text-muted">{t('portalKeys.subtitle')}</p>
           </div>
           <button onClick={() => setShowForm(true)} className="btn btn-primary">
-            New key
+            {t('portalKeys.newKey')}
           </button>
         </div>
 
-        {isLoading && <p className="text-sm text-muted">Loading…</p>}
+        {isLoading && <p className="text-sm text-muted">{t('common.loading')}</p>}
         {error && (
           <p className="text-sm text-danger">
-            {error instanceof ApiError ? error.message : 'Could not load keys.'}
+            {error instanceof ApiError ? error.message : t('portalKeys.loadFailed')}
           </p>
         )}
 
         {keys && keys.length === 0 && (
           <div className="rounded-xl border border-dashed border-line-strong p-10 text-center text-sm text-muted">
-            No keys yet. Create one to start calling the gateway.
+            {t('portalKeys.emptyState')}
           </div>
         )}
 
@@ -54,12 +56,12 @@ export function PortalKeysPage() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-muted">
                 <tr>
-                  <Th>Name</Th>
-                  <Th>Status</Th>
-                  <Th className="text-right">Daily USD</Th>
-                  <Th className="text-right">RPM</Th>
-                  <Th className="text-right">Spent (24h)</Th>
-                  <Th className="text-right">Actions</Th>
+                  <Th>{t('common.name')}</Th>
+                  <Th>{t('common.status')}</Th>
+                  <Th className="text-right">{t('portalKeys.dailyUsd')}</Th>
+                  <Th className="text-right">{t('portalKeys.rpm')}</Th>
+                  <Th className="text-right">{t('portalKeys.spent24h')}</Th>
+                  <Th className="text-right">{t('common.actions')}</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
@@ -80,7 +82,7 @@ export function PortalKeysPage() {
                         disabled={del.isPending}
                         className="btn-danger hover:underline disabled:opacity-50"
                       >
-                        Delete
+                        {t('common.delete')}
                       </button>
                     </Td>
                   </tr>
@@ -123,6 +125,7 @@ function CreateKeyModal({
   onClose: () => void
   onCreate: (input: { name: string; daily_usd_limit: number | null; rpm_limit: number | null; allowed_models: string[] }) => void
 }) {
+  const { t } = useI18n()
   const [name, setName] = useState('')
   const [daily, setDaily] = useState('')
   const [rpm, setRpm] = useState('')
@@ -131,7 +134,7 @@ function CreateKeyModal({
   function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim()) {
-      setLocalErr('Name is required.')
+      setLocalErr(t('portalKeys.nameRequired'))
       return
     }
     onCreate({
@@ -143,29 +146,29 @@ function CreateKeyModal({
   }
 
   return (
-    <Modal title="New API key" onClose={onClose}>
+    <Modal title={t('portalKeys.newKeyTitle')} onClose={onClose}>
       <form onSubmit={submit} className="space-y-4">
         <label className="block space-y-1">
-          <span className="text-sm text-muted">Name</span>
+          <span className="text-sm text-muted">{t('common.name')}</span>
           <input className="field" value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="my-app" />
         </label>
         <div className="grid grid-cols-2 gap-4">
           <label className="block space-y-1">
-            <span className="text-sm text-muted">Daily USD limit (optional)</span>
-            <input className="field" type="number" step="0.01" value={daily} onChange={(e) => setDaily(e.target.value)} placeholder="no limit" />
+            <span className="text-sm text-muted">{t('portalKeys.dailyUsdLimit')}</span>
+            <input className="field" type="number" step="0.01" value={daily} onChange={(e) => setDaily(e.target.value)} placeholder={t('portalKeys.noLimit')} />
           </label>
           <label className="block space-y-1">
-            <span className="text-sm text-muted">RPM limit (optional)</span>
-            <input className="field" type="number" value={rpm} onChange={(e) => setRpm(e.target.value)} placeholder="no limit" />
+            <span className="text-sm text-muted">{t('portalKeys.rpmLimit')}</span>
+            <input className="field" type="number" value={rpm} onChange={(e) => setRpm(e.target.value)} placeholder={t('portalKeys.noLimit')} />
           </label>
         </div>
         {(localErr || error) && <p className="text-sm text-danger">{localErr ?? error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="btn btn-secondary">
-            Cancel
+            {t('common.cancel')}
           </button>
           <button type="submit" disabled={submitting} className="btn btn-primary">
-            {submitting ? 'Creating…' : 'Create key'}
+            {submitting ? t('portalKeys.creating') : t('portalKeys.createKey')}
           </button>
         </div>
       </form>
@@ -174,10 +177,11 @@ function CreateKeyModal({
 }
 
 function RevealKey({ result, onClose }: { result: CreatePortalKeyResult; onClose: () => void }) {
+  const { t } = useI18n()
   const [copied, setCopied] = useState(false)
   return (
-    <Modal title={`Key "${result.name}" created`} onClose={onClose}>
-      <p className="text-sm text-muted">Copy it now — it's shown only once and can't be retrieved again.</p>
+    <Modal title={t('portalKeys.createdTitle', { name: result.name })} onClose={onClose}>
+      <p className="text-sm text-muted">{t('portalKeys.copyNotice')}</p>
       <div className="mt-3 flex items-center gap-2">
         <code className="flex-1 break-all rounded-lg border border-line bg-surface-2 px-3 py-2 font-mono text-sm">
           {result.key}
@@ -186,12 +190,12 @@ function RevealKey({ result, onClose }: { result: CreatePortalKeyResult; onClose
           onClick={() => navigator.clipboard?.writeText(result.key).then(() => setCopied(true))}
           className="btn btn-secondary shrink-0"
         >
-          {copied ? 'Copied' : 'Copy'}
+          {copied ? t('portalKeys.copied') : t('portalKeys.copy')}
         </button>
       </div>
       <div className="mt-5 flex justify-end">
         <button onClick={onClose} className="btn btn-primary">
-          Done
+          {t('portalKeys.done')}
         </button>
       </div>
     </Modal>
