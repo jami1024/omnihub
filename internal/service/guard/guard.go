@@ -21,16 +21,16 @@ import (
 // Context key names. Exported as constants so other packages can
 // inspect them in tests without importing private symbols.
 const (
-	CtxKeyKeyName = "omnihub.key_name" // virtual API key label
-	CtxKeyModel   = "omnihub.model"    // model requested by the client
-	CtxKeyStream  = "omnihub.stream"   // true when the client asked for SSE
-	CtxKeyUsage   = "omnihub.usage"    // usage.Usage extracted from response
-	CtxKeyTTFB    = "omnihub.ttfb"     // time.Duration from request to first byte
+	CtxKeyKeyName   = "omnihub.key_name"   // virtual API key label
+	CtxKeyModel     = "omnihub.model"      // model requested by the client
+	CtxKeyStream    = "omnihub.stream"     // true when the client asked for SSE
+	CtxKeyUsage     = "omnihub.usage"      // usage.Usage extracted from response
+	CtxKeyTTFB      = "omnihub.ttfb"       // time.Duration from request to first byte
 	CtxKeyCostUSD   = "omnihub.cost_usd"   // float64 USD cost from pricing.Calculate
-	CtxKeyClientIP  = "omnihub.client_ip"   // string — immediate caller's IP
-	CtxKeyUserAgent = "omnihub.user_agent"  // string — User-Agent header verbatim
-	CtxKeyAPIKeyID  = "omnihub.api_key_id"  // int64 — DB primary key for the auth'd virtual key
-	CtxKeyAPIKey    = "omnihub.api_key"     // *apikey.Key — full record (limits, allowed_models, ...)
+	CtxKeyClientIP  = "omnihub.client_ip"  // string — immediate caller's IP
+	CtxKeyUserAgent = "omnihub.user_agent" // string — User-Agent header verbatim
+	CtxKeyAPIKeyID  = "omnihub.api_key_id" // int64 — DB primary key for the auth'd virtual key
+	CtxKeyAPIKey    = "omnihub.api_key"    // *apikey.Key — full record (limits, allowed_models, ...)
 
 	CtxKeyAdminID   = "omnihub.admin_id"   // int64 — admin_users.id (web UI auth)
 	CtxKeyAdminUser = "omnihub.admin_user" // string — admin username for audit logs

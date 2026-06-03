@@ -71,13 +71,13 @@ func keyAdd(args []string) error {
 	fs := flag.NewFlagSet("key add", flag.ExitOnError)
 	fs.SetOutput(os.Stderr)
 	var (
-		name      = fs.String("name", "", "unique key handle")
-		label     = fs.String("label", "", "display label (default: --name)")
-		raw       = fs.String("key", "", "use this cleartext key (default: generate)")
-		dailyUSD  = fs.Float64("daily-usd", -1, "daily spend cap (USD)")
-		rpm       = fs.Int("rpm", -1, "requests-per-minute ceiling")
-		allowed   = fs.String("allowed-models", "", "comma-separated model allow-list")
-		disabled  = fs.Bool("disabled", false, "create in disabled state")
+		name     = fs.String("name", "", "unique key handle")
+		label    = fs.String("label", "", "display label (default: --name)")
+		raw      = fs.String("key", "", "use this cleartext key (default: generate)")
+		dailyUSD = fs.Float64("daily-usd", -1, "daily spend cap (USD)")
+		rpm      = fs.Int("rpm", -1, "requests-per-minute ceiling")
+		allowed  = fs.String("allowed-models", "", "comma-separated model allow-list")
+		disabled = fs.Bool("disabled", false, "create in disabled state")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err

@@ -78,11 +78,11 @@ func TestUsageDefaultWindowAndGapFill(t *testing.T) {
 
 func TestUsageClampsDays(t *testing.T) {
 	cases := map[string]int{
-		"days=1":    1,
-		"days=90":   90,
-		"days=999":  90, // clamped to max
-		"days=0":    7,  // invalid → default
-		"days=abc":  7,  // malformed → default
+		"days=1":   1,
+		"days=90":  90,
+		"days=999": 90, // clamped to max
+		"days=0":   7,  // invalid → default
+		"days=abc": 7,  // malformed → default
 	}
 	for query, want := range cases {
 		t.Run(query, func(t *testing.T) {

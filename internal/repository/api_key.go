@@ -79,11 +79,11 @@ func (r *ApiKeyRepo) ListAll(ctx context.Context) ([]*apikey.Key, error) {
 	var out []*apikey.Key
 	for rows.Next() {
 		var (
-			k             apikey.Key
-			enabled       bool
-			allowedJSON   []byte
-			dailyLimit    *float64
-			rpmLimit      *int
+			k           apikey.Key
+			enabled     bool
+			allowedJSON []byte
+			dailyLimit  *float64
+			rpmLimit    *int
 		)
 		if err := rows.Scan(
 			&k.ID, &k.Name, &k.Hash, &k.Label, &enabled,

@@ -20,7 +20,7 @@ type fakeDriver struct {
 	verdict provider.TestStatus
 }
 
-func (d *fakeDriver) Name() string                       { return d.name }
+func (d *fakeDriver) Name() string                        { return d.name }
 func (d *fakeDriver) Capabilities() provider.Capabilities { return provider.Capabilities{Chat: true} }
 func (d *fakeDriver) BuildRequest(context.Context, *ir.UnifiedRequest, *provider.Account) (*http.Request, error) {
 	return nil, nil
@@ -44,7 +44,7 @@ func (d *fakeDriver) Test(context.Context, *provider.Account) provider.TestResul
 // just *fakeDriver with tester=false wrapped so the type-assert fails.
 type noTesterDriver struct{ name string }
 
-func (d *noTesterDriver) Name() string                       { return d.name }
+func (d *noTesterDriver) Name() string                        { return d.name }
 func (d *noTesterDriver) Capabilities() provider.Capabilities { return provider.Capabilities{} }
 func (d *noTesterDriver) BuildRequest(context.Context, *ir.UnifiedRequest, *provider.Account) (*http.Request, error) {
 	return nil, nil
@@ -159,7 +159,7 @@ func TestProberSkipsOptOutAndNoTester(t *testing.T) {
 func TestProberGlobalDefaultOff(t *testing.T) {
 	drv := &fakeDriver{name: "fake", verdict: provider.TestRed}
 	tr := newTestTracker()
-	p := NewProber(tr, fakeRegistry{"fake": drv}, false, 4) // global OFF
+	p := NewProber(tr, fakeRegistry{"fake": drv}, false, 4)           // global OFF
 	snap := []*provider.Account{{ID: 1, Name: "a", Provider: "fake"}} // nil opt-in
 	for i := 0; i < 10; i++ {
 		p.probeAll(context.Background(), snap)

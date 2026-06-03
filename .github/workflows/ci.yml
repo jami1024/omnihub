@@ -20,9 +20,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pin to the toolchain the project is actually built + formatted
+      # with (golang:1.26). go.mod's `go 1.25.0` is only the minimum;
+      # gofmt rules differ between 1.25 and 1.26, so matching avoids a
+      # spurious gofmt failure.
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26"
           cache: true
 
       - name: gofmt

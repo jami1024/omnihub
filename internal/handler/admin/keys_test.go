@@ -135,8 +135,8 @@ func TestCreateKeyRequiresName(t *testing.T) {
 
 func TestCreateKeyRejectsBadLimits(t *testing.T) {
 	cases := map[string]string{
-		"rpm zero":      `{"name":"a","rpm_limit":0}`,
-		"rpm negative":  `{"name":"a","rpm_limit":-5}`,
+		"rpm zero":       `{"name":"a","rpm_limit":0}`,
+		"rpm negative":   `{"name":"a","rpm_limit":-5}`,
 		"daily negative": `{"name":"a","daily_usd_limit":-1.5}`,
 	}
 	for name, body := range cases {

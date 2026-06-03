@@ -52,7 +52,9 @@ type fakeSettings struct{ s repository.PortalSettings }
 
 func (f fakeSettings) Get(context.Context) (repository.PortalSettings, error) { return f.s, nil }
 
-func permissive() fakeSettings { return fakeSettings{s: repository.PortalSettings{SignupEnabled: true}} }
+func permissive() fakeSettings {
+	return fakeSettings{s: repository.PortalSettings{SignupEnabled: true}}
+}
 
 func TestSignupValidatesAndHashes(t *testing.T) {
 	gin.SetMode(gin.TestMode)

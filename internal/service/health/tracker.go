@@ -4,17 +4,17 @@
 //
 // State machine (one instance per account):
 //
-//	  ┌────────┐ failures ≥ threshold  ┌──────┐
-//	  │ Closed │ ─────────────────────▶│ Open │
-//	  └────────┘                       └───┬──┘
-//	      ▲                                │ time > openUntil
-//	      │ N consecutive successes        ▼
-//	  ┌───┴────────┐ first failure   ┌────────────┐
-//	  │ Half-Open  │ ◀──────────────│ Half-Open   │
-//	  └────────────┘                 └────────────┘
-//	         │ N successes
-//	         ▼
-//	    Closed (reset counters)
+//	┌────────┐ failures ≥ threshold  ┌──────┐
+//	│ Closed │ ─────────────────────▶│ Open │
+//	└────────┘                       └───┬──┘
+//	    ▲                                │ time > openUntil
+//	    │ N consecutive successes        ▼
+//	┌───┴────────┐ first failure   ┌────────────┐
+//	│ Half-Open  │ ◀──────────────│ Half-Open   │
+//	└────────────┘                 └────────────┘
+//	       │ N successes
+//	       ▼
+//	  Closed (reset counters)
 //
 // The model and defaults follow claude-code-hub's circuit breaker.
 // State is kept in process memory only — this is acceptable for a
@@ -107,7 +107,7 @@ type TransitionHandler func(Transition)
 // for concurrent use.
 type Tracker struct {
 	defaultConfig Config
-	lookup        ConfigLookup    // nil = always use defaultConfig
+	lookup        ConfigLookup     // nil = always use defaultConfig
 	now           func() time.Time // pluggable clock for tests
 
 	mu                sync.Mutex

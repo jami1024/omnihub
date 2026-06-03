@@ -26,7 +26,7 @@ func (s *stubSource) ListEnabled(_ context.Context) ([]*provider.Account, error)
 
 type stubDriver struct{ name string }
 
-func (s *stubDriver) Name() string                       { return s.name }
+func (s *stubDriver) Name() string                        { return s.name }
 func (s *stubDriver) Capabilities() provider.Capabilities { return provider.Capabilities{Chat: true} }
 func (s *stubDriver) BuildRequest(context.Context, *ir.UnifiedRequest, *provider.Account) (*http.Request, error) {
 	return nil, nil

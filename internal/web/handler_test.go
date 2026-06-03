@@ -29,8 +29,8 @@ func TestSPAHandlerServesIndex(t *testing.T) {
 	}{
 		{"/admin", "OmniHub admin"},
 		{"/admin/", "OmniHub admin"},
-		{"/admin/keys", "OmniHub admin"},          // SPA fallback
-		{"/admin/index.html", "OmniHub admin"},    // direct asset
+		{"/admin/keys", "OmniHub admin"},       // SPA fallback
+		{"/admin/index.html", "OmniHub admin"}, // direct asset
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {

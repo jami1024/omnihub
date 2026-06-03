@@ -195,7 +195,7 @@ func TestToolExtraDoesNotClobberTypedFields(t *testing.T) {
 	tool := ir.Tool{
 		Name: "real_name",
 		Extra: map[string]json.RawMessage{
-			"name": json.RawMessage(`"hijacked"`),
+			"name":     json.RawMessage(`"hijacked"`),
 			"max_uses": json.RawMessage(`3`),
 		},
 	}

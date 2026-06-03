@@ -47,8 +47,8 @@ type Source interface {
 type Pool struct {
 	source Source
 
-	mu        sync.RWMutex
-	policies  map[string]*Policy
+	mu         sync.RWMutex
+	policies   map[string]*Policy
 	concurrent map[string]int // current in-flight count per IP
 
 	tpm *TPMCache // per-IP fresh-input token buckets

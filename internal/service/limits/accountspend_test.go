@@ -29,10 +29,10 @@ func TestAccountGuardOverLimit(t *testing.T) {
 	g := NewAccountGuard(src)
 
 	accounts := []*provider.Account{
-		{ID: 1, Name: "a", DailyUSDLimit: f64(10)},               // 9 < 10 → ok
-		{ID: 2, Name: "b", DailyUSDLimit: f64(1)},                // 2 >= 1 → over
-		{ID: 3, Name: "c"},                                       // no cap → ok
-		{ID: 4, Name: "a", TotalUSDLimit: f64(40)},               // 50 >= 40 → over
+		{ID: 1, Name: "a", DailyUSDLimit: f64(10)},                           // 9 < 10 → ok
+		{ID: 2, Name: "b", DailyUSDLimit: f64(1)},                            // 2 >= 1 → over
+		{ID: 3, Name: "c"},                                                   // no cap → ok
+		{ID: 4, Name: "a", TotalUSDLimit: f64(40)},                           // 50 >= 40 → over
 		{ID: 5, Name: "b", DailyUSDLimit: f64(100), TotalUSDLimit: f64(150)}, // total 200>=150 → over
 	}
 	g.Refresh(context.Background(), accounts)

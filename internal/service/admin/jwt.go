@@ -123,7 +123,9 @@ func (i *Issuer) Verify(token string) (*Claims, error) {
 	if err != nil {
 		return nil, ErrInvalidToken
 	}
-	var h struct{ Alg string `json:"alg"` }
+	var h struct {
+		Alg string `json:"alg"`
+	}
 	if err := json.Unmarshal(header, &h); err != nil || h.Alg != "HS256" {
 		return nil, ErrInvalidToken
 	}

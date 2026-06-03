@@ -62,9 +62,9 @@ type WriteBuffer struct {
 	mu      sync.Mutex
 	pending []MessageRequest
 
-	flushMu  sync.Mutex // serialises calls into the sink
-	timerMu  sync.Mutex
-	timer    *time.Timer
+	flushMu sync.Mutex // serialises calls into the sink
+	timerMu sync.Mutex
+	timer   *time.Timer
 
 	stopOnce sync.Once
 	stopping bool

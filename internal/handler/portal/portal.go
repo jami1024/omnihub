@@ -13,9 +13,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/admin"
 	"github.com/jami1024/omnihub/internal/service/guard"
-	"github.com/jami1024/omnihub/internal/repository"
 )
 
 // writeError emits the canonical {error:{message,type,code}} envelope,
@@ -23,8 +23,12 @@ import (
 func writeError(c *gin.Context, status int, code, msg string) {
 	c.JSON(status, gin.H{"error": gin.H{"message": msg, "type": code, "code": code}})
 }
-func writeBadRequest(c *gin.Context, msg string) { writeError(c, http.StatusBadRequest, "bad_request", msg) }
-func writeInternal(c *gin.Context, msg string)   { writeError(c, http.StatusInternalServerError, "internal_error", msg) }
+func writeBadRequest(c *gin.Context, msg string) {
+	writeError(c, http.StatusBadRequest, "bad_request", msg)
+}
+func writeInternal(c *gin.Context, msg string) {
+	writeError(c, http.StatusInternalServerError, "internal_error", msg)
+}
 
 // userStore is the slice of repository.UserRepo the auth handlers need.
 type userStore interface {

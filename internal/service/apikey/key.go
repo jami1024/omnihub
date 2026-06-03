@@ -19,9 +19,9 @@ import (
 // the hash and metadata.
 type Key struct {
 	ID            int64
-	Name          string  // unique handle
-	Hash          string  // sha256 hex, 64 chars
-	Label         string  // displayed in logs ("alice", "ci-bot")
+	Name          string // unique handle
+	Hash          string // sha256 hex, 64 chars
+	Label         string // displayed in logs ("alice", "ci-bot")
 	Enabled       bool
 	DailyUSDLimit *float64
 	RPMLimit      *int

@@ -131,8 +131,8 @@ func TestStoreDropRemoves(t *testing.T) {
 
 func TestStoreBindIgnoresInvalidInput(t *testing.T) {
 	s := session.New(time.Minute)
-	s.Bind("", 1) // empty key
-	s.Bind("k", 0) // bad id
+	s.Bind("", 1)   // empty key
+	s.Bind("k", 0)  // bad id
 	s.Bind("k", -1) // negative id
 	if s.Size() != 0 {
 		t.Errorf("invalid bindings should be ignored, size=%d", s.Size())

@@ -9,10 +9,10 @@ func TestEffectiveCostMultiplier(t *testing.T) {
 		group    float64
 		expected float64
 	}{
-		{"ungrouped default group", 2.0, 0, 2.0},   // group 0 → treated as 1
-		{"grouped stacks", 2.0, 1.5, 3.0},          // 2 × 1.5
-		{"group subsidy", 1.0, 0.5, 0.5},           // 1 × 0.5
-		{"both one", 1.0, 1.0, 1.0},                // identity
+		{"ungrouped default group", 2.0, 0, 2.0}, // group 0 → treated as 1
+		{"grouped stacks", 2.0, 1.5, 3.0},        // 2 × 1.5
+		{"group subsidy", 1.0, 0.5, 0.5},         // 1 × 0.5
+		{"both one", 1.0, 1.0, 1.0},              // identity
 	}
 	for _, tc := range cases {
 		a := &Account{CostMultiplier: tc.account, GroupCostMultiplier: tc.group}

@@ -16,11 +16,11 @@ func TestApplyModelRedirects(t *testing.T) {
 		want    string
 		matched bool
 	}{
-		{"gpt-4o", "gpt-4o-mini", true},      // exact
+		{"gpt-4o", "gpt-4o-mini", true},               // exact
 		{"claude-3-haiku", "claude-3-5-sonnet", true}, // prefix
-		{"gemini-preview", "stable", true},   // suffix
-		{"some-turbo-x", "fast", true},       // contains
-		{"o3-mini", "o3", true},              // regex capture
+		{"gemini-preview", "stable", true},            // suffix
+		{"some-turbo-x", "fast", true},                // contains
+		{"o3-mini", "o3", true},                       // regex capture
 		{"unknown-model", "unknown-model", false},
 	}
 	for _, tc := range cases {
@@ -43,10 +43,10 @@ func TestModelRedirectValid(t *testing.T) {
 		}
 	}
 	invalid := []ModelRedirect{
-		{MatchType: MatchExact, Source: "", Target: "b"},          // empty source
-		{MatchType: MatchExact, Source: "a", Target: ""},          // empty target
-		{MatchType: "fuzzy", Source: "a", Target: "b"},            // unknown type
-		{MatchType: MatchRegex, Source: `^x(\d+`, Target: "y"},    // bad regex
+		{MatchType: MatchExact, Source: "", Target: "b"},       // empty source
+		{MatchType: MatchExact, Source: "a", Target: ""},       // empty target
+		{MatchType: "fuzzy", Source: "a", Target: "b"},         // unknown type
+		{MatchType: MatchRegex, Source: `^x(\d+`, Target: "y"}, // bad regex
 	}
 	for _, r := range invalid {
 		if r.Valid() {
