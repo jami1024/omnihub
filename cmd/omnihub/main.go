@@ -18,10 +18,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/jami1024/omnihub/internal/crypto"
 	"github.com/jami1024/omnihub/internal/db"
 	adminhandler "github.com/jami1024/omnihub/internal/handler/admin"
-	portalhandler "github.com/jami1024/omnihub/internal/handler/portal"
 	"github.com/jami1024/omnihub/internal/handler/gateway"
+	portalhandler "github.com/jami1024/omnihub/internal/handler/portal"
 	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/account"
 	"github.com/jami1024/omnihub/internal/service/admin"
@@ -61,6 +62,7 @@ var (
 	blockedIPPool  *blockedip.Pool
 	pricePool      *pricing.Pool
 	priceRefresher *pricesync.Refresher
+	accountCipher  *crypto.Cipher
 )
 
 const accountPoolRefreshInterval = 30 * time.Second
@@ -140,6 +142,16 @@ func runGateway() {
 		os.Exit(1)
 	}
 	cancelBoot()
+
+	// At-rest encryption for sensitive account fields. A misconfigured
+	// key must fail loudly rather than silently storing plaintext.
+	var cipherErr error
+	accountCipher, cipherErr = crypto.New(os.Getenv("OMNIHUB_ENCRYPTION_KEY"))
+	if cipherErr != nil {
+		slog.Error("OMNIHUB_ENCRYPTION_KEY invalid", "err", cipherErr)
+		os.Exit(1)
+	}
+	slog.Info("at-rest encryption", "enabled", accountCipher.Enabled())
 
 	registry := buildDriverRegistry()
 	if err := setupAccountPool(rootCtx); err != nil {
@@ -270,7 +282,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 
 	issuer := admin.NewIssuer([]byte(secret), 24*time.Hour)
 	adminUserRepo := repository.NewAdminUserRepo(pool)
-	accountRepo := repository.NewAccountRepo(pool)
+	accountRepo := repository.NewAccountRepo(pool, accountCipher)
 	groupRepo := repository.NewProviderGroupRepo(pool)
 	apiKeyRepo := repository.NewApiKeyRepo(pool)
 	blockedIPRepo := repository.NewBlockedIPRepo(pool)
@@ -879,7 +891,16 @@ func setupAccountPool(ctx context.Context) error {
 		return nil
 	}
 
-	repo := repository.NewAccountRepo(pool)
+	repo := repository.NewAccountRepo(pool, accountCipher)
+
+	// Migrate any legacy plaintext secrets to encrypted form before the
+	// pool loads. Idempotent; a no-op when encryption is disabled.
+	if n, err := repo.ReencryptSecrets(ctx); err != nil {
+		return fmt.Errorf("re-encrypt account secrets: %w", err)
+	} else if n > 0 {
+		slog.Info("account secret encryption migration complete", "rows_migrated", n)
+	}
+
 	accountPool = account.NewPool(repo)
 	if err := accountPool.Start(ctx, accountPoolRefreshInterval); err != nil {
 		return err

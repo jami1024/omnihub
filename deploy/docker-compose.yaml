@@ -64,6 +64,11 @@ services:
       # refuses to mount /admin (see mountAdminRoutes), so the console is
       # unreachable. Generate with `openssl rand -hex 32`.
       OMNIHUB_ADMIN_JWT_SECRET: ${OMNIHUB_ADMIN_JWT_SECRET:?OMNIHUB_ADMIN_JWT_SECRET must be set in deploy/.env}
+      # AES-256 key (base64 of 32 bytes) that encrypts account secrets at
+      # rest. Empty = encryption disabled (plaintext, legacy). Generate
+      # with `openssl rand -base64 32`. WARNING: losing this key makes
+      # already-encrypted credentials unrecoverable.
+      OMNIHUB_ENCRYPTION_KEY: ${OMNIHUB_ENCRYPTION_KEY:-}
       # Upstream credentials. Set the block matching your provider.
       OMNIHUB_ANTHROPIC_API_KEY: ${OMNIHUB_ANTHROPIC_API_KEY:-}
       OMNIHUB_CLAUDE_PLATFORM_API_KEY: ${OMNIHUB_CLAUDE_PLATFORM_API_KEY:-}

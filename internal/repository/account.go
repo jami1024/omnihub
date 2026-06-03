@@ -5,29 +5,33 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/jami1024/omnihub/internal/crypto"
 	"github.com/jami1024/omnihub/internal/service/provider"
 )
 
 // AccountRepo persists upstream provider accounts.
 //
-// Credentials are stored as cleartext JSONB in this MVP. Operators
-// must protect the database accordingly (network isolation, OS-level
-// disk encryption, restricted role grants). A future commit will add
-// envelope encryption on the credentials column once the admin API
-// lands and accounts can be edited by non-DBA users.
+// Sensitive fields (credential VALUES, custom-header VALUES, and the
+// proxy URL) are encrypted at rest with the injected cipher when an
+// OMNIHUB_ENCRYPTION_KEY is configured. A nil/disabled cipher keeps the
+// previous plaintext behaviour; legacy plaintext rows are read
+// transparently and migrated by ReencryptSecrets at boot.
 type AccountRepo struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	cipher *crypto.Cipher
 }
 
-// NewAccountRepo wires the repository onto an existing pgx pool.
-func NewAccountRepo(pool *pgxpool.Pool) *AccountRepo {
-	return &AccountRepo{pool: pool}
+// NewAccountRepo wires the repository onto an existing pgx pool. cipher
+// may be nil (encryption disabled / passthrough).
+func NewAccountRepo(pool *pgxpool.Pool, cipher *crypto.Cipher) *AccountRepo {
+	return &AccountRepo{pool: pool, cipher: cipher}
 }
 
 // ErrAccountNotFound is returned when a single-row lookup misses.
@@ -98,27 +102,43 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 		a.CostMultiplier = multiplier
 		a.GroupCostMultiplier = groupMultiplier
 		applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
-		if err := decodeCredentials(&a, credentialsRaw); err != nil {
-			return nil, err
-		}
-		if err := decodeRedirects(&a, redirectsRaw); err != nil {
-			return nil, err
-		}
-		if err := decodeHeaders(&a, headersRaw); err != nil {
-			return nil, err
-		}
-		if err := decodeEndpoints(&a, endpointsRaw); err != nil {
-			return nil, err
-		}
-		if err := decodeParams(&a, paramsRaw); err != nil {
-			return nil, err
-		}
-		if err := decodeWindows(&a, windowsRaw); err != nil {
-			return nil, err
+		// Decode + decrypt. A failure here (e.g. an account whose secrets
+		// can't be decrypted because the key is wrong/missing) must NOT
+		// brick the whole routing pool — skip the unreadable account and
+		// keep the rest serving. The resolver simply sees fewer upstreams.
+		if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw); err != nil {
+			slog.Warn("skipping unreadable account in routing pool",
+				"account", a.Name, "id", a.ID, "err", err.Error())
+			continue
 		}
 		out = append(out, &a)
 	}
 	return out, rows.Err()
+}
+
+// decodeRow runs every decode/decrypt step for one scanned account row.
+// Returns the first error; callers decide whether to skip (routing pool)
+// or surface it (single-row lookups).
+func (r *AccountRepo) decodeRow(a *provider.Account, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw []byte) error {
+	if err := decodeCredentials(a, credentialsRaw, r.cipher); err != nil {
+		return err
+	}
+	if err := decodeRedirects(a, redirectsRaw); err != nil {
+		return err
+	}
+	if err := decodeHeaders(a, headersRaw, r.cipher); err != nil {
+		return err
+	}
+	if err := decodeEndpoints(a, endpointsRaw); err != nil {
+		return err
+	}
+	if err := decodeParams(a, paramsRaw); err != nil {
+		return err
+	}
+	if err := decodeWindows(a, windowsRaw); err != nil {
+		return err
+	}
+	return decodeProxy(a, r.cipher)
 }
 
 // applyCircuitOverrides materialises the three nullable per-account
@@ -134,13 +154,18 @@ func applyCircuitOverrides(a *provider.Account, failureThreshold *int, openDurat
 	}
 }
 
-func decodeCredentials(a *provider.Account, raw []byte) error {
+func decodeCredentials(a *provider.Account, raw []byte, c *crypto.Cipher) error {
 	if len(raw) == 0 {
 		return nil
 	}
 	if err := json.Unmarshal(raw, &a.Credentials); err != nil {
 		return fmt.Errorf("decode credentials for account %q: %w", a.Name, err)
 	}
+	dec, err := c.DecryptMapValues(a.Credentials)
+	if err != nil {
+		return fmt.Errorf("decrypt credentials for account %q: %w", a.Name, err)
+	}
+	a.Credentials = dec
 	return nil
 }
 
@@ -158,13 +183,32 @@ func decodeRedirects(a *provider.Account, raw []byte) error {
 
 // decodeHeaders unmarshals the custom_headers JSONB object onto the
 // account. An empty / "{}" payload leaves CustomHeaders nil.
-func decodeHeaders(a *provider.Account, raw []byte) error {
+func decodeHeaders(a *provider.Account, raw []byte, c *crypto.Cipher) error {
 	if len(raw) == 0 {
 		return nil
 	}
 	if err := json.Unmarshal(raw, &a.CustomHeaders); err != nil {
 		return fmt.Errorf("decode custom_headers for account %q: %w", a.Name, err)
 	}
+	dec, err := c.DecryptMapValues(a.CustomHeaders)
+	if err != nil {
+		return fmt.Errorf("decrypt custom_headers for account %q: %w", a.Name, err)
+	}
+	a.CustomHeaders = dec
+	return nil
+}
+
+// decodeProxy decrypts the scanned proxy_url in place. Empty / legacy
+// plaintext values pass through.
+func decodeProxy(a *provider.Account, c *crypto.Cipher) error {
+	if a.ProxyURL == "" {
+		return nil
+	}
+	v, err := c.DecryptString(a.ProxyURL)
+	if err != nil {
+		return fmt.Errorf("decrypt proxy_url for account %q: %w", a.Name, err)
+	}
+	a.ProxyURL = v
 	return nil
 }
 
@@ -353,23 +397,9 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 		a.CostMultiplier = multiplier
 		a.GroupCostMultiplier = groupMultiplier
 		applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
-		if err := decodeCredentials(&a, credentialsRaw); err != nil {
-			return nil, nil, err
-		}
-		if err := decodeRedirects(&a, redirectsRaw); err != nil {
-			return nil, nil, err
-		}
-		if err := decodeHeaders(&a, headersRaw); err != nil {
-			return nil, nil, err
-		}
-		if err := decodeEndpoints(&a, endpointsRaw); err != nil {
-			return nil, nil, err
-		}
-		if err := decodeParams(&a, paramsRaw); err != nil {
-			return nil, nil, err
-		}
-		if err := decodeWindows(&a, windowsRaw); err != nil {
-			return nil, nil, err
+		if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw); err != nil {
+			slog.Warn("skipping unreadable account in list", "account", a.Name, "id", a.ID, "err", err.Error())
+			continue
 		}
 		accounts = append(accounts, &a)
 		flags = append(flags, enabled)
@@ -392,6 +422,138 @@ func (r *AccountRepo) SetEnabled(ctx context.Context, name string, enabled bool)
 	return nil
 }
 
+// ReencryptSecrets migrates any account rows that still hold legacy
+// plaintext secrets (credentials, custom-header values, proxy URL) to
+// encrypted form. It is idempotent — rows already fully encrypted are
+// skipped — and a no-op when encryption is disabled. Returns the number
+// of rows rewritten. Safe to run at every boot.
+func (r *AccountRepo) ReencryptSecrets(ctx context.Context) (int, error) {
+	if !r.cipher.Enabled() {
+		return 0, nil
+	}
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, name, credentials, COALESCE(proxy_url, ''), custom_headers FROM accounts`)
+	if err != nil {
+		return 0, fmt.Errorf("scan accounts for re-encrypt: %w", err)
+	}
+	type row struct {
+		id      int64
+		name    string
+		creds   map[string]string
+		proxy   string
+		headers map[string]string
+	}
+	var todo []row
+	for rows.Next() {
+		var (
+			id         int64
+			name       string
+			credsRaw   []byte
+			proxy      string
+			headersRaw []byte
+			creds      = map[string]string{}
+			headers    = map[string]string{}
+		)
+		if err := rows.Scan(&id, &name, &credsRaw, &proxy, &headersRaw); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan row for re-encrypt: %w", err)
+		}
+		// A row whose JSONB can't unmarshal into map[string]string is
+		// malformed (out-of-band write); skip it rather than risk
+		// overwriting it with an empty object.
+		if len(credsRaw) > 0 {
+			if err := json.Unmarshal(credsRaw, &creds); err != nil {
+				slog.Warn("re-encrypt: skipping row with unreadable credentials", "id", id, "err", err.Error())
+				continue
+			}
+		}
+		if len(headersRaw) > 0 {
+			if err := json.Unmarshal(headersRaw, &headers); err != nil {
+				slog.Warn("re-encrypt: skipping row with unreadable custom_headers", "id", id, "err", err.Error())
+				continue
+			}
+		}
+		vals := []string{proxy}
+		for _, v := range creds {
+			vals = append(vals, v)
+		}
+		for _, v := range headers {
+			vals = append(vals, v)
+		}
+		if crypto.HasLegacyPlaintext(vals...) {
+			todo = append(todo, row{id: id, name: name, creds: creds, proxy: proxy, headers: headers})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+
+	// reencryptRow returns the three encrypted column values, or an error
+	// if any secret can't be decrypted. decrypt-then-encrypt is correct
+	// for both legacy plaintext (passthrough decrypt) and already-
+	// encrypted values within a mixed row.
+	reencryptRow := func(t row) (credsJSON, headersJSON []byte, proxyEnc string, err error) {
+		decCreds, err := r.cipher.DecryptMapValues(t.creds)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		encCreds, err := r.cipher.EncryptMapValues(decCreds)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		if credsJSON, err = json.Marshal(encCreds); err != nil {
+			return nil, nil, "", err
+		}
+		decHeaders, err := r.cipher.DecryptMapValues(t.headers)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		encHeaders, err := r.cipher.EncryptMapValues(decHeaders)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		if headersJSON, err = marshalHeaders(encHeaders); err != nil {
+			return nil, nil, "", err
+		}
+		decProxy, err := r.cipher.DecryptString(t.proxy)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		if proxyEnc, err = r.cipher.EncryptString(decProxy); err != nil {
+			return nil, nil, "", err
+		}
+		return credsJSON, headersJSON, proxyEnc, nil
+	}
+
+	n, skipped := 0, 0
+	for _, t := range todo {
+		credsJSON, headersJSON, proxyEnc, err := reencryptRow(t)
+		if err != nil {
+			// A row that can't be re-encrypted (e.g. a partially-migrated
+			// row whose marked value fails GCM auth) is logged and left
+			// untouched — never overwrite it with partial data, and never
+			// abort the whole migration / boot over one bad row.
+			slog.Warn("re-encrypt: skipping account whose secrets could not be re-encrypted",
+				"account", t.name, "id", t.id, "err", err.Error())
+			skipped++
+			continue
+		}
+		if _, err := r.pool.Exec(ctx,
+			`UPDATE accounts SET credentials = $1, custom_headers = $2, proxy_url = NULLIF($3, '') WHERE id = $4`,
+			credsJSON, headersJSON, proxyEnc, t.id); err != nil {
+			return n, fmt.Errorf("rewrite secrets id=%d: %w", t.id, err)
+		}
+		slog.Info("encrypted account secrets at rest", "account", t.name, "id", t.id)
+		n++
+	}
+	if skipped > 0 {
+		slog.Warn("re-encrypt finished with skipped rows", "migrated", n, "skipped", skipped)
+	}
+	return n, nil
+}
+
 // Delete hard-deletes the account row by name. Returns
 // ErrAccountNotFound when no row matches.
 func (r *AccountRepo) Delete(ctx context.Context, name string) error {
@@ -408,7 +570,11 @@ func (r *AccountRepo) Delete(ctx context.Context, name string) error {
 // Insert creates a new account row and returns its id. Duplicate
 // names are rejected by the UNIQUE constraint.
 func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error) {
-	credentialsJSON, err := json.Marshal(p.Credentials)
+	encCreds, err := r.cipher.EncryptMapValues(p.Credentials)
+	if err != nil {
+		return 0, fmt.Errorf("encrypt credentials: %w", err)
+	}
+	credentialsJSON, err := json.Marshal(encCreds)
 	if err != nil {
 		return 0, fmt.Errorf("encode credentials: %w", err)
 	}
@@ -423,9 +589,17 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 	if err != nil {
 		return 0, fmt.Errorf("encode model_redirects: %w", err)
 	}
-	headersJSON, err := marshalHeaders(p.CustomHeaders)
+	encHeaders, err := r.cipher.EncryptMapValues(p.CustomHeaders)
+	if err != nil {
+		return 0, fmt.Errorf("encrypt custom_headers: %w", err)
+	}
+	headersJSON, err := marshalHeaders(encHeaders)
 	if err != nil {
 		return 0, fmt.Errorf("encode custom_headers: %w", err)
+	}
+	proxyEnc, err := r.cipher.EncryptString(p.ProxyURL)
+	if err != nil {
+		return 0, fmt.Errorf("encrypt proxy_url: %w", err)
 	}
 	endpointsJSON, err := marshalEndpoints(p.Endpoints)
 	if err != nil {
@@ -457,7 +631,7 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
-		p.HealthProbeEnabled, p.ProxyURL, paramsJSON, windowsJSON, p.ActiveTimezone,
+		p.HealthProbeEnabled, proxyEnc, paramsJSON, windowsJSON, p.ActiveTimezone,
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -520,22 +694,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 	a.CostMultiplier = multiplier
 	a.GroupCostMultiplier = groupMultiplier
 	applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
-	if err := decodeCredentials(&a, credentialsRaw); err != nil {
-		return nil, false, err
-	}
-	if err := decodeRedirects(&a, redirectsRaw); err != nil {
-		return nil, false, err
-	}
-	if err := decodeHeaders(&a, headersRaw); err != nil {
-		return nil, false, err
-	}
-	if err := decodeEndpoints(&a, endpointsRaw); err != nil {
-		return nil, false, err
-	}
-	if err := decodeParams(&a, paramsRaw); err != nil {
-		return nil, false, err
-	}
-	if err := decodeWindows(&a, windowsRaw); err != nil {
+	if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw); err != nil {
 		return nil, false, err
 	}
 	return &a, enabled, nil
@@ -584,7 +743,11 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
 	// JSONB. A non-nil (possibly empty) map is marshalled and replaces it.
 	var credentialsJSON []byte
 	if p.Credentials != nil {
-		b, err := json.Marshal(p.Credentials)
+		encCreds, err := r.cipher.EncryptMapValues(p.Credentials)
+		if err != nil {
+			return fmt.Errorf("encrypt credentials: %w", err)
+		}
+		b, err := json.Marshal(encCreds)
 		if err != nil {
 			return fmt.Errorf("encode credentials: %w", err)
 		}
@@ -601,7 +764,11 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
 	if err != nil {
 		return fmt.Errorf("encode model_redirects: %w", err)
 	}
-	headersJSON, err := marshalHeaders(p.CustomHeaders)
+	encHeaders, err := r.cipher.EncryptMapValues(p.CustomHeaders)
+	if err != nil {
+		return fmt.Errorf("encrypt custom_headers: %w", err)
+	}
+	headersJSON, err := marshalHeaders(encHeaders)
 	if err != nil {
 		return fmt.Errorf("encode custom_headers: %w", err)
 	}
@@ -616,6 +783,10 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
 	windowsJSON, err := marshalWindows(p.ActiveWindows)
 	if err != nil {
 		return fmt.Errorf("encode active_windows: %w", err)
+	}
+	proxyEnc, err := r.cipher.EncryptString(p.ProxyURL)
+	if err != nil {
+		return fmt.Errorf("encrypt proxy_url: %w", err)
 	}
 
 	const q = `
@@ -637,7 +808,7 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
 		p.CostMultiplier, p.BaseURL, credentialsJSON,
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
-		p.HealthProbeEnabled, p.ProxyURL, paramsJSON, windowsJSON, p.ActiveTimezone,
+		p.HealthProbeEnabled, proxyEnc, paramsJSON, windowsJSON, p.ActiveTimezone,
 		id,
 	)
 	if err != nil {

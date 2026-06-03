@@ -12,10 +12,22 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/jami1024/omnihub/internal/crypto"
 	"github.com/jami1024/omnihub/internal/db"
 	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/provider"
 )
+
+// cliCipher builds the at-rest cipher for CLI account commands from the
+// same env var the gateway uses, so the CLI reads/writes secrets in the
+// same encrypted form. A misconfigured key aborts the command.
+func cliCipher() *crypto.Cipher {
+	c, err := crypto.New(os.Getenv("OMNIHUB_ENCRYPTION_KEY"))
+	if err != nil {
+		exitOnErr(fmt.Errorf("OMNIHUB_ENCRYPTION_KEY invalid: %w", err))
+	}
+	return c
+}
 
 // runAccountCommand dispatches the `omnihub account ...` subcommands.
 // Returns to the caller; never re-enters the gateway logic.
@@ -162,7 +174,7 @@ func accountAdd(args []string) error {
 		params.CircuitHalfOpenSuccess = &v
 	}
 
-	repo := repository.NewAccountRepo(pool)
+	repo := repository.NewAccountRepo(pool, cliCipher())
 	id, err := repo.Insert(ctx, params)
 	if err != nil {
 		return err
@@ -190,7 +202,7 @@ func accountList(args []string) error {
 	}
 	defer pool.Close()
 
-	repo := repository.NewAccountRepo(pool)
+	repo := repository.NewAccountRepo(pool, cliCipher())
 	accounts, enabledFlags, err := repo.ListAll(ctx)
 	if err != nil {
 		return err
@@ -267,7 +279,7 @@ func accountSetEnabled(args []string, enabled bool) error {
 	}
 	defer pool.Close()
 
-	repo := repository.NewAccountRepo(pool)
+	repo := repository.NewAccountRepo(pool, cliCipher())
 	if err := repo.SetEnabled(ctx, name, enabled); err != nil {
 		return err
 	}
@@ -297,7 +309,7 @@ func accountDelete(args []string) error {
 	}
 	defer pool.Close()
 
-	repo := repository.NewAccountRepo(pool)
+	repo := repository.NewAccountRepo(pool, cliCipher())
 	if err := repo.Delete(ctx, name); err != nil {
 		return err
 	}
