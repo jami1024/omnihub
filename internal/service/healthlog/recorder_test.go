@@ -3,6 +3,7 @@ package healthlog
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,8 +27,18 @@ type fakeRecorder struct {
 	ch      chan health.Transition
 	stop    chan struct{}
 	stopped chan struct{}
+
+	mu      sync.Mutex // guards written (consumer goroutine vs test reads)
 	written []health.Transition
 	dropped int
+}
+
+// count returns how many transitions the consumer goroutine has drained,
+// under the lock so the race detector stays happy.
+func (r *fakeRecorder) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.written)
 }
 
 func newFakeRecorder(queue int) *fakeRecorder {
@@ -54,7 +65,9 @@ func (r *fakeRecorder) Start() {
 			case <-r.stop:
 				return
 			case t := <-r.ch:
+				r.mu.Lock()
 				r.written = append(r.written, t)
+				r.mu.Unlock()
 			}
 		}
 	}()
@@ -80,11 +93,11 @@ func TestFakeRecorder_HandlerEnqueuesEvents(t *testing.T) {
 	}
 	// Allow goroutine to drain.
 	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && len(r.written) < 5 {
+	for time.Now().Before(deadline) && r.count() < 5 {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if len(r.written) != 5 {
-		t.Fatalf("written = %d, want 5", len(r.written))
+	if n := r.count(); n != 5 {
+		t.Fatalf("written = %d, want 5", n)
 	}
 	if r.dropped != 0 {
 		t.Errorf("dropped = %d, want 0", r.dropped)
