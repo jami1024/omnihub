@@ -89,6 +89,24 @@ func defaultClient() *http.Client {
 	return &http.Client{Transport: defaultTransport()}
 }
 
+// Failover timeouts. These are deliberately tight: a dead or hung
+// endpoint must fail fast so the multi-endpoint / inter-account retry
+// loops move on, rather than the FIRST request to a bad account eating
+// the full timeout as a multi-second "slow first token". They bound
+// only the CONNECT and the HTTP response-header exchange — NOT the body
+// stream — so a slow-generating model is unaffected: its time-to-first-
+// token lives in the SSE body (the first event), which arrives after
+// the 200 status line and is not governed by ResponseHeaderTimeout.
+//
+// dialTimeout is generous enough to cover an overseas / proxied account
+// (TCP+TLS to a live host is normally sub-second) while still cutting
+// dead-host failover from 30s to 8s.
+const (
+	dialTimeout           = 8 * time.Second
+	tlsHandshakeTimeout   = 8 * time.Second
+	responseHeaderTimeout = 20 * time.Second
+)
+
 // defaultTransport is the tuned transport shared by the default client
 // and each per-account proxied client (which sets Proxy on top).
 func defaultTransport() *http.Transport {
@@ -99,11 +117,11 @@ func defaultTransport() *http.Transport {
 		IdleConnTimeout:       90 * time.Second,
 		ForceAttemptHTTP2:     true,
 		DisableCompression:    true,
-		TLSHandshakeTimeout:   10 * time.Second,
+		TLSHandshakeTimeout:   tlsHandshakeTimeout,
 		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: 60 * time.Second,
+		ResponseHeaderTimeout: responseHeaderTimeout,
 		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
+			Timeout:   dialTimeout,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 	}
