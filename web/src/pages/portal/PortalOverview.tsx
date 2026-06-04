@@ -1,4 +1,15 @@
 import { useState } from 'react'
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { PortalLayout } from '../../components/PortalLayout'
 import { Td, Th } from '../../components/Table'
 import { ApiError } from '../../lib/portalApi'
@@ -60,6 +71,49 @@ export function PortalOverviewPage() {
               />
             </div>
 
+            {data.summary.requests > 0 && (
+              <div className="grid gap-4 lg:grid-cols-2">
+                <section className="card p-4">
+                  <h3 className="mb-3 text-sm font-medium text-muted">{t('portalOverview.dailySpend')}</h3>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <AreaChart data={data.daily} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="portal-spend" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="var(--brand)" stopOpacity={0.35} />
+                          <stop offset="100%" stopColor="var(--brand)" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
+                      <XAxis dataKey="day" tickFormatter={fmtDay} fontSize={11} stroke="var(--muted)" />
+                      <YAxis tickFormatter={(v) => `$${v}`} fontSize={11} stroke="var(--muted)" width={48} />
+                      <Tooltip
+                        formatter={(v: number) => [fmtUSD(v), t('portalOverview.spend')]}
+                        labelFormatter={fmtDay}
+                        contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid var(--line)', background: 'var(--surface)' }}
+                      />
+                      <Area type="monotone" dataKey="cost_usd" stroke="var(--brand)" fill="url(#portal-spend)" strokeWidth={2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </section>
+                <section className="card p-4">
+                  <h3 className="mb-3 text-sm font-medium text-muted">{t('portalOverview.dailyRequests')}</h3>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={data.daily} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
+                      <XAxis dataKey="day" tickFormatter={fmtDay} fontSize={11} stroke="var(--muted)" />
+                      <YAxis fontSize={11} stroke="var(--muted)" width={48} allowDecimals={false} />
+                      <Tooltip
+                        formatter={(v: number) => [fmtInt(v), t('portalOverview.requests')]}
+                        labelFormatter={fmtDay}
+                        contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid var(--line)', background: 'var(--surface)' }}
+                      />
+                      <Bar dataKey="requests" fill="var(--brand)" radius={[2, 2, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </section>
+              </div>
+            )}
+
             <section className="card p-4">
               <h3 className="mb-3 text-sm font-medium text-muted">{t('portalOverview.byModel')}</h3>
               {data.by_model.length === 0 ? (
@@ -119,4 +173,8 @@ function fmtTokens(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
   return String(n)
+}
+// fmtDay shortens an ISO/day string to MM-DD for the chart axis.
+function fmtDay(day: string) {
+  return typeof day === 'string' ? day.slice(5, 10) : String(day)
 }

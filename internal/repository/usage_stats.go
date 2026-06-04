@@ -163,6 +163,76 @@ func (r *MessageRequestRepo) UsageByModelSinceFor(ctx context.Context, since tim
 	return out, rows.Err()
 }
 
+// RequestLogRow is one row of a user's per-request usage log — the
+// non-sensitive subset of message_requests safe to show an end user
+// (no upstream account / provider / internal request id).
+type RequestLogRow struct {
+	CreatedAt    time.Time
+	KeyName      string
+	Model        string // actual_model when known, else the requested model
+	StatusCode   *int
+	InputTokens  int64
+	OutputTokens int64
+	CostUSD      float64
+	DurationMs   *int64
+	Error        string // truncated error_message for failed requests
+}
+
+// ListByKeyNames returns one page of message_requests scoped to the given
+// key names (a user's OWN keys), newest first, plus the total matching
+// count for pagination. An empty names slice returns NO rows — the portal
+// must always pass the authenticated user's own key names so this can
+// never widen to all traffic. key_name is globally UNIQUE, so name-based
+// scoping cannot leak across users.
+func (r *MessageRequestRepo) ListByKeyNames(ctx context.Context, names []string, since time.Time, limit, offset int) ([]RequestLogRow, int, error) {
+	if len(names) == 0 {
+		return []RequestLogRow{}, 0, nil
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int
+	if err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM message_requests WHERE created_at >= $1 AND key_name = ANY($2)`,
+		since, names).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count requests: %w", err)
+	}
+
+	const q = `
+        SELECT created_at, COALESCE(key_name, ''),
+               COALESCE(NULLIF(actual_model, ''), model),
+               status_code, input_tokens, output_tokens,
+               COALESCE(cost_usd, 0)::float8, duration_ms,
+               COALESCE(error_message, '')
+          FROM message_requests
+         WHERE created_at >= $1 AND key_name = ANY($2)
+         ORDER BY created_at DESC
+         LIMIT $3 OFFSET $4`
+	rows, err := r.pool.Query(ctx, q, since, names, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list requests: %w", err)
+	}
+	defer rows.Close()
+
+	out := []RequestLogRow{}
+	for rows.Next() {
+		var row RequestLogRow
+		if err := rows.Scan(&row.CreatedAt, &row.KeyName, &row.Model, &row.StatusCode,
+			&row.InputTokens, &row.OutputTokens, &row.CostUSD, &row.DurationMs, &row.Error); err != nil {
+			return nil, 0, fmt.Errorf("scan request row: %w", err)
+		}
+		if len(row.Error) > 300 {
+			row.Error = row.Error[:300]
+		}
+		out = append(out, row)
+	}
+	return out, total, rows.Err()
+}
+
 // keyClause appends "AND key_name = ANY($2)" when scoping to a user's
 // keys, or "" for all traffic. Pair with argsWithKeys.
 func keyClause(keys []string) string {

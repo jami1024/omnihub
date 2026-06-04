@@ -10,6 +10,7 @@ import { LangSwitch } from './LangSwitch'
 // the portal session controls.
 const NAV = [
   { to: '/portal', labelKey: 'portalNav.overview' },
+  { to: '/portal/requests', labelKey: 'portalNav.requests' },
   { to: '/portal/keys', labelKey: 'portalNav.apiKeys' },
 ]
 

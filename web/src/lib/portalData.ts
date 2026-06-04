@@ -56,3 +56,31 @@ export function useDeletePortalKey() {
 export function usePortalUsage(days: number) {
   return useQuery({ queryKey: ['portal-usage', days], queryFn: () => papi<PortalUsage>(`/usage?days=${days}`) })
 }
+
+export interface PortalRequestRow {
+  created_at: string
+  key_name: string
+  model: string
+  status_code: number | null
+  input_tokens: number
+  output_tokens: number
+  cost_usd: number
+  duration_ms: number | null
+  error: string
+}
+
+export interface PortalRequests {
+  window_days: number
+  page: number
+  page_size: number
+  total: number
+  requests: PortalRequestRow[]
+}
+
+export function usePortalRequests(days: number, page: number) {
+  return useQuery({
+    queryKey: ['portal-requests', days, page],
+    queryFn: () => papi<PortalRequests>(`/requests?days=${days}&page=${page}`),
+    placeholderData: (prev) => prev, // keep the table visible while paging
+  })
+}

@@ -375,6 +375,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	puser.POST("/keys", portalhandler.CreateKeyHandler(apiKeyRepo, portalSettingsRepo))
 	puser.DELETE("/keys/:id", portalhandler.DeleteKeyHandler(apiKeyRepo))
 	puser.GET("/usage", portalhandler.UsageHandler(messageRepo, apiKeyRepo))
+	puser.GET("/requests", portalhandler.RequestsHandler(messageRepo, apiKeyRepo))
 
 	// M7 — admin oversight of portal users + the portal policy (signup
 	// toggle, per-key limit default/ceiling).
