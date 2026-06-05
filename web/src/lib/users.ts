@@ -8,6 +8,7 @@ export interface AdminUser {
   enabled: boolean
   key_count: number
   spend_30d: number
+  price_ratio: number
   created_at: string
 }
 
@@ -24,6 +25,15 @@ export function useSetUserEnabled() {
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   })
 }
+export function useSetUserRatio() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, price_ratio }: { id: number; price_ratio: number }) =>
+      api<void>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify({ price_ratio }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  })
+}
+
 export function useDeleteUser() {
   const qc = useQueryClient()
   return useMutation({

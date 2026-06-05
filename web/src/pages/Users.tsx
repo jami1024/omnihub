@@ -5,15 +5,27 @@ import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '
 import { StatusBadge, Td, Th } from '../components/Table'
 import { ApiError } from '../lib/api'
 import { useI18n } from '../lib/i18n'
-import { useDeleteUser, useRechargeUser, useSetUserEnabled, useUsers, type AdminUser } from '../lib/users'
+import { useDeleteUser, useRechargeUser, useSetUserEnabled, useSetUserRatio, useUsers, type AdminUser } from '../lib/users'
 
 export function UsersPage() {
   const { t } = useI18n()
   const { data: users, isLoading, error } = useUsers()
   const setEnabled = useSetUserEnabled()
+  const setRatio = useSetUserRatio()
   const del = useDeleteUser()
   const recharge = useRechargeUser()
   const [recharging, setRecharging] = useState<AdminUser | null>(null)
+
+  function editRatio(u: AdminUser) {
+    const raw = window.prompt(t('users.ratioPrompt', { name: u.username }), String(u.price_ratio))
+    if (raw == null) return
+    const n = Number(raw.trim())
+    if (!Number.isFinite(n) || n < 0) {
+      alert(t('users.ratioInvalid'))
+      return
+    }
+    setRatio.mutate({ id: u.id, price_ratio: n })
+  }
 
   const total = users?.length ?? 0
   const enabled = users?.filter((u) => u.enabled).length ?? 0
@@ -51,7 +63,7 @@ export function UsersPage() {
 
         <div className="mt-6" />
 
-        {isLoading && <LoadingTable columns={6} />}
+        {isLoading && <LoadingTable columns={8} />}
         {error && <ErrorNotice>{error instanceof ApiError ? error.message : t('users.loadError')}</ErrorNotice>}
 
         {users && users.length === 0 && (
@@ -71,6 +83,7 @@ export function UsersPage() {
                   <Th>{t('common.email')}</Th>
                   <Th className="text-right">{t('users.colKeys')}</Th>
                   <Th className="text-right">{t('users.colSpent30d')}</Th>
+                  <Th className="text-right">{t('users.colRatio')}</Th>
                   <Th>{t('common.status')}</Th>
                   <Th>{t('users.colJoined')}</Th>
                   <Th className="text-right">{t('common.actions')}</Th>
@@ -83,6 +96,7 @@ export function UsersPage() {
                     <Td className="text-muted">{u.email || '—'}</Td>
                     <Td className="text-right tabular-nums">{u.key_count}</Td>
                     <Td className="text-right tabular-nums">${u.spend_30d.toFixed(4)}</Td>
+                    <Td className="text-right tabular-nums">{u.price_ratio.toFixed(2)}×</Td>
                     <Td>
                       <StatusBadge enabled={u.enabled} />
                     </Td>
@@ -93,6 +107,13 @@ export function UsersPage() {
                         className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
                       >
                         {t('users.recharge')}
+                      </button>
+                      <button
+                        onClick={() => editRatio(u)}
+                        disabled={setRatio.isPending}
+                        className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline disabled:opacity-50"
+                      >
+                        {t('users.ratio')}
                       </button>
                       <button
                         onClick={() => toggle(u)}

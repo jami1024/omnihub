@@ -19,9 +19,10 @@ type walletStore interface {
 	ListEntries(ctx context.Context, userID int64, limit int) ([]repository.WalletEntry, error)
 }
 
-// costStore returns the user's lifetime request cost.
+// costStore returns the user's lifetime billed amount (what they are
+// charged, after the price ratio).
 type costStore interface {
-	SumCostByUser(ctx context.Context, userID int64) (float64, error)
+	SumBilledByUser(ctx context.Context, userID int64) (float64, error)
 }
 
 type walletEntryDTO struct {
@@ -44,7 +45,7 @@ func WalletHandler(wallet walletStore, cost costStore) gin.HandlerFunc {
 			writeInternal(c, "could not load wallet")
 			return
 		}
-		spent, err := cost.SumCostByUser(c.Request.Context(), uid)
+		spent, err := cost.SumBilledByUser(c.Request.Context(), uid)
 		if err != nil {
 			slog.Error("portal: wallet spend failed", "uid", uid, "err", err.Error())
 			writeInternal(c, "could not load wallet")

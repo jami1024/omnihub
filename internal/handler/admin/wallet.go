@@ -20,9 +20,10 @@ type walletStore interface {
 	ListEntries(ctx context.Context, userID int64, limit int) ([]repository.WalletEntry, error)
 }
 
-// userCostStore returns a user's lifetime request cost (consumption side).
+// userCostStore returns a user's lifetime billed amount (consumption side,
+// after the price ratio).
 type userCostStore interface {
-	SumCostByUser(ctx context.Context, userID int64) (float64, error)
+	SumBilledByUser(ctx context.Context, userID int64) (float64, error)
 }
 
 type walletEntryDTO struct {
@@ -42,7 +43,7 @@ func userBalance(ctx context.Context, wallet walletStore, cost userCostStore, us
 	if credits, err = wallet.Credits(ctx, userID); err != nil {
 		return
 	}
-	if spent, err = cost.SumCostByUser(ctx, userID); err != nil {
+	if spent, err = cost.SumBilledByUser(ctx, userID); err != nil {
 		return
 	}
 	balance = credits - spent

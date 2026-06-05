@@ -272,6 +272,7 @@ func AnthropicMessagesHandler(
 			if buffer != nil {
 				rec := buildMessageRequest(c, &req, driver, account, &result, writeErr, startedAt)
 				rec.CostUSD = costUSD
+				rec.BilledUSD = billedUSD(c, costUSD)
 				rec.CostBreakdown = costBreakdown
 				buffer.Enqueue(rec)
 			}
@@ -415,6 +416,22 @@ func emitMetrics(providerName, requestedModel string, result *forward.Result, co
 		OutputTokens: outTok,
 		CostUSD:      cost,
 	})
+}
+
+// billedUSD returns what the owning user is charged: cost times the key
+// owner's price ratio. Nil when cost is nil; falls back to the raw cost
+// when there is no authenticated key (open mode). A ratio of 0 bills 0
+// (a deliberate free tier).
+func billedUSD(c *gin.Context, cost *float64) *float64 {
+	if cost == nil {
+		return nil
+	}
+	ratio := 1.0
+	if k := guard.APIKey(c); k != nil {
+		ratio = k.PriceRatio
+	}
+	b := *cost * ratio
+	return &b
 }
 
 func recordExhaustedFailure(

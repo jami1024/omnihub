@@ -39,11 +39,13 @@ var ErrApiKeyNameTaken = errors.New("api key name already in use")
 // accidentally authenticate someone whose key was revoked.
 func (r *ApiKeyRepo) ListEnabled(ctx context.Context) ([]*apikey.Key, error) {
 	const q = `
-        SELECT id, name, key_hash, COALESCE(label, ''),
-               daily_usd_limit, rpm_limit, allowed_models, user_id
-          FROM api_keys
-         WHERE enabled = TRUE
-         ORDER BY id ASC`
+        SELECT k.id, k.name, k.key_hash, COALESCE(k.label, ''),
+               k.daily_usd_limit, k.rpm_limit, k.allowed_models, k.user_id,
+               COALESCE(u.price_ratio, 1.0)::float8
+          FROM api_keys k
+          LEFT JOIN users u ON u.id = k.user_id
+         WHERE k.enabled = TRUE
+         ORDER BY k.id ASC`
 	rows, err := r.pool.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("query api_keys: %w", err)
@@ -344,16 +346,18 @@ func scanApiKey(rows interface{ Scan(...any) error }) (*apikey.Key, error) {
 		dailyLimit  *float64
 		rpmLimit    *int
 		userID      *int64
+		priceRatio  float64
 	)
 	if err := rows.Scan(
 		&k.ID, &k.Name, &k.Hash, &k.Label,
-		&dailyLimit, &rpmLimit, &allowedJSON, &userID,
+		&dailyLimit, &rpmLimit, &allowedJSON, &userID, &priceRatio,
 	); err != nil {
 		return nil, fmt.Errorf("scan api_key: %w", err)
 	}
 	k.DailyUSDLimit = dailyLimit
 	k.RPMLimit = rpmLimit
 	k.UserID = userID
+	k.PriceRatio = priceRatio
 	if err := decodeAllowedModels(&k, allowedJSON); err != nil {
 		return nil, err
 	}

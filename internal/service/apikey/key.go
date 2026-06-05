@@ -27,6 +27,7 @@ type Key struct {
 	RPMLimit      *int
 	AllowedModels []string // nil / empty = all models
 	UserID        *int64   // owning portal user; nil for admin/system keys
+	PriceRatio    float64  // owner's billing markup; 1.0 (or no owner) = bill at cost
 }
 
 // HashOf computes the canonical key hash. Both the CLI's "key add"

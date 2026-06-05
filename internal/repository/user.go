@@ -105,8 +105,9 @@ func (r *UserRepo) Insert(ctx context.Context, p UserInsertParams) (int64, error
 // how many keys they own and how much they've spent in the last 30 days.
 type UserStat struct {
 	User
-	KeyCount int     `json:"key_count"`
-	Spend30d float64 `json:"spend_30d"`
+	KeyCount   int     `json:"key_count"`
+	Spend30d   float64 `json:"spend_30d"`
+	PriceRatio float64 `json:"price_ratio"`
 }
 
 // ListWithStats returns every user with their key count and 30-day
@@ -117,13 +118,14 @@ func (r *UserRepo) ListWithStats(ctx context.Context) ([]UserStat, error) {
 	const q = `
         SELECT u.id, u.username, u.email, u.enabled, u.created_at,
                COUNT(DISTINCT k.id) AS key_count,
-               COALESCE(SUM(mr.cost_usd), 0)::float8 AS spend_30d
+               COALESCE(SUM(mr.cost_usd), 0)::float8 AS spend_30d,
+               u.price_ratio::float8
           FROM users u
           LEFT JOIN api_keys k ON k.user_id = u.id
           LEFT JOIN message_requests mr
                  ON mr.key_name = k.name
                 AND mr.created_at > NOW() - INTERVAL '30 days'
-         GROUP BY u.id, u.username, u.email, u.enabled, u.created_at
+         GROUP BY u.id, u.username, u.email, u.enabled, u.created_at, u.price_ratio
          ORDER BY u.created_at DESC`
 	rows, err := r.pool.Query(ctx, q)
 	if err != nil {
@@ -136,7 +138,7 @@ func (r *UserRepo) ListWithStats(ctx context.Context) ([]UserStat, error) {
 			s     UserStat
 			email *string
 		)
-		if err := rows.Scan(&s.ID, &s.Username, &email, &s.Enabled, &s.CreatedAt, &s.KeyCount, &s.Spend30d); err != nil {
+		if err := rows.Scan(&s.ID, &s.Username, &email, &s.Enabled, &s.CreatedAt, &s.KeyCount, &s.Spend30d, &s.PriceRatio); err != nil {
 			return nil, fmt.Errorf("scan user stat: %w", err)
 		}
 		if email != nil {
@@ -152,6 +154,19 @@ func (r *UserRepo) SetEnabled(ctx context.Context, id int64, enabled bool) error
 	tag, err := r.pool.Exec(ctx, `UPDATE users SET enabled = $2, updated_at = NOW() WHERE id = $1`, id, enabled)
 	if err != nil {
 		return fmt.Errorf("set user %d enabled: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// SetPriceRatio updates a user's billing markup (sell price = cost ×
+// ratio). A ratio of 1.0 bills at cost; 0 makes their usage free.
+func (r *UserRepo) SetPriceRatio(ctx context.Context, id int64, ratio float64) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE users SET price_ratio = $2, updated_at = NOW() WHERE id = $1`, id, ratio)
+	if err != nil {
+		return fmt.Errorf("set user %d price_ratio: %w", id, err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrUserNotFound

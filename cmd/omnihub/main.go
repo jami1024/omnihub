@@ -1031,11 +1031,11 @@ func buildLimiter() (*limits.Limiter, *limits.RPMCache) {
 			if err != nil {
 				return 0, err
 			}
-			cost, err := src.SumCostByUser(ctx, userID)
+			billed, err := src.SumBilledByUser(ctx, userID)
 			if err != nil {
 				return 0, err
 			}
-			return credits - cost, nil
+			return credits - billed, nil
 		})
 		l.SetBalanceGuard(limits.NewBalanceGuard(balSrc, spendCacheTTL))
 		slog.Info("prepaid balance billing enabled", "balance_cache_ttl", spendCacheTTL)

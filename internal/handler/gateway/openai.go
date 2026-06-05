@@ -173,6 +173,7 @@ func OpenAIChatCompletionsHandler(
 			if buffer != nil {
 				rec := buildMessageRequest(c, req, driver, account, &result, writeErr, startedAt)
 				rec.CostUSD = costUSD
+				rec.BilledUSD = billedUSD(c, costUSD)
 				rec.CostBreakdown = costBreakdown
 				buffer.Enqueue(rec)
 			}
