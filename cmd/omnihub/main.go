@@ -515,12 +515,17 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 	// Per-account spend caps: a background-refreshed guard skips
 	// accounts that have reached their daily / total USD limit. Requires
 	// a DB-backed spend source; stays disabled in log-only mode.
+	var accountGuard *limits.AccountGuard
 	if pool != nil {
-		accountGuard := limits.NewAccountGuard(repository.NewMessageRequestRepo(pool))
+		accountGuard = limits.NewAccountGuard(repository.NewMessageRequestRepo(pool))
 		accountGuard.Start(context.Background(), accountPool.All, accountSpendRefreshInterval)
 		res.SetSpendFilter(accountGuard)
 		slog.Info("per-account spend caps enabled", "refresh_interval", accountSpendRefreshInterval)
 	}
+
+	// Per-account observability gauges: circuit state + measured spend,
+	// read live from the tracker/guard at each /metrics scrape.
+	registerAccountGauges(tracker, accountPool, accountGuard)
 
 	// Active health probes: a background prober checks each opted-in
 	// account's upstream reachability and feeds the verdict into the same
@@ -757,6 +762,35 @@ func seedApiKeysFromEnv(ctx context.Context, repo *repository.ApiKeyRepo) (int, 
 // Unset falls back to session.DefaultTTL (5 minutes). The special
 // value "0" or "off" disables stickiness entirely. Malformed values
 // log a warning and fall back to the default.
+// registerAccountGauges installs the /metrics account gauge source. It
+// reads circuit state from the tracker and measured spend from the guard
+// (nil in log-only mode) for every account in the pool, on each scrape.
+func registerAccountGauges(tracker *health.Tracker, pool *account.Pool, guard *limits.AccountGuard) {
+	if tracker == nil || pool == nil {
+		return
+	}
+	src := func() []metrics.AccountGauge {
+		accs := pool.All()
+		out := make([]metrics.AccountGauge, 0, len(accs))
+		for _, a := range accs {
+			g := metrics.AccountGauge{
+				AccountName:  a.Name,
+				CircuitState: string(tracker.Snapshot(a.ID).State),
+			}
+			if guard != nil {
+				if spend, ok := guard.DailySpend(a.ID); ok {
+					g.SpendUSD, g.HasSpend = spend, true
+				}
+			}
+			out = append(out, g)
+		}
+		return out
+	}
+	if err := metrics.RegisterAccountGauges(src); err != nil {
+		slog.Warn("account gauges not registered", "err", err.Error())
+	}
+}
+
 // buildAlerter wires the circuit-breaker alerter from OMNIHUB_ALERT_*
 // env vars. Returns nil when no notifier URL is configured (alerting
 // stays off). pool resolves account ids to names in the alert text.

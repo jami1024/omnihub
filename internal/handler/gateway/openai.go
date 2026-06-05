@@ -17,6 +17,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/guard"
 	"github.com/jami1024/omnihub/internal/service/health"
 	"github.com/jami1024/omnihub/internal/service/limits"
+	"github.com/jami1024/omnihub/internal/service/metrics"
 	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/resolver"
@@ -124,6 +125,7 @@ func OpenAIChatCompletionsHandler(
 				slog.Warn("upstream dispatch failed; trying next account",
 					"account", account.Name, "attempt", attempt+1, "err", derr.Error())
 				attempted = append(attempted, account.ID)
+				metrics.IncFailover(driver.Name())
 				lastDriver, lastAccount, lastErr, lastBadStatus = driver, account, derr, 0
 				continue
 			}
@@ -137,6 +139,7 @@ func OpenAIChatCompletionsHandler(
 				slog.Warn("upstream returned retriable status; trying next account",
 					"account", account.Name, "attempt", attempt+1, "status", resp.StatusCode)
 				attempted = append(attempted, account.ID)
+				metrics.IncFailover(driver.Name())
 				lastDriver, lastAccount, lastBadStatus = driver, account, resp.StatusCode
 				lastErr = fmt.Errorf("upstream HTTP %d", resp.StatusCode)
 				continue

@@ -68,6 +68,23 @@ func (g *AccountGuard) OverLimit(a *provider.Account) bool {
 	return false
 }
 
+// DailySpend returns the last-measured rolling-24h USD spend for an
+// account id. The second result is false when the account has no measured
+// spend yet (no cap configured, or not refreshed). Intended for
+// observability (metrics gauges), not enforcement.
+func (g *AccountGuard) DailySpend(id int64) (float64, bool) {
+	if g == nil {
+		return 0, false
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	s, ok := g.spend[id]
+	if !ok {
+		return 0, false
+	}
+	return s.daily, true
+}
+
 // Refresh reloads spend for every account that has at least one cap
 // configured. Accounts without caps are skipped (no query) and dropped
 // from the map. A per-account query error is logged and leaves that
