@@ -2,11 +2,16 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrWalletUserNotFound is returned by AddEntry when user_id references a
+// user that does not exist (foreign-key violation).
+var ErrWalletUserNotFound = errors.New("wallet user not found")
 
 // WalletRepo persists the wallet_ledger table — the credit side of a
 // user's prepaid balance. Consumption is NOT stored here; it is derived
@@ -51,6 +56,9 @@ func (r *WalletRepo) AddEntry(ctx context.Context, userID int64, kind string, am
         INSERT INTO wallet_ledger (user_id, kind, amount_usd, note, created_by)
         VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''))`
 	if _, err := r.pool.Exec(ctx, q, userID, kind, amountUSD, note, createdBy); err != nil {
+		if isForeignKeyViolation(err) {
+			return ErrWalletUserNotFound
+		}
 		return fmt.Errorf("insert wallet entry for user %d: %w", userID, err)
 	}
 	return nil

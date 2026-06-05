@@ -12,6 +12,7 @@ const NAV = [
   { to: '/portal', labelKey: 'portalNav.overview' },
   { to: '/portal/requests', labelKey: 'portalNav.requests' },
   { to: '/portal/keys', labelKey: 'portalNav.apiKeys' },
+  { to: '/portal/wallet', labelKey: 'portalNav.wallet' },
 ]
 
 export function PortalLayout({ children }: { children: React.ReactNode }) {

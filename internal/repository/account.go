@@ -49,6 +49,13 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
+// isForeignKeyViolation reports whether err is a Postgres
+// foreign-key-constraint violation (SQLSTATE 23503).
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503"
+}
+
 // ListEnabled returns every row with enabled = TRUE. Disabled accounts
 // are excluded so the resolver sees only routable upstreams.
 func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, error) {

@@ -1,15 +1,19 @@
+import { useState } from 'react'
 import { Layout } from '../components/Layout'
+import { Modal } from '../components/Modal'
 import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { StatusBadge, Td, Th } from '../components/Table'
 import { ApiError } from '../lib/api'
 import { useI18n } from '../lib/i18n'
-import { useDeleteUser, useSetUserEnabled, useUsers, type AdminUser } from '../lib/users'
+import { useDeleteUser, useRechargeUser, useSetUserEnabled, useUsers, type AdminUser } from '../lib/users'
 
 export function UsersPage() {
   const { t } = useI18n()
   const { data: users, isLoading, error } = useUsers()
   const setEnabled = useSetUserEnabled()
   const del = useDeleteUser()
+  const recharge = useRechargeUser()
+  const [recharging, setRecharging] = useState<AdminUser | null>(null)
 
   const total = users?.length ?? 0
   const enabled = users?.filter((u) => u.enabled).length ?? 0
@@ -85,6 +89,12 @@ export function UsersPage() {
                     <Td className="text-muted">{new Date(u.created_at).toLocaleDateString()}</Td>
                     <Td className="text-right">
                       <button
+                        onClick={() => setRecharging(u)}
+                        className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
+                      >
+                        {t('users.recharge')}
+                      </button>
+                      <button
                         onClick={() => toggle(u)}
                         disabled={setEnabled.isPending}
                         className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline disabled:opacity-50"
@@ -116,6 +126,80 @@ export function UsersPage() {
           </div>
         )}
       </main>
+
+      {recharging && (
+        <Modal title={t('users.rechargeTitle', { name: recharging.username })} onClose={() => setRecharging(null)}>
+          <RechargeForm
+            submitting={recharge.isPending}
+            error={recharge.error instanceof ApiError ? recharge.error.message : null}
+            onCancel={() => setRecharging(null)}
+            onSubmit={(amount, note) =>
+              recharge.mutate(
+                { id: recharging.id, amount_usd: amount, note },
+                { onSuccess: () => setRecharging(null) },
+              )
+            }
+          />
+        </Modal>
+      )}
     </Layout>
+  )
+}
+
+function RechargeForm({
+  submitting,
+  error,
+  onCancel,
+  onSubmit,
+}: {
+  submitting: boolean
+  error: string | null
+  onCancel: () => void
+  onSubmit: (amount: number, note: string) => void
+}) {
+  const { t } = useI18n()
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+  const [localErr, setLocalErr] = useState<string | null>(null)
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setLocalErr(null)
+    const n = Number(amount.trim())
+    if (!Number.isFinite(n) || n <= 0) {
+      setLocalErr(t('users.rechargeAmountInvalid'))
+      return
+    }
+    onSubmit(n, note.trim())
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <label className="block space-y-1">
+        <span className="text-sm text-muted">{t('users.rechargeAmount')}</span>
+        <input
+          className="field"
+          type="number"
+          step="0.0001"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          autoFocus
+          placeholder="10.00"
+        />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-sm text-muted">{t('users.rechargeNote')}</span>
+        <input className="field" value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('users.rechargeNotePlaceholder')} />
+      </label>
+      {(localErr || error) && <p className="text-sm text-danger">{localErr ?? error}</p>}
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onCancel} className="btn btn-secondary">
+          {t('common.cancel')}
+        </button>
+        <button type="submit" disabled={submitting} className="btn btn-primary">
+          {submitting ? t('common.saving') : t('users.rechargeSubmit')}
+        </button>
+      </div>
+    </form>
   )
 }

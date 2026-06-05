@@ -16,6 +16,7 @@ import { PortalLoginPage } from './pages/portal/PortalLogin'
 import { PortalOverviewPage } from './pages/portal/PortalOverview'
 import { PortalKeysPage } from './pages/portal/PortalKeys'
 import { PortalRequestsPage } from './pages/portal/PortalRequests'
+import { PortalWalletPage } from './pages/portal/PortalWallet'
 
 // The admin Dashboard pulls in recharts (~180 kB gzip). Lazy-load it so
 // the charting library lands in its own chunk.
@@ -80,6 +81,7 @@ function PortalRoutes() {
       <Route path="" element={<PortalProtected><PortalOverviewPage /></PortalProtected>} />
       <Route path="keys" element={<PortalProtected><PortalKeysPage /></PortalProtected>} />
       <Route path="requests" element={<PortalProtected><PortalRequestsPage /></PortalProtected>} />
+      <Route path="wallet" element={<PortalProtected><PortalWalletPage /></PortalProtected>} />
       <Route path="*" element={<Navigate to="/portal" replace />} />
     </Routes>
   )

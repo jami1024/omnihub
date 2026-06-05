@@ -84,3 +84,20 @@ export function usePortalRequests(days: number, page: number) {
     placeholderData: (prev) => prev, // keep the table visible while paging
   })
 }
+
+export interface WalletEntry {
+  kind: string
+  amount_usd: number
+  note: string
+  created_at: string
+}
+export interface PortalWallet {
+  balance: number
+  credits: number
+  spent: number
+  entries: WalletEntry[]
+}
+
+export function usePortalWallet() {
+  return useQuery({ queryKey: ['portal-wallet'], queryFn: () => papi<PortalWallet>('/wallet') })
+}

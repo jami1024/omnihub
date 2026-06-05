@@ -31,3 +31,23 @@ export function useDeleteUser() {
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   })
 }
+
+export interface RechargeResult {
+  credits: number
+  spent: number
+  balance: number
+}
+
+// useRechargeUser applies a wallet credit (top-up / adjust / refund) to a
+// user and returns their new balance.
+export function useRechargeUser() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, amount_usd, note, kind }: { id: number; amount_usd: number; note?: string; kind?: string }) =>
+      api<RechargeResult>(`/users/${id}/recharge`, {
+        method: 'POST',
+        body: JSON.stringify({ amount_usd, note, kind }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  })
+}

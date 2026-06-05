@@ -301,6 +301,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	apiKeyRepo := repository.NewApiKeyRepo(pool)
 	blockedIPRepo := repository.NewBlockedIPRepo(pool)
 	messageRepo := repository.NewMessageRequestRepo(pool)
+	walletRepo := repository.NewWalletRepo(pool)
 	healthEventRepo := repository.NewAccountHealthEventRepo(pool)
 	adminAuth := guard.NewAdminAuthenticator(issuer)
 
@@ -399,6 +400,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	puser.POST("/keys", portalhandler.CreateKeyHandler(apiKeyRepo, portalSettingsRepo))
 	puser.DELETE("/keys/:id", portalhandler.DeleteKeyHandler(apiKeyRepo))
 	puser.GET("/usage", portalhandler.UsageHandler(messageRepo, apiKeyRepo))
+	puser.GET("/wallet", portalhandler.WalletHandler(walletRepo, messageRepo))
 	puser.GET("/requests", portalhandler.RequestsHandler(messageRepo, apiKeyRepo))
 
 	// M7 — admin oversight of portal users + the portal policy (signup
@@ -406,6 +408,10 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	authed.GET("/users", adminhandler.ListUsersHandler(userRepo))
 	authed.PATCH("/users/:id", adminhandler.UpdateUserHandler(userRepo))
 	authed.DELETE("/users/:id", adminhandler.DeleteUserHandler(userRepo))
+	// Prepaid wallet: view balance + ledger, and apply a credit (top-up /
+	// adjust / refund). Balance is enforced only when OMNIHUB_BILLING_ENABLED.
+	authed.GET("/users/:id/wallet", adminhandler.GetUserWalletHandler(walletRepo, messageRepo))
+	authed.POST("/users/:id/recharge", adminhandler.RechargeUserHandler(walletRepo, messageRepo))
 	authed.GET("/settings", adminhandler.GetSettingsHandler(portalSettingsRepo))
 	authed.PUT("/settings", adminhandler.UpdateSettingsHandler(portalSettingsRepo))
 
