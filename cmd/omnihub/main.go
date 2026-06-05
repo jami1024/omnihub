@@ -64,6 +64,7 @@ var (
 	apiKeyPool       *apikey.Pool
 	blockedIPPool    *blockedip.Pool
 	alertChannelPool *alertchannel.Pool
+	balanceGuard     *limits.BalanceGuard
 	pricePool        *pricing.Pool
 	priceRefresher   *pricesync.Refresher
 	accountCipher    *crypto.Cipher
@@ -402,7 +403,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	puser.DELETE("/keys/:id", portalhandler.DeleteKeyHandler(apiKeyRepo))
 	puser.GET("/usage", portalhandler.UsageHandler(messageRepo, apiKeyRepo))
 	puser.GET("/wallet", portalhandler.WalletHandler(walletRepo, messageRepo))
-	puser.POST("/redeem", portalhandler.RedeemHandler(redemptionRepo))
+	puser.POST("/redeem", portalhandler.RedeemHandler(redemptionRepo, balanceGuard))
 	puser.GET("/requests", portalhandler.RequestsHandler(messageRepo, apiKeyRepo))
 
 	// M7 — admin oversight of portal users + the portal policy (signup
@@ -413,7 +414,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	// Prepaid wallet: view balance + ledger, and apply a credit (top-up /
 	// adjust / refund). Balance is enforced only when OMNIHUB_BILLING_ENABLED.
 	authed.GET("/users/:id/wallet", adminhandler.GetUserWalletHandler(walletRepo, messageRepo))
-	authed.POST("/users/:id/recharge", adminhandler.RechargeUserHandler(walletRepo, messageRepo))
+	authed.POST("/users/:id/recharge", adminhandler.RechargeUserHandler(walletRepo, messageRepo, balanceGuard))
 	// Redemption (gift) codes: generate a batch, list batch summaries.
 	authed.GET("/redemptions", adminhandler.ListRedemptionsHandler(redemptionRepo))
 	authed.POST("/redemptions", adminhandler.GenerateRedemptionsHandler(redemptionRepo))
@@ -1037,7 +1038,8 @@ func buildLimiter() (*limits.Limiter, *limits.RPMCache) {
 			}
 			return credits - billed, nil
 		})
-		l.SetBalanceGuard(limits.NewBalanceGuard(balSrc, spendCacheTTL))
+		balanceGuard = limits.NewBalanceGuard(balSrc, spendCacheTTL)
+		l.SetBalanceGuard(balanceGuard)
 		slog.Info("prepaid balance billing enabled", "balance_cache_ttl", spendCacheTTL)
 	}
 	return l, rpm

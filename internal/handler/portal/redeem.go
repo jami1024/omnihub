@@ -19,10 +19,17 @@ type redeemStore interface {
 	Redeem(ctx context.Context, code string, userID int64) (float64, error)
 }
 
+// balanceCrediter folds a redeemed credit into the in-memory balance cache
+// so the user is unblocked immediately. Satisfied by *limits.BalanceGuard;
+// nil when billing is off.
+type balanceCrediter interface {
+	Credit(userID int64, usd float64)
+}
+
 // RedeemHandler handles POST /portal/api/redeem {code}: it credits the
 // authenticated user's wallet with the code's value. An invalid / used /
 // expired code returns 422 with a deliberately generic message.
-func RedeemHandler(store redeemStore) gin.HandlerFunc {
+func RedeemHandler(store redeemStore, crediter balanceCrediter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		uid := guard.UserID(c)
 		var in struct {
@@ -47,6 +54,9 @@ func RedeemHandler(store redeemStore) gin.HandlerFunc {
 			slog.Error("portal: redeem failed", "uid", uid, "err", err.Error())
 			writeInternal(c, "could not redeem code")
 			return
+		}
+		if crediter != nil {
+			crediter.Credit(uid, amount)
 		}
 		slog.Info("portal: code redeemed", "uid", uid, "amount", amount)
 		c.JSON(http.StatusOK, gin.H{"credited": amount})

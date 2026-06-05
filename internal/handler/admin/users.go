@@ -69,8 +69,8 @@ func UpdateUserHandler(store userMgmtStore) gin.HandlerFunc {
 			writeBadRequest(c, "provide enabled (true/false) and/or price_ratio (>= 0)")
 			return
 		}
-		if in.PriceRatio != nil && *in.PriceRatio < 0 {
-			writeBadRequest(c, "price_ratio must be >= 0")
+		if in.PriceRatio != nil && (*in.PriceRatio < 0 || *in.PriceRatio > 1000) {
+			writeBadRequest(c, "price_ratio must be between 0 and 1000")
 			return
 		}
 

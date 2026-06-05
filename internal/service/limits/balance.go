@@ -91,6 +91,15 @@ func (g *BalanceGuard) Balance(ctx context.Context, userID int64) (float64, erro
 
 // refresh reloads one user's balance in the background. On error the
 // entry is left intact (serving stale) and re-armed for a later retry.
+//
+// Known, bounded imprecision (matches SpendCache): the fresh DB value is
+// an absolute assignment, so a Charge that lands during the read window
+// — before its message_requests row is flushed — can be overwritten and
+// briefly under-counted. It self-corrects on the next refresh, so the
+// error is at most one refresh window (TTL) of one user's spend. Together
+// with the bal<=0 gate's TOCTOU (concurrent requests may each pass before
+// any Charge lands), this allows small, bounded overdraft — an accepted
+// trade-off for keeping the hot path lock-free and DB-free.
 func (g *BalanceGuard) refresh(userID int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), refreshTimeout)
 	defer cancel()
@@ -118,7 +127,7 @@ func (g *BalanceGuard) refresh(userID int64) {
 // user has no cached entry (the next Balance call seeds it from the DB,
 // which already reflects the cost via message_requests).
 func (g *BalanceGuard) Charge(userID int64, usd float64) {
-	if usd <= 0 {
+	if g == nil || usd <= 0 {
 		return
 	}
 	g.mu.Lock()
@@ -131,7 +140,7 @@ func (g *BalanceGuard) Charge(userID int64, usd float64) {
 // Credit folds a just-applied top-up into the cached balance so the
 // effect is immediate rather than waiting for the next refresh.
 func (g *BalanceGuard) Credit(userID int64, usd float64) {
-	if usd == 0 {
+	if g == nil || usd == 0 {
 		return
 	}
 	g.mu.Lock()

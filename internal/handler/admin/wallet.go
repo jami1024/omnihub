@@ -26,6 +26,13 @@ type userCostStore interface {
 	SumBilledByUser(ctx context.Context, userID int64) (float64, error)
 }
 
+// balanceCrediter folds a just-applied credit into the in-memory balance
+// cache so a topped-up user is unblocked immediately rather than after the
+// cache TTL. Satisfied by *limits.BalanceGuard; nil when billing is off.
+type balanceCrediter interface {
+	Credit(userID int64, usd float64)
+}
+
 type walletEntryDTO struct {
 	ID        int64     `json:"id"`
 	Kind      string    `json:"kind"`
@@ -53,7 +60,7 @@ func userBalance(ctx context.Context, wallet walletStore, cost userCostStore, us
 // RechargeUserHandler handles POST /admin/api/users/:id/recharge. Body:
 // {amount_usd, note?, kind?}. kind defaults to "topup"; "adjust" may be
 // negative. Returns the user's new credits/spent/balance.
-func RechargeUserHandler(wallet walletStore, cost userCostStore) gin.HandlerFunc {
+func RechargeUserHandler(wallet walletStore, cost userCostStore, crediter balanceCrediter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseIDParam(c)
 		if !ok {
@@ -93,6 +100,11 @@ func RechargeUserHandler(wallet walletStore, cost userCostStore) gin.HandlerFunc
 			slog.Error("admin: recharge failed", "id", id, "err", err.Error())
 			writeInternal(c, "could not apply credit")
 			return
+		}
+		// Reflect the credit in the live balance cache so the user is
+		// unblocked immediately, not after the cache TTL.
+		if crediter != nil {
+			crediter.Credit(id, in.AmountUSD)
 		}
 
 		credits, spent, balance, err := userBalance(c.Request.Context(), wallet, cost, id)
