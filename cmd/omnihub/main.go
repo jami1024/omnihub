@@ -33,6 +33,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/health"
 	"github.com/jami1024/omnihub/internal/service/healthlog"
 	"github.com/jami1024/omnihub/internal/service/limits"
+	"github.com/jami1024/omnihub/internal/service/metrics"
 	"github.com/jami1024/omnihub/internal/service/pricesync"
 	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
@@ -241,6 +242,12 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 	r.GET("/healthz", handleHealth)
 	r.GET("/readyz", handleReady)
 	r.GET("/version", handleVersion)
+
+	// Prometheus metrics. Optionally guarded by a bearer token
+	// (OMNIHUB_METRICS_TOKEN); when unset the endpoint is open and should
+	// be restricted at the reverse proxy. Mounted unconditionally so
+	// scrapers get a stable target even before any gateway traffic.
+	r.GET("/metrics", gin.WrapH(metrics.Handler(os.Getenv("OMNIHUB_METRICS_TOKEN"))))
 
 	// mountGatewayRoutes builds the in-memory circuit-breaker Tracker;
 	// hand it to the admin routes so the dashboard can read live breaker

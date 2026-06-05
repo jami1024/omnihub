@@ -163,6 +163,8 @@ func OpenAIChatCompletionsHandler(
 				}
 			}
 
+			emitMetrics(driver.Name(), req.Model, &result, costUSD, startedAt)
+
 			chargeIPTokenBudget(c, blockedIPs, &result)
 
 			if buffer != nil {

@@ -29,6 +29,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/guard"
 	"github.com/jami1024/omnihub/internal/service/health"
 	"github.com/jami1024/omnihub/internal/service/limits"
+	"github.com/jami1024/omnihub/internal/service/metrics"
 	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/resolver"
@@ -257,6 +258,8 @@ func AnthropicMessagesHandler(
 				}
 			}
 
+			emitMetrics(driver.Name(), req.Model, &result, costUSD, startedAt)
+
 			// Charge the per-IP TPM bucket for the fresh-input tokens
 			// this request actually consumed. The middleware admitted
 			// the request based on the pre-existing budget; this is
@@ -336,6 +339,8 @@ func recordNoUpstreamRejection(
 	buffer *repository.WriteBuffer,
 	startedAt time.Time,
 ) {
+	emitMetrics("-", req.Model, &forward.Result{StatusCode: http.StatusServiceUnavailable}, nil, startedAt)
+
 	if buffer == nil {
 		return
 	}
@@ -373,6 +378,43 @@ func recordNoUpstreamRejection(
 // surfaced via Result.ErrorBody so buildMessageRequest stores it in
 // the error_message column rather than the generic "upstream HTTP N"
 // string.
+// emitMetrics folds one committed/terminal response into the Prometheus
+// gateway metrics. It is deliberately independent of the WriteBuffer so
+// metrics are emitted even in log-only mode. costUSD is nil when the
+// model is unpriced; result may carry a zero TTFB / usage for failures.
+func emitMetrics(providerName, requestedModel string, result *forward.Result, costUSD *float64, startedAt time.Time) {
+	model := requestedModel
+	cost := 0.0
+	var (
+		status int
+		ttfb   time.Duration
+		inTok  int64
+		outTok int64
+	)
+	if result != nil {
+		status = result.StatusCode
+		ttfb = result.TTFB
+		inTok = result.Usage.InputTokens
+		outTok = result.Usage.OutputTokens
+		if result.Usage.ActualModel != "" {
+			model = result.Usage.ActualModel
+		}
+	}
+	if costUSD != nil {
+		cost = *costUSD
+	}
+	metrics.Record(metrics.Sample{
+		Provider:     providerName,
+		Model:        model,
+		Status:       status,
+		Duration:     time.Since(startedAt),
+		TTFB:         ttfb,
+		InputTokens:  inTok,
+		OutputTokens: outTok,
+		CostUSD:      cost,
+	})
+}
+
 func recordExhaustedFailure(
 	c *gin.Context,
 	req *ir.UnifiedRequest,
@@ -384,10 +426,16 @@ func recordExhaustedFailure(
 	err error,
 	body []byte,
 ) {
+	providerName := "unknown"
+	if driver != nil {
+		providerName = driver.Name()
+	}
+	result := forward.Result{StatusCode: status, ErrorBody: body}
+	emitMetrics(providerName, req.Model, &result, nil, startedAt)
+
 	if buffer == nil || account == nil || driver == nil {
 		return
 	}
-	result := forward.Result{StatusCode: status, ErrorBody: body}
 	rec := buildMessageRequest(c, req, driver, account, &result, err, startedAt)
 	buffer.Enqueue(rec)
 }
