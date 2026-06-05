@@ -2,6 +2,7 @@ import { Suspense, lazy } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { PortalAuthProvider, usePortalAuth } from './lib/portalAuth'
+import { LandingPage } from './pages/Landing'
 import { LoginPage } from './pages/Login'
 import { AccountsPage } from './pages/Accounts'
 import { GroupsPage } from './pages/Groups'
@@ -31,6 +32,8 @@ const DashboardPage = lazy(() =>
 export default function App() {
   return (
     <Routes>
+      {/* Marketing landing at the bare domain. */}
+      <Route path="/" element={<LandingPage />} />
       {/* Admin console */}
       <Route
         path="/admin/*"
@@ -49,7 +52,7 @@ export default function App() {
           </PortalAuthProvider>
         }
       />
-      {/* Bare domain → the user-facing portal. */}
+      {/* Any other unknown path → the user-facing portal. */}
       <Route path="*" element={<Navigate to="/portal" replace />} />
     </Routes>
   )
