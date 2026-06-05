@@ -87,6 +87,12 @@ services:
       # Prepaid-balance billing: when true, a portal-owned key whose
       # balance has reached zero is rejected with 402. Off by default.
       OMNIHUB_BILLING_ENABLED: ${OMNIHUB_BILLING_ENABLED:-false}
+      # Observability + alerting (see deploy/.env.example).
+      OMNIHUB_METRICS_TOKEN: ${OMNIHUB_METRICS_TOKEN:-}
+      OMNIHUB_ALERT_WEBHOOK_URL: ${OMNIHUB_ALERT_WEBHOOK_URL:-}
+      OMNIHUB_ALERT_FEISHU_URL: ${OMNIHUB_ALERT_FEISHU_URL:-}
+      OMNIHUB_ALERT_DINGTALK_URL: ${OMNIHUB_ALERT_DINGTALK_URL:-}
+      OMNIHUB_ALERT_THROTTLE: ${OMNIHUB_ALERT_THROTTLE:-}
       # Caddy is the only proxy in front; trust its container so
       # X-Forwarded-For survives. The "172.16.0.0/12" CIDR covers the
       # default Docker bridge network range.
