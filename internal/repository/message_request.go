@@ -168,6 +168,24 @@ func (r *MessageRequestRepo) SumCostByKey(ctx context.Context, keyName string) (
 	return total, nil
 }
 
+// SumCostByUser returns the LIFETIME request cost across every key owned
+// by a portal user, joining api_keys on key_name. Used to derive a
+// prepaid balance (credits minus this). Lifetime (not a rolling window)
+// because prepaid credits are themselves lifetime.
+func (r *MessageRequestRepo) SumCostByUser(ctx context.Context, userID int64) (float64, error) {
+	var total float64
+	err := r.pool.QueryRow(ctx, `
+        SELECT COALESCE(SUM(mr.cost_usd), 0)::float8
+          FROM message_requests mr
+          JOIN api_keys k ON k.name = mr.key_name
+         WHERE k.user_id = $1`,
+		userID).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("sum cost for user %d: %w", userID, err)
+	}
+	return total, nil
+}
+
 // SumCostByAccount returns the rolling 24h USD spend recorded against
 // the named upstream account. Mirrors SumCostByKey but groups on
 // account_name; used to enforce per-account daily spend caps.

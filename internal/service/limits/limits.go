@@ -36,9 +36,15 @@ func (r *Reject) Error() string { return r.Message }
 // share it across the gateway — the caches inside are safe for
 // concurrent use.
 type Limiter struct {
-	cache *SpendCache
-	rpm   *RPMCache
+	cache   *SpendCache
+	rpm     *RPMCache
+	balance *BalanceGuard // nil = prepaid-balance billing disabled
 }
+
+// SetBalanceGuard enables prepaid-balance enforcement: a key owned by a
+// portal user (Key.UserID != nil) whose balance has reached zero is
+// rejected. Pass nil (the default) to keep billing off.
+func (l *Limiter) SetBalanceGuard(g *BalanceGuard) { l.balance = g }
 
 // New returns a Limiter. A nil spend cache disables the daily USD
 // check (useful in tests, or when running without a DB-backed
@@ -89,6 +95,25 @@ func (l *Limiter) Check(ctx context.Context, k *apikey.Key, model string) *Rejec
 		}
 	}
 
+	// Prepaid balance gate (when billing is enabled). Runs for every key
+	// with a portal owner, independent of any daily cap. Fail-open on a
+	// source/DB error, same rationale as the daily cap below.
+	if l.balance != nil && k.UserID != nil {
+		bal, err := l.balance.Balance(ctx, *k.UserID)
+		if err != nil {
+			slog.Warn("balance check failed; request allowed",
+				"key", k.Name, "err", err.Error())
+		} else if bal <= 0 {
+			return &Reject{
+				Status: 402,
+				Type:   "insufficient_balance",
+				Message: fmt.Sprintf(
+					"key %q has no remaining prepaid balance ($%.4f); please top up to continue",
+					k.Name, bal),
+			}
+		}
+	}
+
 	if k.DailyUSDLimit == nil || l.cache == nil {
 		return nil
 	}
@@ -111,15 +136,21 @@ func (l *Limiter) Check(ctx context.Context, k *apikey.Key, model string) *Rejec
 	return nil
 }
 
-// RecordSpend folds the cost of a just-completed request into the
-// cache so the next request against the same key sees up-to-date
-// data, without waiting for the WriteBuffer flush or the cache TTL.
-// Safe to call with a nil Limiter or a zero-cost request.
-func (l *Limiter) RecordSpend(keyName string, usd float64) {
-	if l == nil || l.cache == nil {
+// RecordSpend folds the cost of a just-completed request into the per-key
+// spend cache and, when billing is enabled and the key has a portal owner,
+// debits that user's prepaid balance — so the next request sees
+// up-to-date data without waiting for the WriteBuffer flush or a TTL
+// refresh. Safe to call with a nil Limiter / key or a zero-cost request.
+func (l *Limiter) RecordSpend(k *apikey.Key, usd float64) {
+	if l == nil || k == nil || usd <= 0 {
 		return
 	}
-	l.cache.Add(keyName, usd)
+	if l.cache != nil {
+		l.cache.Add(k.Name, usd)
+	}
+	if l.balance != nil && k.UserID != nil {
+		l.balance.Charge(*k.UserID, usd)
+	}
 }
 
 // modelAllowed returns true when allow is empty (no restriction) or

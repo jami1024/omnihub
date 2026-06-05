@@ -1002,12 +1002,40 @@ func buildLimiter() (*limits.Limiter, *limits.RPMCache) {
 	}
 	src := repository.NewMessageRequestRepo(pool)
 	cache := limits.NewSpendCache(src, spendCacheTTL)
+	l := limits.New(cache, rpm)
 	slog.Info("per-key limits enabled",
 		"spend_cache_ttl", spendCacheTTL,
 		"daily_window", "24h rolling",
 		"rpm_enforcement", "in-process token bucket",
 	)
-	return limits.New(cache, rpm), rpm
+
+	// Prepaid-balance billing is opt-in (OMNIHUB_BILLING_ENABLED). Off by
+	// default so deploying the code never starts rejecting existing portal
+	// users (who would otherwise have a zero balance). Balance = lifetime
+	// wallet credits minus lifetime request cost, cached like spend.
+	if billingEnabled() {
+		wallet := repository.NewWalletRepo(pool)
+		balSrc := limits.BalanceFunc(func(ctx context.Context, userID int64) (float64, error) {
+			credits, err := wallet.Credits(ctx, userID)
+			if err != nil {
+				return 0, err
+			}
+			cost, err := src.SumCostByUser(ctx, userID)
+			if err != nil {
+				return 0, err
+			}
+			return credits - cost, nil
+		})
+		l.SetBalanceGuard(limits.NewBalanceGuard(balSrc, spendCacheTTL))
+		slog.Info("prepaid balance billing enabled", "balance_cache_ttl", spendCacheTTL)
+	}
+	return l, rpm
+}
+
+// billingEnabled reports whether prepaid-balance enforcement is on.
+func billingEnabled() bool {
+	b, _ := strconv.ParseBool(os.Getenv("OMNIHUB_BILLING_ENABLED"))
+	return b
 }
 
 // buildDriverRegistry registers every built-in driver. Adding a new

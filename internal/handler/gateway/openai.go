@@ -161,7 +161,7 @@ func OpenAIChatCompletionsHandler(
 				c.Set(guard.CtxKeyCostUSD, *costUSD)
 				if limiter != nil {
 					if k := guard.APIKey(c); k != nil {
-						limiter.RecordSpend(k.Name, *costUSD)
+						limiter.RecordSpend(k, *costUSD)
 					}
 				}
 			}

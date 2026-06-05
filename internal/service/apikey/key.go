@@ -26,6 +26,7 @@ type Key struct {
 	DailyUSDLimit *float64
 	RPMLimit      *int
 	AllowedModels []string // nil / empty = all models
+	UserID        *int64   // owning portal user; nil for admin/system keys
 }
 
 // HashOf computes the canonical key hash. Both the CLI's "key add"

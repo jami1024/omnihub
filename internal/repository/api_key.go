@@ -40,7 +40,7 @@ var ErrApiKeyNameTaken = errors.New("api key name already in use")
 func (r *ApiKeyRepo) ListEnabled(ctx context.Context) ([]*apikey.Key, error) {
 	const q = `
         SELECT id, name, key_hash, COALESCE(label, ''),
-               daily_usd_limit, rpm_limit, allowed_models
+               daily_usd_limit, rpm_limit, allowed_models, user_id
           FROM api_keys
          WHERE enabled = TRUE
          ORDER BY id ASC`
@@ -343,15 +343,17 @@ func scanApiKey(rows interface{ Scan(...any) error }) (*apikey.Key, error) {
 		allowedJSON []byte
 		dailyLimit  *float64
 		rpmLimit    *int
+		userID      *int64
 	)
 	if err := rows.Scan(
 		&k.ID, &k.Name, &k.Hash, &k.Label,
-		&dailyLimit, &rpmLimit, &allowedJSON,
+		&dailyLimit, &rpmLimit, &allowedJSON, &userID,
 	); err != nil {
 		return nil, fmt.Errorf("scan api_key: %w", err)
 	}
 	k.DailyUSDLimit = dailyLimit
 	k.RPMLimit = rpmLimit
+	k.UserID = userID
 	if err := decodeAllowedModels(&k, allowedJSON); err != nil {
 		return nil, err
 	}

@@ -128,7 +128,7 @@ func TestRecordSpend_FoldsIntoCachedTotal(t *testing.T) {
 	}
 	// Simulate a completed request worth $4.50; should push us past the
 	// $5.00 cap WITHOUT another DB query.
-	l.RecordSpend("alice", 4.50)
+	l.RecordSpend(keyWith("alice", 5.00, nil), 4.50)
 
 	if r := l.Check(ctx, keyWith("alice", 5.00, nil), "m"); r == nil {
 		t.Fatal("expected reject after RecordSpend pushed over cap")
