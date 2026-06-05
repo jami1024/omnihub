@@ -84,6 +84,9 @@ services:
       OMNIHUB_HEALTH_PROBE_INTERVAL: ${OMNIHUB_HEALTH_PROBE_INTERVAL:-}
       OMNIHUB_HEALTH_PROBE_CONCURRENCY: ${OMNIHUB_HEALTH_PROBE_CONCURRENCY:-}
       OMNIHUB_SESSION_TTL: ${OMNIHUB_SESSION_TTL:-}
+      # Prepaid-balance billing: when true, a portal-owned key whose
+      # balance has reached zero is rejected with 402. Off by default.
+      OMNIHUB_BILLING_ENABLED: ${OMNIHUB_BILLING_ENABLED:-false}
       # Caddy is the only proxy in front; trust its container so
       # X-Forwarded-For survives. The "172.16.0.0/12" CIDR covers the
       # default Docker bridge network range.
