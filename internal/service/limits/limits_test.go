@@ -3,6 +3,7 @@ package limits
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,17 +11,35 @@ import (
 )
 
 type stubSource struct {
+	mu     sync.Mutex
 	calls  int
 	values map[string]float64
 	err    error
 }
 
 func (s *stubSource) SumCostByKey(_ context.Context, name string) (float64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls++
 	if s.err != nil {
 		return 0, s.err
 	}
 	return s.values[name], nil
+}
+
+// set updates a stubbed value under lock — the cache may read it from a
+// background refresh goroutine concurrently with the test mutating it.
+func (s *stubSource) set(name string, v float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.values[name] = v
+}
+
+// callCount returns how many times the source was queried, under lock.
+func (s *stubSource) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
 }
 
 func keyWith(name string, dailyUSD float64, models []string) *apikey.Key {
@@ -114,8 +133,8 @@ func TestRecordSpend_FoldsIntoCachedTotal(t *testing.T) {
 	if r := l.Check(ctx, keyWith("alice", 5.00, nil), "m"); r == nil {
 		t.Fatal("expected reject after RecordSpend pushed over cap")
 	}
-	if src.calls != 1 {
-		t.Fatalf("source queries = %d, want 1 (in-memory increment should not re-query)", src.calls)
+	if n := src.callCount(); n != 1 {
+		t.Fatalf("source queries = %d, want 1 (in-memory increment should not re-query)", n)
 	}
 }
 
@@ -127,14 +146,27 @@ func TestSpendCache_RefreshesAfterTTL(t *testing.T) {
 	if v, _ := cache.Spend(ctx, "alice"); v != 1.00 {
 		t.Fatalf("first read = %.2f, want 1.00", v)
 	}
-	src.values["alice"] = 2.50
-	// Within TTL: stale value still returned.
+	src.set("alice", 2.50)
+	// Within TTL: cached value still returned.
 	if v, _ := cache.Spend(ctx, "alice"); v != 1.00 {
 		t.Fatalf("cached read = %.2f, want 1.00", v)
 	}
 	time.Sleep(15 * time.Millisecond)
-	if v, _ := cache.Spend(ctx, "alice"); v != 2.50 {
-		t.Fatalf("post-TTL read = %.2f, want 2.50", v)
+	// Post-TTL: stale-while-revalidate serves the OLD value immediately
+	// (never blocks on the source) and kicks off a background refresh.
+	if v, _ := cache.Spend(ctx, "alice"); v != 1.00 {
+		t.Fatalf("stale read = %.2f, want 1.00 (served while revalidating)", v)
+	}
+	// The background refresh lands shortly; a later read sees 2.50.
+	deadline := time.Now().Add(time.Second)
+	for {
+		if v, _ := cache.Spend(ctx, "alice"); v == 2.50 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("background refresh did not update the cache to 2.50")
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }
 
