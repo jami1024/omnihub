@@ -7,6 +7,7 @@ import { AccountsPage } from './pages/Accounts'
 import { GroupsPage } from './pages/Groups'
 import { KeysPage } from './pages/Keys'
 import { BlockedIPsPage } from './pages/BlockedIPs'
+import { AlertChannelsPage } from './pages/AlertChannels'
 import { HealthPage } from './pages/Health'
 import { PricesPage } from './pages/Prices'
 import { UsersPage } from './pages/Users'
@@ -61,6 +62,7 @@ function AdminRoutes() {
       <Route path="groups" element={<AdminProtected><GroupsPage /></AdminProtected>} />
       <Route path="keys" element={<AdminProtected><KeysPage /></AdminProtected>} />
       <Route path="blocked-ips" element={<AdminProtected><BlockedIPsPage /></AdminProtected>} />
+      <Route path="alert-channels" element={<AdminProtected><AlertChannelsPage /></AdminProtected>} />
       <Route path="health" element={<AdminProtected><HealthPage /></AdminProtected>} />
       <Route path="prices" element={<AdminProtected><PricesPage /></AdminProtected>} />
       <Route path="users" element={<AdminProtected><UsersPage /></AdminProtected>} />

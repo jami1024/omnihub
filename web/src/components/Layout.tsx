@@ -15,6 +15,7 @@ const NAV = [
   { to: '/admin/groups', labelKey: 'nav.groups' },
   { to: '/admin/keys', labelKey: 'nav.keys' },
   { to: '/admin/blocked-ips', labelKey: 'nav.blockedIps' },
+  { to: '/admin/alert-channels', labelKey: 'nav.alertChannels' },
   { to: '/admin/health', labelKey: 'nav.health' },
   { to: '/admin/prices', labelKey: 'nav.prices' },
   { to: '/admin/users', labelKey: 'nav.users' },

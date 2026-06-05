@@ -27,6 +27,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/account"
 	"github.com/jami1024/omnihub/internal/service/admin"
 	"github.com/jami1024/omnihub/internal/service/alert"
+	"github.com/jami1024/omnihub/internal/service/alertchannel"
 	"github.com/jami1024/omnihub/internal/service/apikey"
 	"github.com/jami1024/omnihub/internal/service/blockedip"
 	"github.com/jami1024/omnihub/internal/service/forward"
@@ -57,14 +58,15 @@ var (
 // degradation: no pool / buffer means log-only mode and the gateway
 // will not mount /v1/messages.
 var (
-	pool           *pgxpool.Pool
-	writeBuffer    *repository.WriteBuffer
-	accountPool    *account.Pool
-	apiKeyPool     *apikey.Pool
-	blockedIPPool  *blockedip.Pool
-	pricePool      *pricing.Pool
-	priceRefresher *pricesync.Refresher
-	accountCipher  *crypto.Cipher
+	pool             *pgxpool.Pool
+	writeBuffer      *repository.WriteBuffer
+	accountPool      *account.Pool
+	apiKeyPool       *apikey.Pool
+	blockedIPPool    *blockedip.Pool
+	alertChannelPool *alertchannel.Pool
+	pricePool        *pricing.Pool
+	priceRefresher   *pricesync.Refresher
+	accountCipher    *crypto.Cipher
 )
 
 const accountPoolRefreshInterval = 30 * time.Second
@@ -166,6 +168,10 @@ func runGateway() {
 	}
 	if err := setupBlockedIPPool(rootCtx); err != nil {
 		slog.Error("blocked_ips pool init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := setupAlertChannelPool(rootCtx); err != nil {
+		slog.Error("alert_channels pool init failed", "err", err)
 		os.Exit(1)
 	}
 	if err := setupPricePool(rootCtx); err != nil {
@@ -350,6 +356,16 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	authed.PATCH("/blocked-ips/:ip", adminhandler.UpdateBlockedIPHandler(blockedIPRepo))
 	authed.DELETE("/blocked-ips/:ip", adminhandler.DeleteBlockedIPHandler(blockedIPRepo))
 
+	// Alert channels: writes flow through the alert_channels NOTIFY
+	// trigger (migration 0026) so the in-memory channel pool the Alerter
+	// delivers through refreshes within milliseconds. url is encrypted.
+	alertChannelRepo := repository.NewAlertChannelRepo(pool, accountCipher)
+	authed.GET("/alert-channels", adminhandler.ListAlertChannelsHandler(alertChannelRepo))
+	authed.POST("/alert-channels", adminhandler.CreateAlertChannelHandler(alertChannelRepo))
+	authed.PATCH("/alert-channels/:id", adminhandler.UpdateAlertChannelHandler(alertChannelRepo))
+	authed.DELETE("/alert-channels/:id", adminhandler.DeleteAlertChannelHandler(alertChannelRepo))
+	authed.POST("/alert-channels/:id/test", adminhandler.TestAlertChannelHandler(alertChannelRepo))
+
 	// M4 — usage dashboard. Read-only aggregation over message_requests.
 	authed.GET("/usage", adminhandler.UsageHandler(messageRepo))
 
@@ -493,7 +509,7 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 	// DingTalk) when an account's breaker trips OPEN or recovers. Off
 	// unless at least one OMNIHUB_ALERT_*_URL is set. Works without a DB
 	// (it only needs the in-memory account pool for names).
-	if alerter := buildAlerter(accountPool); alerter != nil {
+	if alerter := buildAlerter(accountPool, alertChannelPool); alerter != nil {
 		alerter.Start(context.Background())
 		transitionHandlers = append(transitionHandlers, alerter.Handler)
 		slog.Info("circuit-breaker alerting enabled", "channels", alerter.NotifierNames())
@@ -638,6 +654,28 @@ func setupBlockedIPPool(ctx context.Context) error {
 		"size", blockedIPPool.Size(),
 		"refresh_interval", accountPoolRefreshInterval,
 		"notify_channel", blockedip.DefaultNotifyChannel,
+	)
+	return nil
+}
+
+// setupAlertChannelPool wires the in-memory alert-channel pool against the
+// DB, hot-reloaded on the alert_channels NOTIFY trigger (migration 0026).
+// A nil DB pool degrades to a no-op (env-configured alert channels still
+// work).
+func setupAlertChannelPool(ctx context.Context) error {
+	if pool == nil {
+		return nil
+	}
+	repo := repository.NewAlertChannelRepo(pool, accountCipher)
+	alertChannelPool = alertchannel.NewPool(repo)
+	if err := alertChannelPool.Start(ctx, accountPoolRefreshInterval); err != nil {
+		return err
+	}
+	alertchannel.NewListener(pool, "", alertChannelPool.Refresh).Start(ctx)
+	slog.Info("alert_channels pool ready",
+		"size", alertChannelPool.Size(),
+		"refresh_interval", accountPoolRefreshInterval,
+		"notify_channel", alertchannel.DefaultNotifyChannel,
 	)
 	return nil
 }
@@ -791,17 +829,33 @@ func registerAccountGauges(tracker *health.Tracker, pool *account.Pool, guard *l
 	}
 }
 
-// buildAlerter wires the circuit-breaker alerter from OMNIHUB_ALERT_*
-// env vars. Returns nil when no notifier URL is configured (alerting
-// stays off). pool resolves account ids to names in the alert text.
-func buildAlerter(pool *account.Pool) *alert.Alerter {
-	cfg := alert.Config{
+// buildAlerter wires the circuit-breaker alerter. Its notifier set is the
+// union of the static OMNIHUB_ALERT_* env channels and the DB-backed
+// channel pool (managed from the admin UI), resolved live on each
+// delivery. Returns nil only when there are no env channels AND no DB
+// pool (alerting fully off). pool resolves account ids to names.
+func buildAlerter(pool *account.Pool, channelPool *alertchannel.Pool) *alert.Alerter {
+	envNotifiers := alert.Config{
 		WebhookURL:  os.Getenv("OMNIHUB_ALERT_WEBHOOK_URL"),
 		FeishuURL:   os.Getenv("OMNIHUB_ALERT_FEISHU_URL"),
 		DingTalkURL: os.Getenv("OMNIHUB_ALERT_DINGTALK_URL"),
-		Throttle:    loadAlertThrottle(),
+	}.Notifiers()
+	if len(envNotifiers) == 0 && channelPool == nil {
+		return nil
 	}
-	return alert.New(cfg.Notifiers(), pool, cfg.Throttle)
+	source := func() []alert.Notifier {
+		ns := make([]alert.Notifier, 0, len(envNotifiers)+2)
+		ns = append(ns, envNotifiers...)
+		if channelPool != nil {
+			for _, ch := range channelPool.Enabled() {
+				if n, ok := alert.NotifierFor(ch.Type, ch.URL); ok {
+					ns = append(ns, n)
+				}
+			}
+		}
+		return ns
+	}
+	return alert.New(source, pool, loadAlertThrottle())
 }
 
 // loadAlertThrottle parses OMNIHUB_ALERT_THROTTLE (a Go duration); 0 lets

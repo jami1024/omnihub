@@ -57,6 +57,17 @@ func (e Event) throttleKey() string {
 	return fmt.Sprintf("%s|%d", e.Title, e.AccountID)
 }
 
+// TestEvent builds a synthetic alert for the admin "test send" action so
+// an operator can verify a channel before relying on it.
+func TestEvent(channelName string) Event {
+	return Event{
+		Level: LevelInfo,
+		Title: "test alert",
+		Text:  fmt.Sprintf("Test alert from OmniHub for channel %q. If you can read this, delivery works.", channelName),
+		At:    time.Now(),
+	}
+}
+
 // Notifier delivers an Event to one external channel. Implementations
 // must be safe for concurrent use.
 type Notifier interface {
@@ -64,12 +75,15 @@ type Notifier interface {
 	Name() string
 }
 
-// Alerter fans health transitions out to notifiers asynchronously.
+// Alerter fans health transitions out to notifiers asynchronously. The
+// notifier set is resolved from source on each delivery, so channels
+// added or disabled at runtime (via the DB-backed pool) take effect
+// without a restart.
 type Alerter struct {
-	notifiers []Notifier
-	pool      *account.Pool // resolves account names; may be nil
-	throttle  time.Duration
-	now       func() time.Time
+	source   func() []Notifier
+	pool     *account.Pool // resolves account names; may be nil
+	throttle time.Duration
+	now      func() time.Time
 
 	ch      chan Event
 	stop    chan struct{}
@@ -80,33 +94,35 @@ type Alerter struct {
 	lastSent map[string]time.Time
 }
 
-// New builds an Alerter over the given notifiers. Returns nil when no
-// notifiers are configured, so callers can treat "alerting disabled" as
-// a nil Alerter. pool may be nil (account names degrade to the numeric
-// id). A throttle of 0 uses defaultThrottle.
-func New(notifiers []Notifier, pool *account.Pool, throttle time.Duration) *Alerter {
-	if len(notifiers) == 0 {
+// New builds an Alerter whose notifier set comes from source (evaluated
+// per delivery). Returns nil when source is nil, so callers can treat
+// "alerting disabled" as a nil Alerter. pool may be nil (account names
+// degrade to the numeric id). A throttle of 0 uses defaultThrottle.
+func New(source func() []Notifier, pool *account.Pool, throttle time.Duration) *Alerter {
+	if source == nil {
 		return nil
 	}
 	if throttle <= 0 {
 		throttle = defaultThrottle
 	}
 	return &Alerter{
-		notifiers: notifiers,
-		pool:      pool,
-		throttle:  throttle,
-		now:       time.Now,
-		ch:        make(chan Event, queueSize),
-		stop:      make(chan struct{}),
-		stopped:   make(chan struct{}),
-		lastSent:  make(map[string]time.Time),
+		source:   source,
+		pool:     pool,
+		throttle: throttle,
+		now:      time.Now,
+		ch:       make(chan Event, queueSize),
+		stop:     make(chan struct{}),
+		stopped:  make(chan struct{}),
+		lastSent: make(map[string]time.Time),
 	}
 }
 
-// NotifierNames lists the configured channels, for startup logging.
+// NotifierNames lists the currently-resolved channels, for startup
+// logging. The set may grow/shrink later as channels are managed at runtime.
 func (a *Alerter) NotifierNames() []string {
-	names := make([]string, 0, len(a.notifiers))
-	for _, n := range a.notifiers {
+	ns := a.source()
+	names := make([]string, 0, len(ns))
+	for _, n := range ns {
 		names = append(names, n.Name())
 	}
 	return names
@@ -227,10 +243,10 @@ func (a *Alerter) drain(ctx context.Context) {
 	}
 }
 
-// deliver sends one event to every notifier. A failing notifier is logged
-// but does not block the others.
+// deliver sends one event to every currently-configured notifier. A
+// failing notifier is logged but does not block the others.
 func (a *Alerter) deliver(ctx context.Context, e Event) {
-	for _, n := range a.notifiers {
+	for _, n := range a.source() {
 		sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
 		if err := n.Send(sendCtx, e); err != nil {
 			slog.Error("alert delivery failed",

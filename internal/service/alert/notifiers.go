@@ -39,6 +39,22 @@ func postJSON(ctx context.Context, url string, body any) error {
 	return nil
 }
 
+// NotifierFor builds the notifier for a channel kind + url. The second
+// result is false for an unknown kind. Shared by the DB-backed channel
+// pool and the admin test-send path so both honour the same type set.
+func NotifierFor(kind, url string) (Notifier, bool) {
+	switch kind {
+	case "webhook":
+		return WebhookNotifier{URL: url}, true
+	case "feishu":
+		return FeishuNotifier{URL: url}, true
+	case "dingtalk":
+		return DingTalkNotifier{URL: url}, true
+	default:
+		return nil, false
+	}
+}
+
 // WebhookNotifier posts a structured JSON document to a generic endpoint.
 type WebhookNotifier struct{ URL string }
 

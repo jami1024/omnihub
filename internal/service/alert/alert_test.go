@@ -27,6 +27,11 @@ func (f *fakeNotifier) Send(_ context.Context, e Event) error {
 	return nil
 }
 
+// staticSource wraps fixed notifiers as a NotifierSource for tests.
+func staticSource(ns ...Notifier) func() []Notifier {
+	return func() []Notifier { return ns }
+}
+
 func openTransition(id int64) health.Transition {
 	return health.Transition{
 		AccountID:    id,
@@ -37,15 +42,26 @@ func openTransition(id int64) health.Transition {
 	}
 }
 
-func TestNewReturnsNilWithoutNotifiers(t *testing.T) {
+func TestNewReturnsNilWithoutSource(t *testing.T) {
 	if a := New(nil, nil, 0); a != nil {
-		t.Fatal("New with no notifiers should return nil")
+		t.Fatal("New with a nil source should return nil")
+	}
+}
+
+func TestNotifierFor(t *testing.T) {
+	for _, kind := range []string{"webhook", "feishu", "dingtalk"} {
+		if _, ok := NotifierFor(kind, "http://x"); !ok {
+			t.Errorf("NotifierFor(%q) not recognised", kind)
+		}
+	}
+	if _, ok := NotifierFor("smoke-signal", "http://x"); ok {
+		t.Error("NotifierFor accepted an unknown kind")
 	}
 }
 
 func TestHandlerDeliversOpenAlert(t *testing.T) {
 	fn := &fakeNotifier{ch: make(chan Event, 4)}
-	a := New([]Notifier{fn}, nil, time.Minute)
+	a := New(staticSource(fn), nil, time.Minute)
 	a.Start(context.Background())
 	defer a.Stop()
 
@@ -66,7 +82,7 @@ func TestHandlerDeliversOpenAlert(t *testing.T) {
 
 func TestHandlerDeliversRecoveryAlert(t *testing.T) {
 	fn := &fakeNotifier{ch: make(chan Event, 4)}
-	a := New([]Notifier{fn}, nil, time.Minute)
+	a := New(staticSource(fn), nil, time.Minute)
 	a.Start(context.Background())
 	defer a.Stop()
 
@@ -84,7 +100,7 @@ func TestHandlerDeliversRecoveryAlert(t *testing.T) {
 
 func TestHandlerIgnoresNonAlertTransitions(t *testing.T) {
 	fn := &fakeNotifier{ch: make(chan Event, 4)}
-	a := New([]Notifier{fn}, nil, time.Minute)
+	a := New(staticSource(fn), nil, time.Minute)
 	a.Start(context.Background())
 	defer a.Stop()
 
@@ -101,7 +117,7 @@ func TestHandlerIgnoresNonAlertTransitions(t *testing.T) {
 
 func TestThrottleSuppressesDuplicates(t *testing.T) {
 	fn := &fakeNotifier{ch: make(chan Event, 8)}
-	a := New([]Notifier{fn}, nil, time.Minute)
+	a := New(staticSource(fn), nil, time.Minute)
 	fixed := time.Unix(5000, 0)
 	a.now = func() time.Time { return fixed }
 	a.Start(context.Background())
@@ -135,11 +151,10 @@ func TestThrottleSuppressesDuplicates(t *testing.T) {
 
 func TestConfigNotifiers(t *testing.T) {
 	cfg := Config{WebhookURL: "http://w", FeishuURL: "http://f", DingTalkURL: "http://d"}
-	ns := cfg.Notifiers()
-	if len(ns) != 3 {
+	if ns := cfg.Notifiers(); len(ns) != 3 {
 		t.Fatalf("notifier count = %d, want 3", len(ns))
 	}
-	if New((Config{}).Notifiers(), nil, 0) != nil {
-		t.Fatal("empty config should yield a nil Alerter")
+	if ns := (Config{}).Notifiers(); len(ns) != 0 {
+		t.Fatalf("empty config notifier count = %d, want 0", len(ns))
 	}
 }
