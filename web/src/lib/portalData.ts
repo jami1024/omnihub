@@ -101,3 +101,12 @@ export interface PortalWallet {
 export function usePortalWallet() {
   return useQuery({ queryKey: ['portal-wallet'], queryFn: () => papi<PortalWallet>('/wallet') })
 }
+
+export function useRedeemCode() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (code: string) =>
+      papi<{ credited: number }>('/redeem', { method: 'POST', body: JSON.stringify({ code }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['portal-wallet'] }),
+  })
+}

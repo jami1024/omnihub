@@ -302,6 +302,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	blockedIPRepo := repository.NewBlockedIPRepo(pool)
 	messageRepo := repository.NewMessageRequestRepo(pool)
 	walletRepo := repository.NewWalletRepo(pool)
+	redemptionRepo := repository.NewRedemptionRepo(pool)
 	healthEventRepo := repository.NewAccountHealthEventRepo(pool)
 	adminAuth := guard.NewAdminAuthenticator(issuer)
 
@@ -401,6 +402,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	puser.DELETE("/keys/:id", portalhandler.DeleteKeyHandler(apiKeyRepo))
 	puser.GET("/usage", portalhandler.UsageHandler(messageRepo, apiKeyRepo))
 	puser.GET("/wallet", portalhandler.WalletHandler(walletRepo, messageRepo))
+	puser.POST("/redeem", portalhandler.RedeemHandler(redemptionRepo))
 	puser.GET("/requests", portalhandler.RequestsHandler(messageRepo, apiKeyRepo))
 
 	// M7 — admin oversight of portal users + the portal policy (signup
@@ -412,6 +414,9 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	// adjust / refund). Balance is enforced only when OMNIHUB_BILLING_ENABLED.
 	authed.GET("/users/:id/wallet", adminhandler.GetUserWalletHandler(walletRepo, messageRepo))
 	authed.POST("/users/:id/recharge", adminhandler.RechargeUserHandler(walletRepo, messageRepo))
+	// Redemption (gift) codes: generate a batch, list batch summaries.
+	authed.GET("/redemptions", adminhandler.ListRedemptionsHandler(redemptionRepo))
+	authed.POST("/redemptions", adminhandler.GenerateRedemptionsHandler(redemptionRepo))
 	authed.GET("/settings", adminhandler.GetSettingsHandler(portalSettingsRepo))
 	authed.PUT("/settings", adminhandler.UpdateSettingsHandler(portalSettingsRepo))
 

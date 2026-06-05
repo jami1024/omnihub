@@ -19,6 +19,7 @@ const NAV = [
   { to: '/admin/health', labelKey: 'nav.health' },
   { to: '/admin/prices', labelKey: 'nav.prices' },
   { to: '/admin/users', labelKey: 'nav.users' },
+  { to: '/admin/redemptions', labelKey: 'nav.redemptions' },
   { to: '/admin/settings', labelKey: 'nav.settings' },
 ]
 

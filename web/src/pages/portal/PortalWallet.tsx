@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { PortalLayout } from '../../components/PortalLayout'
 import { Td, Th } from '../../components/Table'
 import { ApiError } from '../../lib/portalApi'
-import { usePortalWallet } from '../../lib/portalData'
+import { usePortalWallet, useRedeemCode } from '../../lib/portalData'
 import { useI18n } from '../../lib/i18n'
 
 export function PortalWalletPage() {
@@ -39,6 +40,8 @@ export function PortalWalletPage() {
               </p>
             )}
 
+            <RedeemBox />
+
             <h3 className="mb-3 text-sm font-semibold text-muted">{t('portalWallet.history')}</h3>
             {data.entries.length === 0 ? (
               <p className="rounded-lg border border-line bg-surface px-4 py-8 text-center text-sm text-muted">
@@ -74,6 +77,44 @@ export function PortalWalletPage() {
         )}
       </main>
     </PortalLayout>
+  )
+}
+
+function RedeemBox() {
+  const { t } = useI18n()
+  const redeem = useRedeemCode()
+  const [code, setCode] = useState('')
+  const [msg, setMsg] = useState<string | null>(null)
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setMsg(null)
+    if (!code.trim()) return
+    redeem.mutate(code.trim(), {
+      onSuccess: (r) => {
+        setMsg(t('portalWallet.redeemed', { amount: `$${r.credited.toFixed(4)}` }))
+        setCode('')
+      },
+      onError: (err) => setMsg(err instanceof ApiError ? err.message : t('portalWallet.redeemFailed')),
+    })
+  }
+
+  return (
+    <div className="mb-8 rounded-xl border border-line bg-surface px-5 py-4">
+      <h3 className="mb-2 text-sm font-semibold">{t('portalWallet.redeemTitle')}</h3>
+      <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
+        <input
+          className="field max-w-xs flex-1"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="OMNI-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+        />
+        <button type="submit" disabled={redeem.isPending} className="btn btn-primary h-10 disabled:opacity-50">
+          {redeem.isPending ? t('common.saving') : t('portalWallet.redeemButton')}
+        </button>
+      </form>
+      {msg && <p className="mt-2 text-sm text-muted">{msg}</p>}
+    </div>
   )
 }
 

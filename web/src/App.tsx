@@ -8,6 +8,7 @@ import { GroupsPage } from './pages/Groups'
 import { KeysPage } from './pages/Keys'
 import { BlockedIPsPage } from './pages/BlockedIPs'
 import { AlertChannelsPage } from './pages/AlertChannels'
+import { RedemptionsPage } from './pages/Redemptions'
 import { HealthPage } from './pages/Health'
 import { PricesPage } from './pages/Prices'
 import { UsersPage } from './pages/Users'
@@ -67,6 +68,7 @@ function AdminRoutes() {
       <Route path="health" element={<AdminProtected><HealthPage /></AdminProtected>} />
       <Route path="prices" element={<AdminProtected><PricesPage /></AdminProtected>} />
       <Route path="users" element={<AdminProtected><UsersPage /></AdminProtected>} />
+      <Route path="redemptions" element={<AdminProtected><RedemptionsPage /></AdminProtected>} />
       <Route path="settings" element={<AdminProtected><SettingsPage /></AdminProtected>} />
       <Route path="*" element={<Navigate to="/admin" replace />} />
     </Routes>
