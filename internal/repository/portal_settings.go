@@ -25,6 +25,9 @@ type PortalSettings struct {
 	KeyDailyUSDDefault *float64 `json:"key_daily_usd_default"`
 	KeyDailyUSDMax     *float64 `json:"key_daily_usd_max"`
 	KeyRPMMax          *int     `json:"key_rpm_max"`
+	// SignupBonusUSD is the starting wallet credit granted to a new portal
+	// user. 0 disables the bonus.
+	SignupBonusUSD float64 `json:"signup_bonus_usd"`
 }
 
 // Get returns the current settings. The row is seeded by the migration,
@@ -33,9 +36,10 @@ type PortalSettings struct {
 func (r *PortalSettingsRepo) Get(ctx context.Context) (PortalSettings, error) {
 	var s PortalSettings
 	err := r.pool.QueryRow(ctx, `
-        SELECT signup_enabled, key_daily_usd_default, key_daily_usd_max, key_rpm_max
+        SELECT signup_enabled, key_daily_usd_default, key_daily_usd_max, key_rpm_max,
+               signup_bonus_usd::float8
           FROM portal_settings WHERE id = 1`).
-		Scan(&s.SignupEnabled, &s.KeyDailyUSDDefault, &s.KeyDailyUSDMax, &s.KeyRPMMax)
+		Scan(&s.SignupEnabled, &s.KeyDailyUSDDefault, &s.KeyDailyUSDMax, &s.KeyRPMMax, &s.SignupBonusUSD)
 	if err != nil {
 		return PortalSettings{SignupEnabled: true}, fmt.Errorf("read portal_settings: %w", err)
 	}
@@ -45,15 +49,16 @@ func (r *PortalSettingsRepo) Get(ctx context.Context) (PortalSettings, error) {
 // Update replaces the policy (upserting the single row).
 func (r *PortalSettingsRepo) Update(ctx context.Context, s PortalSettings) error {
 	_, err := r.pool.Exec(ctx, `
-        INSERT INTO portal_settings (id, signup_enabled, key_daily_usd_default, key_daily_usd_max, key_rpm_max, updated_at)
-        VALUES (1, $1, $2, $3, $4, NOW())
+        INSERT INTO portal_settings (id, signup_enabled, key_daily_usd_default, key_daily_usd_max, key_rpm_max, signup_bonus_usd, updated_at)
+        VALUES (1, $1, $2, $3, $4, $5, NOW())
         ON CONFLICT (id) DO UPDATE SET
             signup_enabled = EXCLUDED.signup_enabled,
             key_daily_usd_default = EXCLUDED.key_daily_usd_default,
             key_daily_usd_max = EXCLUDED.key_daily_usd_max,
             key_rpm_max = EXCLUDED.key_rpm_max,
+            signup_bonus_usd = EXCLUDED.signup_bonus_usd,
             updated_at = NOW()`,
-		s.SignupEnabled, s.KeyDailyUSDDefault, s.KeyDailyUSDMax, s.KeyRPMMax)
+		s.SignupEnabled, s.KeyDailyUSDDefault, s.KeyDailyUSDMax, s.KeyRPMMax, s.SignupBonusUSD)
 	if err != nil {
 		return fmt.Errorf("update portal_settings: %w", err)
 	}

@@ -8,6 +8,7 @@ package portal
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -38,9 +39,15 @@ type userStore interface {
 }
 
 // settingsProvider exposes the admin-controlled portal policy (signup
-// toggle + per-key limit default/ceiling).
+// toggle + per-key limit default/ceiling + signup bonus).
 type settingsProvider interface {
 	Get(ctx context.Context) (repository.PortalSettings, error)
+}
+
+// signupBonusStore credits a new user's wallet with the configured signup
+// bonus. Satisfied by *repository.WalletRepo.
+type signupBonusStore interface {
+	AddEntry(ctx context.Context, userID int64, kind string, amountUSD float64, note, createdBy string) error
 }
 
 type credentials struct {
@@ -52,9 +59,10 @@ type credentials struct {
 // SignupHandler handles POST /portal/api/signup — self-registration,
 // gated on the admin's signup_enabled policy. On success it logs the
 // user straight in (returns a portal token).
-func SignupHandler(store userStore, settings settingsProvider, issuer *admin.Issuer) gin.HandlerFunc {
+func SignupHandler(store userStore, settings settingsProvider, wallet signupBonusStore, issuer *admin.Issuer) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if s, err := settings.Get(c.Request.Context()); err == nil && !s.SignupEnabled {
+		s, sErr := settings.Get(c.Request.Context())
+		if sErr == nil && !s.SignupEnabled {
 			writeError(c, http.StatusForbidden, "signup_disabled",
 				"registration is closed; ask an administrator for an account")
 			return
@@ -89,6 +97,18 @@ func SignupHandler(store userStore, settings settingsProvider, issuer *admin.Iss
 			writeInternal(c, "could not create account")
 			return
 		}
+
+		// Signup bonus: grant the configured starting credit so a new user
+		// can use their keys immediately under prepaid billing. Best-effort
+		// — a bonus failure must not fail an otherwise-successful signup.
+		if sErr == nil && s.SignupBonusUSD > 0 && wallet != nil {
+			if err := wallet.AddEntry(c.Request.Context(), id, "bonus", s.SignupBonusUSD, "signup bonus", "system"); err != nil {
+				slog.Error("portal: signup bonus failed", "uid", id, "err", err.Error())
+			} else {
+				slog.Info("portal: signup bonus granted", "uid", id, "amount", s.SignupBonusUSD)
+			}
+		}
+
 		issueToken(c, issuer, in.Username, id)
 	}
 }

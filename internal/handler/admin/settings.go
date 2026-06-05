@@ -50,6 +50,10 @@ func UpdateSettingsHandler(store settingsStore) gin.HandlerFunc {
 			writeBadRequest(c, "key_rpm_max must be greater than 0 (omit for no cap)")
 			return
 		}
+		if in.SignupBonusUSD < 0 || in.SignupBonusUSD > 1000 {
+			writeBadRequest(c, "signup_bonus_usd must be between 0 and 1000 (0 disables it)")
+			return
+		}
 		if err := store.Update(c.Request.Context(), in); err != nil {
 			slog.Error("admin: update settings failed", "err", err.Error())
 			writeInternal(c, "could not save settings")

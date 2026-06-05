@@ -6,6 +6,7 @@ export interface PortalSettings {
   key_daily_usd_default: number | null
   key_daily_usd_max: number | null
   key_rpm_max: number | null
+  signup_bonus_usd: number
 }
 
 const KEY = ['portal-settings'] as const

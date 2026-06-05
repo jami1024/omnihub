@@ -394,7 +394,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	portalSettingsRepo := repository.NewPortalSettingsRepo(pool)
 	userAuth := guard.NewUserAuthenticator(issuer)
 	papi := r.Group("/portal/api")
-	papi.POST("/signup", portalhandler.SignupHandler(userRepo, portalSettingsRepo, issuer))
+	papi.POST("/signup", portalhandler.SignupHandler(userRepo, portalSettingsRepo, walletRepo, issuer))
 	papi.POST("/login", portalhandler.LoginHandler(userRepo, issuer))
 	puser := papi.Group("", userAuth.Middleware())
 	puser.GET("/me", portalhandler.MeHandler(userRepo))

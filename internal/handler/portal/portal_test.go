@@ -60,7 +60,7 @@ func TestSignupValidatesAndHashes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := &fakeUserStore{insertID: 1}
 	r := gin.New()
-	r.POST("/portal/api/signup", portal.SignupHandler(store, permissive(), newIssuer()))
+	r.POST("/portal/api/signup", portal.SignupHandler(store, permissive(), nil, newIssuer()))
 
 	// short password rejected
 	if rec := do(r, http.MethodPost, "/portal/api/signup", `{"username":"alice","password":"short"}`, ""); rec.Code != http.StatusBadRequest {
@@ -86,7 +86,7 @@ func TestSignupUsernameTaken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := &fakeUserStore{insertErr: repository.ErrUsernameTaken}
 	r := gin.New()
-	r.POST("/portal/api/signup", portal.SignupHandler(store, permissive(), newIssuer()))
+	r.POST("/portal/api/signup", portal.SignupHandler(store, permissive(), nil, newIssuer()))
 	rec := do(r, http.MethodPost, "/portal/api/signup", `{"username":"taken","password":"alicepw12345"}`, "")
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status %d want 409", rec.Code)
@@ -148,7 +148,7 @@ func TestSignupDisabledByPolicy(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	closed := fakeSettings{s: repository.PortalSettings{SignupEnabled: false}}
-	r.POST("/portal/api/signup", portal.SignupHandler(&fakeUserStore{}, closed, newIssuer()))
+	r.POST("/portal/api/signup", portal.SignupHandler(&fakeUserStore{}, closed, nil, newIssuer()))
 	rec := do(r, http.MethodPost, "/portal/api/signup", `{"username":"bob","password":"bobpw12345"}`, "")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d want 403 when signup disabled", rec.Code)

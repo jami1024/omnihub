@@ -105,6 +105,24 @@ export function SettingsPage() {
               </div>
             </section>
 
+            <section className="card space-y-4 p-5">
+              <div>
+                <h3 className="text-sm font-medium">{t('settings.billing')}</h3>
+                <p className="text-xs text-muted">{t('settings.signupBonusHint')}</p>
+              </div>
+              <Field label={t('settings.signupBonus')}>
+                <input
+                  className="field max-w-xs"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.signup_bonus_usd}
+                  onChange={(e) => setForm({ ...form, signup_bonus_usd: Number(e.target.value) || 0 })}
+                  placeholder="0"
+                />
+              </Field>
+            </section>
+
             {update.error && (
               <p className="text-sm text-danger">
                 {update.error instanceof ApiError ? update.error.message : t('settings.saveError')}
