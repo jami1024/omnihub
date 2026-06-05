@@ -26,6 +26,7 @@ import (
 	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/account"
 	"github.com/jami1024/omnihub/internal/service/admin"
+	"github.com/jami1024/omnihub/internal/service/alert"
 	"github.com/jami1024/omnihub/internal/service/apikey"
 	"github.com/jami1024/omnihub/internal/service/blockedip"
 	"github.com/jami1024/omnihub/internal/service/forward"
@@ -481,11 +482,24 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 	// so operators can query the flap history with plain SQL. The
 	// recorder runs an async writer goroutine; the hot path on the
 	// tracker side is non-blocking.
+	var transitionHandlers []health.TransitionHandler
 	if pool != nil {
 		recorder := healthlog.New(repository.NewAccountHealthEventRepo(pool), accountPool)
 		recorder.Start(context.Background())
-		tracker.SetTransitionHandler(recorder.Handler)
+		transitionHandlers = append(transitionHandlers, recorder.Handler)
 		slog.Info("account health event recorder running", "queue_size", 256)
+	}
+	// Operational alerting: notify external channels (webhook / Feishu /
+	// DingTalk) when an account's breaker trips OPEN or recovers. Off
+	// unless at least one OMNIHUB_ALERT_*_URL is set. Works without a DB
+	// (it only needs the in-memory account pool for names).
+	if alerter := buildAlerter(accountPool); alerter != nil {
+		alerter.Start(context.Background())
+		transitionHandlers = append(transitionHandlers, alerter.Handler)
+		slog.Info("circuit-breaker alerting enabled", "channels", alerter.NotifierNames())
+	}
+	if len(transitionHandlers) > 0 {
+		tracker.SetTransitionHandler(health.FanOut(transitionHandlers...))
 	}
 
 	sessionTTL := loadSessionTTL()
@@ -743,6 +757,34 @@ func seedApiKeysFromEnv(ctx context.Context, repo *repository.ApiKeyRepo) (int, 
 // Unset falls back to session.DefaultTTL (5 minutes). The special
 // value "0" or "off" disables stickiness entirely. Malformed values
 // log a warning and fall back to the default.
+// buildAlerter wires the circuit-breaker alerter from OMNIHUB_ALERT_*
+// env vars. Returns nil when no notifier URL is configured (alerting
+// stays off). pool resolves account ids to names in the alert text.
+func buildAlerter(pool *account.Pool) *alert.Alerter {
+	cfg := alert.Config{
+		WebhookURL:  os.Getenv("OMNIHUB_ALERT_WEBHOOK_URL"),
+		FeishuURL:   os.Getenv("OMNIHUB_ALERT_FEISHU_URL"),
+		DingTalkURL: os.Getenv("OMNIHUB_ALERT_DINGTALK_URL"),
+		Throttle:    loadAlertThrottle(),
+	}
+	return alert.New(cfg.Notifiers(), pool, cfg.Throttle)
+}
+
+// loadAlertThrottle parses OMNIHUB_ALERT_THROTTLE (a Go duration); 0 lets
+// the alert package apply its default flap-suppression window.
+func loadAlertThrottle() time.Duration {
+	raw := os.Getenv("OMNIHUB_ALERT_THROTTLE")
+	if raw == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		slog.Warn("OMNIHUB_ALERT_THROTTLE invalid; using default", "value", raw)
+		return 0
+	}
+	return d
+}
+
 func loadSessionTTL() time.Duration {
 	v := os.Getenv("OMNIHUB_SESSION_TTL")
 	if v == "" {

@@ -163,6 +163,19 @@ func (t *Tracker) SetTransitionHandler(h TransitionHandler) {
 	t.transitionHandler = h
 }
 
+// FanOut composes several TransitionHandlers into one that invokes each
+// in order. nil handlers are skipped. Each handler must still honour the
+// non-blocking contract; FanOut adds no goroutine of its own.
+func FanOut(handlers ...TransitionHandler) TransitionHandler {
+	return func(tr Transition) {
+		for _, h := range handlers {
+			if h != nil {
+				h(tr)
+			}
+		}
+	}
+}
+
 // configFor returns the effective config for one account.
 // Caller must hold t.mu.
 func (t *Tracker) configFor(accountID int64) Config {
