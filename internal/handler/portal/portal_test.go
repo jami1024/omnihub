@@ -31,13 +31,20 @@ type fakeUserStore struct {
 	insertID  int64
 	insertErr error
 	lastUser  repository.UserInsertParams
+	user      *repository.User
 }
 
 func (f *fakeUserStore) GetByUsername(context.Context, string) (*repository.User, error) {
 	return nil, repository.ErrUserNotFound
 }
+func (f *fakeUserStore) GetByEmail(context.Context, string) (*repository.User, error) {
+	if f.user != nil {
+		return f.user, nil
+	}
+	return nil, repository.ErrUserNotFound
+}
 func (f *fakeUserStore) GetByID(_ context.Context, id int64) (*repository.User, error) {
-	return &repository.User{ID: id, Username: "alice"}, nil
+	return &repository.User{ID: id, Username: "alice@example.com", Email: "alice@example.com"}, nil
 }
 func (f *fakeUserStore) Insert(_ context.Context, p repository.UserInsertParams) (int64, error) {
 	f.lastUser = p
@@ -63,11 +70,11 @@ func TestSignupValidatesAndHashes(t *testing.T) {
 	r.POST("/portal/api/signup", portal.SignupHandler(store, permissive(), nil, newIssuer()))
 
 	// short password rejected
-	if rec := do(r, http.MethodPost, "/portal/api/signup", `{"username":"alice","password":"short"}`, ""); rec.Code != http.StatusBadRequest {
+	if rec := do(r, http.MethodPost, "/portal/api/signup", `{"email":"alice@example.com","password":"short"}`, ""); rec.Code != http.StatusBadRequest {
 		t.Fatalf("short password: status %d want 400", rec.Code)
 	}
 	// happy path → token, password stored hashed (not cleartext)
-	rec := do(r, http.MethodPost, "/portal/api/signup", `{"username":"alice","password":"alicepw12345"}`, "")
+	rec := do(r, http.MethodPost, "/portal/api/signup", `{"email":"Alice@Example.com","password":"alicepw12345"}`, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("signup status %d want 200 (%s)", rec.Code, rec.Body.String())
 	}
@@ -80,16 +87,55 @@ func TestSignupValidatesAndHashes(t *testing.T) {
 	if admin.VerifyPassword(store.lastUser.PasswordHash, "alicepw12345") != nil {
 		t.Error("stored hash should verify against the cleartext")
 	}
+	if store.lastUser.Email != "alice@example.com" || store.lastUser.Username != "alice@example.com" {
+		t.Errorf("signup should normalize email into user identity, got %+v", store.lastUser)
+	}
 }
 
-func TestSignupUsernameTaken(t *testing.T) {
+func TestSignupEmailTaken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	store := &fakeUserStore{insertErr: repository.ErrUsernameTaken}
+	store := &fakeUserStore{insertErr: repository.ErrEmailTaken}
 	r := gin.New()
 	r.POST("/portal/api/signup", portal.SignupHandler(store, permissive(), nil, newIssuer()))
-	rec := do(r, http.MethodPost, "/portal/api/signup", `{"username":"taken","password":"alicepw12345"}`, "")
+	rec := do(r, http.MethodPost, "/portal/api/signup", `{"email":"taken@example.com","password":"alicepw12345"}`, "")
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status %d want 409", rec.Code)
+	}
+}
+
+func TestSignupRejectsAdminEmail(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/portal/api/signup", portal.SignupHandlerWithReservedEmail(&fakeUserStore{}, permissive(), nil, newIssuer(), "admin@example.com"))
+	rec := do(r, http.MethodPost, "/portal/api/signup", `{"email":"ADMIN@example.com","password":"alicepw12345"}`, "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status %d want 409 for admin email signup", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "email_taken") {
+		t.Fatalf("admin email signup should look like an already registered email, got %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "admin") || strings.Contains(rec.Body.String(), "reserved") {
+		t.Fatalf("admin email signup should not reveal admin/reserved status, got %s", rec.Body.String())
+	}
+}
+
+func TestLoginUsesEmail(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	hash, err := admin.HashPassword("alicepw12345")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeUserStore{user: &repository.User{
+		ID: 11, Username: "alice@example.com", Email: "alice@example.com", PasswordHash: hash, Enabled: true,
+	}}
+	r := gin.New()
+	r.POST("/portal/api/login", portal.LoginHandler(store, newIssuer()))
+	rec := do(r, http.MethodPost, "/portal/api/login", `{"email":"ALICE@example.com","password":"alicepw12345"}`, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"email":"alice@example.com"`) {
+		t.Fatalf("login response should include normalized email, got %s", rec.Body.String())
 	}
 }
 
@@ -149,7 +195,7 @@ func TestSignupDisabledByPolicy(t *testing.T) {
 	r := gin.New()
 	closed := fakeSettings{s: repository.PortalSettings{SignupEnabled: false}}
 	r.POST("/portal/api/signup", portal.SignupHandler(&fakeUserStore{}, closed, nil, newIssuer()))
-	rec := do(r, http.MethodPost, "/portal/api/signup", `{"username":"bob","password":"bobpw12345"}`, "")
+	rec := do(r, http.MethodPost, "/portal/api/signup", `{"email":"bob@example.com","password":"bobpw12345"}`, "")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d want 403 when signup disabled", rec.Code)
 	}

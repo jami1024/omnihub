@@ -10,6 +10,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/mail"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -34,6 +35,7 @@ func writeInternal(c *gin.Context, msg string) {
 // userStore is the slice of repository.UserRepo the auth handlers need.
 type userStore interface {
 	GetByUsername(ctx context.Context, username string) (*repository.User, error)
+	GetByEmail(ctx context.Context, email string) (*repository.User, error)
 	GetByID(ctx context.Context, id int64) (*repository.User, error)
 	Insert(ctx context.Context, p repository.UserInsertParams) (int64, error)
 }
@@ -60,6 +62,13 @@ type credentials struct {
 // gated on the admin's signup_enabled policy. On success it logs the
 // user straight in (returns a portal token).
 func SignupHandler(store userStore, settings settingsProvider, wallet signupBonusStore, issuer *admin.Issuer) gin.HandlerFunc {
+	return SignupHandlerWithReservedEmail(store, settings, wallet, issuer, "")
+}
+
+// SignupHandlerWithReservedEmail is SignupHandler plus an optional
+// reserved admin email that cannot be self-registered as a portal user.
+func SignupHandlerWithReservedEmail(store userStore, settings settingsProvider, wallet signupBonusStore, issuer *admin.Issuer, reservedAdminEmail string) gin.HandlerFunc {
+	reservedAdminEmail = normalizeEmail(reservedAdminEmail)
 	return func(c *gin.Context) {
 		s, sErr := settings.Get(c.Request.Context())
 		if sErr == nil && !s.SignupEnabled {
@@ -72,9 +81,16 @@ func SignupHandler(store userStore, settings settingsProvider, wallet signupBonu
 			writeBadRequest(c, "invalid JSON: "+err.Error())
 			return
 		}
-		in.Username = strings.TrimSpace(in.Username)
-		if len(in.Username) < 3 {
-			writeBadRequest(c, "username must be at least 3 characters")
+		email := normalizeEmail(in.Email)
+		if email == "" && strings.Contains(in.Username, "@") {
+			email = normalizeEmail(in.Username)
+		}
+		if !validEmail(email) {
+			writeBadRequest(c, "valid email is required")
+			return
+		}
+		if reservedAdminEmail != "" && email == reservedAdminEmail {
+			writeError(c, http.StatusConflict, "email_taken", "that email is already registered")
 			return
 		}
 		if len(in.Password) < 8 {
@@ -87,11 +103,11 @@ func SignupHandler(store userStore, settings settingsProvider, wallet signupBonu
 			return
 		}
 		id, err := store.Insert(c.Request.Context(), repository.UserInsertParams{
-			Username: in.Username, Email: strings.TrimSpace(in.Email), PasswordHash: hash,
+			Username: email, Email: email, PasswordHash: hash,
 		})
 		if err != nil {
-			if err == repository.ErrUsernameTaken {
-				writeError(c, http.StatusConflict, "username_taken", "that username is taken")
+			if err == repository.ErrUsernameTaken || err == repository.ErrEmailTaken {
+				writeError(c, http.StatusConflict, "email_taken", "that email is already registered")
 				return
 			}
 			writeInternal(c, "could not create account")
@@ -109,11 +125,11 @@ func SignupHandler(store userStore, settings settingsProvider, wallet signupBonu
 			}
 		}
 
-		issueToken(c, issuer, in.Username, id)
+		issueToken(c, issuer, email, id)
 	}
 }
 
-// LoginHandler handles POST /portal/api/login. A wrong username and a
+// LoginHandler handles POST /portal/api/login. A wrong email and a
 // wrong password return the same 401 so accounts can't be enumerated.
 func LoginHandler(store userStore, issuer *admin.Issuer) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -122,17 +138,24 @@ func LoginHandler(store userStore, issuer *admin.Issuer) gin.HandlerFunc {
 			writeBadRequest(c, "invalid JSON: "+err.Error())
 			return
 		}
-		in.Username = strings.TrimSpace(in.Username)
-		if in.Username == "" || in.Password == "" {
-			writeBadRequest(c, "username and password are required")
+		email := normalizeEmail(in.Email)
+		if email == "" && strings.Contains(in.Username, "@") {
+			email = normalizeEmail(in.Username)
+		}
+		if email == "" || in.Password == "" {
+			writeBadRequest(c, "email and password are required")
 			return
 		}
-		u, err := store.GetByUsername(c.Request.Context(), in.Username)
+		u, err := store.GetByEmail(c.Request.Context(), email)
 		if err != nil || !u.Enabled || admin.VerifyPassword(u.PasswordHash, in.Password) != nil {
-			writeError(c, http.StatusUnauthorized, "invalid_credentials", "invalid username or password")
+			writeError(c, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
 			return
 		}
-		issueToken(c, issuer, u.Username, u.ID)
+		identity := normalizeEmail(u.Email)
+		if identity == "" {
+			identity = normalizeEmail(u.Username)
+		}
+		issueToken(c, issuer, identity, u.ID)
 	}
 }
 
@@ -142,7 +165,14 @@ func issueToken(c *gin.Context, issuer *admin.Issuer, username string, uid int64
 		writeInternal(c, "could not issue session")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"token": token, "expires_at": exp.Unix(), "username": username})
+	c.JSON(http.StatusOK, gin.H{
+		"token":       token,
+		"expires_at":  exp.Unix(),
+		"username":    username,
+		"email":       username,
+		"role":        "user",
+		"redirect_to": "/portal",
+	})
 }
 
 // MeHandler handles GET /portal/api/me → the authenticated user's profile.
@@ -155,4 +185,16 @@ func MeHandler(store userStore) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{"id": u.ID, "username": u.Username, "email": u.Email})
 	}
+}
+
+func normalizeEmail(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+func validEmail(s string) bool {
+	if s == "" || strings.ContainsAny(s, " \t\r\n") {
+		return false
+	}
+	addr, err := mail.ParseAddress(s)
+	return err == nil && normalizeEmail(addr.Address) == s
 }

@@ -3,7 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { PortalAuthProvider, usePortalAuth } from './lib/portalAuth'
 import { LandingPage } from './pages/Landing'
-import { LoginPage } from './pages/Login'
+import { UnifiedLoginPage } from './pages/UnifiedLogin'
 import { AccountsPage } from './pages/Accounts'
 import { GroupsPage } from './pages/Groups'
 import { KeysPage } from './pages/Keys'
@@ -14,7 +14,6 @@ import { HealthPage } from './pages/Health'
 import { PricesPage } from './pages/Prices'
 import { UsersPage } from './pages/Users'
 import { SettingsPage } from './pages/Settings'
-import { PortalLoginPage } from './pages/portal/PortalLogin'
 import { PortalOverviewPage } from './pages/portal/PortalOverview'
 import { PortalKeysPage } from './pages/portal/PortalKeys'
 import { PortalRequestsPage } from './pages/portal/PortalRequests'
@@ -34,6 +33,14 @@ export default function App() {
     <Routes>
       {/* Marketing landing at the bare domain. */}
       <Route path="/" element={<LandingPage />} />
+      <Route
+        path="/login"
+        element={
+          <PortalAuthProvider>
+            <UnifiedLoginPage />
+          </PortalAuthProvider>
+        }
+      />
       {/* Admin console */}
       <Route
         path="/admin/*"
@@ -61,7 +68,7 @@ export default function App() {
 function AdminRoutes() {
   return (
     <Routes>
-      <Route path="login" element={<LoginPage />} />
+      <Route path="login" element={<Navigate to="/login?next=/admin" replace />} />
       <Route path="" element={<AdminProtected><Suspense fallback={<PageLoading />}><DashboardPage /></Suspense></AdminProtected>} />
       <Route path="accounts" element={<AdminProtected><AccountsPage /></AdminProtected>} />
       <Route path="groups" element={<AdminProtected><GroupsPage /></AdminProtected>} />
@@ -81,8 +88,8 @@ function AdminRoutes() {
 function PortalRoutes() {
   return (
     <Routes>
-      <Route path="login" element={<PortalLoginPage />} />
-      <Route path="signup" element={<PortalLoginPage initialMode="signup" />} />
+      <Route path="login" element={<Navigate to="/login?next=/portal" replace />} />
+      <Route path="signup" element={<Navigate to="/login?mode=signup" replace />} />
       <Route path="" element={<PortalProtected><PortalOverviewPage /></PortalProtected>} />
       <Route path="keys" element={<PortalProtected><PortalKeysPage /></PortalProtected>} />
       <Route path="requests" element={<PortalProtected><PortalRequestsPage /></PortalProtected>} />

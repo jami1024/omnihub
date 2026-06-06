@@ -27,6 +27,9 @@ var ErrUserNotFound = errors.New("user not found")
 // ErrUsernameTaken is returned when signup collides with UNIQUE(username).
 var ErrUsernameTaken = errors.New("username already taken")
 
+// ErrEmailTaken is returned when signup collides with UNIQUE(email).
+var ErrEmailTaken = errors.New("email already taken")
+
 // User is one row of the users table. PasswordHash is bcrypt-encoded.
 type User struct {
 	ID           int64
@@ -65,6 +68,18 @@ func (r *UserRepo) GetByUsername(ctx context.Context, username string) (*User, e
 	return u, nil
 }
 
+// GetByEmail fetches a user by normalized email address.
+func (r *UserRepo) GetByEmail(ctx context.Context, email string) (*User, error) {
+	u, err := scanUser(r.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE lower(email) = lower($1)`, email))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("query user email %q: %w", email, err)
+	}
+	return u, nil
+}
+
 // GetByID fetches a user by primary key.
 func (r *UserRepo) GetByID(ctx context.Context, id int64) (*User, error) {
 	u, err := scanUser(r.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, id))
@@ -84,7 +99,8 @@ type UserInsertParams struct {
 	PasswordHash string
 }
 
-// Insert creates a user. Returns ErrUsernameTaken on a UNIQUE collision.
+// Insert creates a user. Returns ErrEmailTaken on an email UNIQUE
+// collision and ErrUsernameTaken for legacy username collisions.
 func (r *UserRepo) Insert(ctx context.Context, p UserInsertParams) (int64, error) {
 	var id int64
 	err := r.pool.QueryRow(ctx, `
@@ -94,6 +110,9 @@ func (r *UserRepo) Insert(ctx context.Context, p UserInsertParams) (int64, error
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
+			if p.Email != "" {
+				return 0, ErrEmailTaken
+			}
 			return 0, ErrUsernameTaken
 		}
 		return 0, fmt.Errorf("insert user %q: %w", p.Username, err)

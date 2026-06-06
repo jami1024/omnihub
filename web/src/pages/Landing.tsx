@@ -12,21 +12,21 @@ const COPY = {
     nav: { features: 'Routing', reliability: 'Reliability', billing: 'Billing', observability: 'Observability', signin: 'Sign in', start: 'Get started' },
     hero: {
       tag: 'Self-hosted AI gateway',
-      title: 'One endpoint for every model you run.',
-      sub: 'Put OmniHub in front of Claude, Claude on AWS, OpenAI and any OpenAI-compatible API. It pools your upstream accounts, fails over when one trips, and meters every request so you can price and resell access.',
+      title: 'One gateway for every model provider you run.',
+      sub: 'OmniHub turns Claude, Claude on AWS, OpenAI, and compatible APIs into one reliable endpoint — with health-aware routing and per-request cost tracking.',
       start: 'Get started',
       signin: 'Sign in',
-      note: 'Pass-through, not a rewrite: matched-pair on /v1/messages and /v1/chat/completions.',
+      note: 'Protocol pass-through for /v1/messages and /v1/chat/completions. No cross-format rewriting.',
     },
-    providers: { label: 'Speaks the native wire format of', items: ['Anthropic · Claude', 'Claude on AWS Bedrock', 'OpenAI', 'any OpenAI-compatible'] },
+    providers: { label: 'Routes requests to the native API format of', items: ['Anthropic · Claude', 'Claude on AWS Bedrock', 'OpenAI', 'any OpenAI-compatible'] },
     routing: {
-      title: 'Send one request. It finds a healthy account.',
-      body: 'The resolver picks an upstream account by weight and priority, keeps a conversation on the same account for cache hits, and rolls over to the next one on a 5xx, a 429, or a dead connection. Per-account model redirects and parameter overrides happen on the way out.',
-      points: ['Weighted + priority selection', 'Session stickiness for prompt cache', 'Multi-endpoint failover', 'Per-account model redirect'],
+      title: 'Send one request. OmniHub chooses the account.',
+      body: 'Each request goes through a resolver that checks priority, weight, account state, and session stickiness. If an upstream returns 5xx, 429, or drops the connection, OmniHub moves the request to the next available route.',
+      points: ['Weighted and priority routing', 'Session stickiness for prompt cache', 'Endpoint failover per account', 'Model redirect before forwarding'],
     },
     reliability: {
-      title: 'A pool that stays up when an account does not.',
-      body: 'A circuit breaker takes a failing account out of rotation before user traffic hits it, active health probes check upstreams off the request path, and failover timeouts are tuned so a dead endpoint is abandoned in seconds, not after a 30-second hang.',
+      title: 'Keep the pool usable when one account fails.',
+      body: 'Circuit breakers remove unstable accounts from rotation, health probes check upstreams outside the request path, and short failover timeouts prevent a dead endpoint from holding traffic for too long.',
       states: [
         { name: 'anthropic-1', state: 'closed', note: 'serving' },
         { name: 'anthropic-2', state: 'half-open', note: 'probing' },
@@ -34,41 +34,40 @@ const COPY = {
       ],
     },
     billing: {
-      title: 'Meter it, price it, resell it.',
-      body: 'Every request records its cost and the amount billed. Give each user a prepaid wallet, a price ratio for your margin, and per-key daily caps. Hand out redemption codes for self-serve top-ups, or credit a balance from the console.',
+      title: 'Meter usage before you expose the endpoint.',
+      body: 'Every request stores provider cost and billed amount. You can give users prepaid balances, set a price ratio per user, cap daily key spend, and issue redemption codes for self-serve top-ups.',
       cards: [
-        { k: 'Prepaid balance', v: 'Requests stop at $0.00, not a surprise invoice.' },
-        { k: 'Price ratio', v: 'Charge cost × your markup, per user.' },
-        { k: 'Redemption codes', v: 'Generate a batch, users redeem to top up.' },
+        { k: 'Prepaid balance', v: 'Stop requests when balance reaches $0.00.' },
+        { k: 'Price ratio', v: 'Bill each user at provider cost × your ratio.' },
+        { k: 'Redemption codes', v: 'Generate top-up codes and let users redeem them.' },
       ],
     },
     observability: {
-      title: 'See every request. Get paged when an account trips.',
-      body: 'OmniHub exposes Prometheus metrics out of the box and ships an importable Grafana dashboard. When a circuit breaker opens or recovers, it notifies a webhook, Feishu, or DingTalk channel you manage from the console.',
+      title: 'Inspect traffic and account health from the console.',
+      body: 'OmniHub exposes Prometheus metrics and ships an importable Grafana dashboard. When a circuit breaker opens or recovers, it sends a notification to the webhook, Feishu, or DingTalk channel you configure.',
       metrics: ['omnihub_ttfb_seconds', 'omnihub_cost_usd_total', 'omnihub_circuit_state', 'omnihub_upstream_failover_total'],
     },
-    cta: { title: 'Run it on your own infrastructure.', body: 'One Go binary, Postgres, and your provider keys. Bring it up with Docker Compose and add an account.', start: 'Get started', },
-    footer: { tagline: 'Self-hosted AI gateway.', portal: 'User portal', console: 'Admin console', rights: 'All rights reserved.' },
+    footer: { tagline: 'Self-hosted AI gateway.', portal: 'User portal', rights: 'All rights reserved.' },
   },
   zh: {
     nav: { features: '路由', reliability: '可靠性', billing: '计费', observability: '可观测', signin: '登录', start: '开始使用' },
     hero: {
       tag: '自托管 AI 网关',
-      title: '一个端点，接住你所有的模型。',
-      sub: '把 OmniHub 放在 Claude、AWS 上的 Claude、OpenAI 以及任何 OpenAI 兼容 API 前面。它把上游账号汇成池、某个账号挂了自动切换、并为每次请求计量，让你能定价转售。',
+      title: '一个网关，统一接入多家模型供应商。',
+      sub: 'OmniHub 将 Claude、AWS 上的 Claude、OpenAI 和兼容 API 统一成一个稳定入口，自动避开异常账号，并记录每次请求成本。',
       start: '开始使用',
       signin: '登录',
-      note: '直通而非重写：/v1/messages 与 /v1/chat/completions 同协议匹配转发。',
+      note: '协议直通：/v1/messages 与 /v1/chat/completions 按原格式转发，不做跨协议重写。',
     },
-    providers: { label: '原生支持以下上游格式', items: ['Anthropic · Claude', 'AWS Bedrock 上的 Claude', 'OpenAI', '任意 OpenAI 兼容'] },
+    providers: { label: '按上游原生 API 格式转发到', items: ['Anthropic · Claude', 'AWS Bedrock 上的 Claude', 'OpenAI', '任意 OpenAI 兼容'] },
     routing: {
-      title: '发一个请求，它自己找到健康的账号。',
-      body: '解析器按权重和优先级挑选上游账号，把同一会话粘在同一账号上以命中缓存，遇到 5xx、429 或连接断开就切到下一个。每账号的模型重定向与参数覆盖在出站时完成。',
-      points: ['权重 + 优先级选择', '会话粘性命中提示缓存', '多端点失败转移', '每账号模型重定向'],
+      title: '发一个请求，由 OmniHub 选择账号。',
+      body: '每次请求都会经过解析器，综合优先级、权重、账号状态和会话粘性来选择路由。遇到 5xx、429 或连接断开时，OmniHub 会把请求切到下一个可用线路。',
+      points: ['权重与优先级路由', '会话粘性命中提示缓存', '账号内端点失败转移', '转发前模型重定向'],
     },
     reliability: {
-      title: '某个账号挂了，池子照样在。',
-      body: '熔断器在用户流量打到坏账号之前把它移出轮转，主动健康探测在请求路径之外检查上游，失败转移超时也调紧了：死端点几秒内放弃，而不是干等 30 秒。',
+      title: '单个账号异常，账号池仍然可用。',
+      body: '熔断器会把不稳定账号移出轮转，健康探测在请求路径之外检查上游，较短的失败转移超时也能避免死端点长时间占住流量。',
       states: [
         { name: 'anthropic-1', state: 'closed', note: '服务中' },
         { name: 'anthropic-2', state: 'half-open', note: '探测中' },
@@ -76,21 +75,20 @@ const COPY = {
       ],
     },
     billing: {
-      title: '计量、定价、转售。',
-      body: '每次请求都记录成本与计费金额。给每个用户一个预付费钱包、一个体现你毛利的价格倍率、以及每个 key 的日额度。发兑换码让用户自助充值，或在后台直接给余额充值。',
+      title: '先计量，再把端点交给用户。',
+      body: '每次请求都会记录供应商成本和计费金额。你可以给用户配置预付费余额、按用户设置价格倍率、限制每个 key 的每日花费，并发放兑换码让用户自助充值。',
       cards: [
-        { k: '预付费余额', v: '余额到 $0.00 就停，不会有意外账单。' },
-        { k: '价格倍率', v: '按「成本 × 你的加价」计费，可按用户设。' },
-        { k: '兑换码', v: '批量生成，用户兑换即充值。' },
+        { k: '预付费余额', v: '余额到 $0.00 时停止请求。' },
+        { k: '价格倍率', v: '按「供应商成本 × 你的倍率」向用户计费。' },
+        { k: '兑换码', v: '批量生成充值码，用户在门户里兑换。' },
       ],
     },
     observability: {
-      title: '看见每个请求，账号一挂就收到告警。',
-      body: 'OmniHub 开箱暴露 Prometheus 指标，并附带可导入的 Grafana 看板。熔断器打开或恢复时，它会通知你在后台管理的 webhook、飞书或钉钉渠道。',
+      title: '在控制台查看流量和账号健康。',
+      body: 'OmniHub 暴露 Prometheus 指标，并附带可导入的 Grafana 看板。熔断器打开或恢复时，它会通知你配置的 webhook、飞书或钉钉渠道。',
       metrics: ['omnihub_ttfb_seconds', 'omnihub_cost_usd_total', 'omnihub_circuit_state', 'omnihub_upstream_failover_total'],
     },
-    cta: { title: '跑在你自己的基础设施上。', body: '一个 Go 二进制、一个 Postgres、加上你的上游密钥。用 Docker Compose 拉起来，添加一个账号即可。', start: '开始使用' },
-    footer: { tagline: '自托管 AI 网关。', portal: '用户门户', console: '管理后台', rights: '保留所有权利。' },
+    footer: { tagline: '自托管 AI 网关。', portal: '用户门户', rights: '保留所有权利。' },
   },
 }
 
@@ -113,8 +111,8 @@ export function LandingPage() {
             </h1>
             <p className="mt-5 max-w-xl text-pretty text-base leading-relaxed text-muted sm:text-lg">{c.hero.sub}</p>
             <div className="mt-7 flex flex-wrap items-center gap-3">
-              <Link to="/portal/signup" className="btn btn-primary h-11 px-5 text-[15px]">{c.hero.start}</Link>
-              <Link to="/portal/login" className="btn btn-secondary h-11 px-5 text-[15px]">{c.hero.signin}</Link>
+              <Link to="/login?mode=signup" className="btn btn-primary h-11 px-5 text-[15px]">{c.hero.start}</Link>
+              <Link to="/login" className="btn btn-secondary h-11 px-5 text-[15px]">{c.hero.signin}</Link>
             </div>
             <p className="mt-5 font-mono text-xs text-muted">{c.hero.note}</p>
           </div>
@@ -169,17 +167,6 @@ export function LandingPage() {
         {/* Observability */}
         <Feature id="observability" reverse title={c.observability.title} body={c.observability.body} visual={<MetricsVisual metrics={c.observability.metrics} />} />
 
-        {/* CTA band */}
-        <section className="mx-auto max-w-6xl px-6 pb-20">
-          <div className="relative overflow-hidden rounded-2xl border border-line-strong px-8 py-12 text-center sm:py-16" style={{ background: 'linear-gradient(180deg, var(--surface), var(--surface-2))' }}>
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: 'linear-gradient(90deg, transparent, var(--brand), transparent)' }} />
-            <h2 className="mx-auto max-w-2xl text-balance text-3xl font-semibold tracking-tight sm:text-4xl" style={{ letterSpacing: '-0.02em' }}>{c.cta.title}</h2>
-            <p className="mx-auto mt-4 max-w-xl text-pretty leading-relaxed text-muted">{c.cta.body}</p>
-            <div className="mt-7 flex justify-center">
-              <Link to="/portal/signup" className="btn btn-primary h-11 px-6 text-[15px]">{c.cta.start}</Link>
-            </div>
-          </div>
-        </section>
       </main>
 
       <SiteFooter c={c} />
@@ -193,7 +180,7 @@ function SiteNav({ c }: { c: typeof COPY.en }) {
   return (
     <header className="sticky top-0 z-30 border-b border-line/70 bg-bg/80 backdrop-blur">
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-        <a href="#top" className="flex items-center gap-2">
+        <a href="#top" className="flex min-h-10 items-center gap-2">
           <Mark />
           <span className="text-[17px] font-semibold tracking-tight">OmniHub</span>
         </a>
@@ -204,8 +191,8 @@ function SiteNav({ c }: { c: typeof COPY.en }) {
           <a href="#observability" className="text-sm text-muted transition-colors hover:text-ink">{c.nav.observability}</a>
         </div>
         <div className="flex items-center gap-2">
-          <Link to="/portal/login" className="btn btn-ghost h-9 px-3 text-sm">{c.nav.signin}</Link>
-          <Link to="/portal/signup" className="btn btn-primary h-9 px-3.5 text-sm">{c.nav.start}</Link>
+          <Link to="/login" className="btn btn-ghost h-10 px-3 text-sm">{c.nav.signin}</Link>
+          <Link to="/login?mode=signup" className="btn btn-primary h-10 px-3.5 text-sm">{c.nav.start}</Link>
         </div>
       </nav>
     </header>
@@ -222,8 +209,7 @@ function SiteFooter({ c }: { c: typeof COPY.en }) {
           <span className="text-sm text-muted">· {c.footer.tagline}</span>
         </div>
         <div className="flex items-center gap-6 text-sm text-muted">
-          <Link to="/portal" className="transition-colors hover:text-ink">{c.footer.portal}</Link>
-          <Link to="/admin" className="transition-colors hover:text-ink">{c.footer.console}</Link>
+          <Link to="/portal" className="inline-flex min-h-10 items-center transition-colors hover:text-ink">{c.footer.portal}</Link>
           <span className="font-mono text-xs">© {new Date().getFullYear()}</span>
         </div>
       </div>
@@ -273,25 +259,109 @@ function RequestCard() {
 
 function RoutingDiagram() {
   const providers = [
-    { n: 'claude', s: 'closed' as const },
-    { n: 'bedrock', s: 'closed' as const },
-    { n: 'openai', s: 'open' as const },
+    { n: 'claude', s: 'closed' as const, note: 'primary route' },
+    { n: 'bedrock', s: 'closed' as const, note: 'fallback ready' },
+    { n: 'openai', s: 'open' as const, note: 'skipped' },
   ]
   return (
-    <div className="card p-6">
-      <div className="grid grid-cols-[auto_1fr] items-center gap-x-5 gap-y-4">
-        <Node label="client" />
-        <Wire />
-        <Node label="omnihub" accent />
-        <div className="flex flex-wrap gap-2">
-          {providers.map((p) => (
-            <span key={p.n} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 py-1 font-mono text-xs">
-              {p.n} <Pill tone={p.s === 'open' ? 'danger' : 'success'}>{p.s}</Pill>
-            </span>
-          ))}
+    <div className="card overflow-hidden p-0">
+      <div className="border-b border-line bg-surface-2/70 px-5 py-3">
+        <div className="flex items-center justify-between gap-4">
+          <span className="font-mono text-xs text-muted">routing decision</span>
+          <span className="font-mono text-[11px] text-muted">health-aware failover</span>
         </div>
       </div>
-      <p className="mt-5 border-t border-line pt-4 font-mono text-xs text-muted">openai · open → failover to next healthy account</p>
+
+      <div className="p-5">
+        <div className="grid gap-4">
+          <div className="grid gap-3 sm:grid-cols-[1fr_auto_1.15fr] sm:items-center">
+            <FlowNode eyebrow="source" title="client" body="POST /v1/messages" />
+            <FlowArrow />
+            <FlowNode eyebrow="gateway" title="OmniHub" body="resolve · meter · guard" accent />
+          </div>
+
+          <FlowDownArrow />
+
+          <div className="rounded-2xl border border-line bg-surface p-3">
+            <div className="mb-2 flex items-center justify-between gap-3 px-1">
+              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted">route pool</span>
+              <span className="font-mono text-[11px] text-muted">open circuits are skipped</span>
+            </div>
+            <div className="grid gap-2">
+              {providers.map((p) => (
+                <ProviderLane key={p.n} name={p.n} state={p.s} note={p.note} />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-2 border-t border-line pt-4 sm:grid-cols-3">
+          <FlowCaption label="1" text="check account state" />
+          <FlowCaption label="2" text="skip open circuits" />
+          <FlowCaption label="3" text="send to next healthy route" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FlowNode({ eyebrow, title, body, accent }: { eyebrow: string; title: string; body: string; accent?: boolean }) {
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${accent ? 'border-line-strong bg-brand-subtle' : 'border-line bg-surface'}`}>
+      <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted">{eyebrow}</div>
+      <div className={`mt-1 text-lg font-semibold tracking-tight ${accent ? 'text-brand' : 'text-ink'}`}>{title}</div>
+      <div className="mt-1 font-mono text-[11px] text-muted">{body}</div>
+    </div>
+  )
+}
+
+function FlowArrow() {
+  return (
+    <div className="flex items-center justify-center sm:min-w-8" aria-hidden>
+      <div className="hidden h-px w-full bg-line-strong sm:block" />
+      <span className="-ml-1 hidden text-brand sm:block">→</span>
+      <span className="font-mono text-xs text-brand sm:hidden">↓</span>
+    </div>
+  )
+}
+
+function FlowDownArrow() {
+  return (
+    <div className="grid sm:grid-cols-[1fr_auto_1.15fr]" aria-hidden>
+      <div className="flex h-10 items-center justify-center sm:col-start-3">
+        <div className="flex h-full flex-col items-center">
+          <div className="min-h-0 flex-1 border-l border-line-strong" />
+          <span className="-mt-1 font-mono text-xs text-brand">↓</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProviderLane({ name, state, note }: { name: string; state: 'closed' | 'open'; note: string }) {
+  const open = state === 'open'
+  return (
+    <div className={`rounded-2xl border px-3.5 py-3 ${open ? 'border-danger/30 bg-danger-bg/60 opacity-80' : 'border-line bg-surface-2'}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className={`h-2.5 w-2.5 rounded-full ${open ? 'bg-danger' : 'bg-success'}`} />
+          <span className="font-mono text-sm text-ink">{name}</span>
+        </div>
+        <Pill tone={open ? 'danger' : 'success'}>{state}</Pill>
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-3 font-mono text-[11px] text-muted">
+        <span>{note}</span>
+        <span className={open ? 'text-danger' : 'text-success'}>{open ? 'failover →' : 'selected'}</span>
+      </div>
+    </div>
+  )
+}
+
+function FlowCaption({ label, text }: { label: string; text: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2">
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-subtle font-mono text-[11px] text-brand">{label}</span>
+      <span className="font-mono text-[11px] text-muted">{text}</span>
     </div>
   )
 }
@@ -358,18 +428,6 @@ function BackdropGlow() {
       <div className="absolute left-1/2 top-[-12%] h-[42rem] w-[42rem] -translate-x-1/2 rounded-full opacity-60" style={{ background: 'radial-gradient(closest-side, var(--glow), transparent)' }} />
     </div>
   )
-}
-
-function Node({ label, accent }: { label: string; accent?: boolean }) {
-  return (
-    <span className={`inline-flex items-center rounded-lg border px-3 py-1.5 font-mono text-sm ${accent ? 'border-line-strong bg-brand-subtle text-brand' : 'border-line bg-surface-2'}`}>
-      {label}
-    </span>
-  )
-}
-
-function Wire() {
-  return <div className="h-px w-full" style={{ background: 'linear-gradient(90deg, var(--border-strong), var(--brand))' }} />
 }
 
 function CircuitGlyph({ state }: { state: string }) {

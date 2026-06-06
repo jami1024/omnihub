@@ -153,7 +153,7 @@ export function AlertChannelsPage() {
                       <button
                         onClick={() => handleTest(row)}
                         disabled={test.isPending}
-                        className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline disabled:opacity-50"
+                        className="mr-1 inline-flex min-h-10 items-center rounded-md px-2 text-muted underline-offset-4 hover:bg-surface-2 hover:text-ink hover:underline disabled:opacity-50 sm:mr-3 sm:px-1"
                       >
                         {t('alertChannels.test')}
                       </button>
@@ -162,14 +162,14 @@ export function AlertChannelsPage() {
                           setFormErr(null)
                           setEditing(row)
                         }}
-                        className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
+                        className="mr-1 inline-flex min-h-10 items-center rounded-md px-2 text-muted underline-offset-4 hover:bg-surface-2 hover:text-ink hover:underline sm:mr-3 sm:px-1"
                       >
                         {t('common.edit')}
                       </button>
                       <button
                         onClick={() => handleDelete(row)}
                         disabled={del.isPending}
-                        className="btn-danger hover:underline disabled:opacity-50"
+                        className="inline-flex min-h-10 items-center rounded-md px-2 btn-danger hover:underline disabled:opacity-50"
                       >
                         {t('common.delete')}
                       </button>

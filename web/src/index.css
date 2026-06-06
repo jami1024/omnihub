@@ -132,7 +132,7 @@
    One button, one input, one card, one badge — used on every page. */
 @layer components {
   .btn {
-    @apply inline-flex select-none items-center justify-center gap-1.5 rounded-lg px-3 py-1.5
+    @apply inline-flex min-h-10 select-none items-center justify-center gap-1.5 rounded-lg px-3 py-1.5
       text-sm font-medium transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
@@ -172,7 +172,7 @@
   }
 
   .field {
-    @apply w-full rounded-lg px-3 py-1.5 text-sm transition-shadow duration-150;
+    @apply min-h-10 w-full rounded-lg px-3 py-1.5 text-sm transition-shadow duration-150;
     background: var(--surface);
     color: var(--ink);
     border: 1px solid var(--border-strong);
@@ -255,6 +255,53 @@
   }
 }
 
+.login-signal-card {
+  position: relative;
+}
+
+.login-signal-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    transparent 38%,
+    color-mix(in oklch, var(--brand-subtle) 58%, transparent) 50%,
+    transparent 62%,
+    transparent 100%
+  );
+  opacity: 0.72;
+  transform: translateX(-55%);
+  animation: login-signal-sweep 5.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.login-signal-dot {
+  animation: login-signal-pulse 2.8s ease-out infinite;
+}
+
+@keyframes login-signal-sweep {
+  0%,
+  46% {
+    transform: translateX(-65%);
+  }
+  78%,
+  100% {
+    transform: translateX(65%);
+  }
+}
+
+@keyframes login-signal-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--brand) 22%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in oklch, var(--brand) 0%, transparent);
+  }
+}
+
 @keyframes modal-in {
   from {
     opacity: 0;
@@ -298,4 +345,265 @@
 }
 .reveal-1 {
   animation-delay: 0.12s;
+}
+
+/* Login motion language: calm control-plane signals, not decorative noise. */
+.login-ambient {
+  background-size: 130% 130%, 100% 100%;
+  animation: login-ambient-drift 16s cubic-bezier(0.22, 1, 0.36, 1) infinite alternate;
+  will-change: background-position, opacity;
+}
+
+.login-right-surface {
+  overflow: hidden;
+}
+.login-right-surface::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: -18%;
+  width: 1px;
+  height: 28%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in oklch, var(--brand) 42%, transparent),
+    transparent
+  );
+  opacity: 0.72;
+  animation: login-divider-scan 6.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.login-left-panel {
+  animation: login-panel-in 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.login-form-panel {
+  animation: login-panel-in 720ms 90ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.login-form-card > * {
+  animation: login-field-in 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.login-form-card > *:nth-child(2) { animation-delay: 90ms; }
+.login-form-card > *:nth-child(3) { animation-delay: 150ms; }
+.login-form-card > *:nth-child(4) { animation-delay: 210ms; }
+.login-form-card > *:nth-child(5) { animation-delay: 260ms; }
+
+.login-brand-mark {
+  position: relative;
+  overflow: hidden;
+  animation: login-mark-in 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.login-brand-mark::after {
+  content: '';
+  position: absolute;
+  inset: -35%;
+  background: linear-gradient(115deg, transparent 35%, oklch(1 0 0 / 0.36), transparent 62%);
+  transform: translateX(-90%) rotate(8deg);
+  animation: login-mark-glint 5.4s 1.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+.login-brand-mark svg circle:not(:first-of-type) {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: login-node-pulse 3.8s ease-out infinite;
+}
+.login-brand-mark svg circle:nth-of-type(3) { animation-delay: 0.25s; }
+.login-brand-mark svg circle:nth-of-type(4) { animation-delay: 0.5s; }
+.login-brand-mark svg circle:nth-of-type(5) { animation-delay: 0.75s; }
+
+.login-hero-title {
+  animation: login-title-settle 760ms 80ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.login-signal-card {
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease, border-color 220ms ease;
+}
+.login-signal-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklch, var(--brand) 22%, var(--border));
+  box-shadow: var(--shadow);
+}
+.login-signal-row {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms ease, background 180ms ease;
+}
+.login-signal-row:hover {
+  transform: translateX(2px);
+  border-color: color-mix(in oklch, var(--brand) 18%, var(--border));
+}
+.login-status-pill {
+  animation: login-status-breathe 3.2s ease-in-out infinite;
+}
+.login-field {
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background 160ms ease;
+}
+.login-field:focus {
+  transform: translateY(-1px);
+}
+.login-submit {
+  transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1), filter 140ms ease, box-shadow 140ms ease;
+}
+.login-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.login-submit:active:not(:disabled) {
+  transform: translateY(0) scale(0.99);
+}
+
+@keyframes login-ambient-drift {
+  from {
+    background-position: 0% 0%, center;
+    opacity: 0.92;
+  }
+  to {
+    background-position: 16% 8%, center;
+    opacity: 1;
+  }
+}
+@keyframes login-divider-scan {
+  0%, 34% { transform: translateY(0); opacity: 0; }
+  48% { opacity: 0.72; }
+  82%, 100% { transform: translateY(520%); opacity: 0; }
+}
+@keyframes login-panel-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes login-field-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes login-mark-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes login-mark-glint {
+  0%, 58% { transform: translateX(-90%) rotate(8deg); opacity: 0; }
+  70% { opacity: 0.85; }
+  88%, 100% { transform: translateX(90%) rotate(8deg); opacity: 0; }
+}
+@keyframes login-node-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.68; }
+  46% { transform: scale(1.18); opacity: 0.95; }
+}
+@keyframes login-title-settle {
+  from { opacity: 0; transform: translateY(10px); letter-spacing: -0.08em; }
+  to { opacity: 1; transform: translateY(0); letter-spacing: -0.055em; }
+}
+@keyframes login-status-breathe {
+  0%, 100% { box-shadow: inset 0 0 0 1px transparent; }
+  50% { box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--brand) 22%, transparent); }
+}
+
+/* Static login effects that remain visible even when motion is reduced. */
+.login-ambient::before,
+.login-ambient::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.login-ambient::before {
+  background-image:
+    linear-gradient(color-mix(in oklch, var(--brand) 8%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, var(--brand) 8%, transparent) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at 26% 42%, black, transparent 58%);
+  opacity: 0.26;
+}
+.login-ambient::after {
+  background:
+    radial-gradient(circle at 30% 68%, color-mix(in oklch, var(--brand) 6%, transparent), transparent 32%),
+    radial-gradient(circle at 74% 28%, color-mix(in oklch, var(--brand-2) 5%, transparent), transparent 28%);
+  opacity: 0.38;
+}
+.login-form-panel {
+  position: relative;
+}
+.login-form-panel::before {
+  content: '';
+  position: absolute;
+  inset: 5.5rem -0.5rem auto auto;
+  width: min(17rem, 62%);
+  height: 11rem;
+  pointer-events: none;
+  background: radial-gradient(circle, color-mix(in oklch, var(--brand-subtle) 34%, transparent), transparent 72%);
+  filter: blur(24px);
+  opacity: 0.18;
+  transform: translateZ(0);
+}
+.login-form-card {
+  isolation: isolate;
+}
+.login-form-card::before {
+  content: '';
+  position: absolute;
+  inset: -0.5rem -0.5rem auto -0.5rem;
+  height: 4.5rem;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(180deg, color-mix(in oklch, var(--brand-subtle) 24%, transparent), transparent);
+  border-radius: 1.25rem;
+  opacity: 0.16;
+}
+.login-right-surface {
+  box-shadow: inset 1px 0 0 color-mix(in oklch, var(--brand) 12%, transparent);
+}
+
+.login-back-home {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid transparent;
+  transition:
+    color 180ms ease,
+    background 180ms ease,
+    border-color 180ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.login-back-home::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 22% 50%, color-mix(in oklch, var(--brand-subtle) 42%, transparent), transparent 36%),
+    linear-gradient(90deg, transparent, color-mix(in oklch, var(--brand-subtle) 28%, transparent), transparent);
+  opacity: 0;
+  transform: translateX(10px);
+  transition:
+    opacity 180ms ease,
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.login-back-home > span {
+  position: relative;
+  z-index: 1;
+}
+.login-back-home-orbit {
+  display: inline-flex;
+  height: 1.5rem;
+  width: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  color: var(--muted);
+  background: color-mix(in oklch, var(--surface-2) 74%, transparent);
+  transition:
+    color 180ms ease,
+    background 180ms ease,
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.login-back-home:hover,
+.login-back-home:focus-visible {
+  color: var(--ink);
+  background: color-mix(in oklch, var(--surface) 76%, transparent);
+  border-color: color-mix(in oklch, var(--brand) 14%, var(--border));
+  transform: translateY(-1px);
+}
+.login-back-home:hover::before,
+.login-back-home:focus-visible::before {
+  opacity: 1;
+  transform: translateX(0);
+}
+.login-back-home:hover .login-back-home-orbit,
+.login-back-home:focus-visible .login-back-home-orbit {
+  color: var(--brand);
+  background: color-mix(in oklch, var(--brand-subtle) 76%, var(--surface));
+  transform: translateX(-2px);
 }

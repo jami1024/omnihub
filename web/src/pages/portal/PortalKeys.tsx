@@ -28,12 +28,12 @@ export function PortalKeysPage() {
   return (
     <PortalLayout>
       <main className="mx-auto max-w-5xl px-6 py-8">
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-xl font-semibold">{t('portalKeys.title')}</h2>
             <p className="text-sm text-muted">{t('portalKeys.subtitle')}</p>
           </div>
-          <button onClick={() => setShowForm(true)} className="btn btn-primary">
+          <button onClick={() => setShowForm(true)} className="btn btn-primary min-h-10">
             {t('portalKeys.newKey')}
           </button>
         </div>
@@ -80,7 +80,7 @@ export function PortalKeysPage() {
                       <button
                         onClick={() => handleDelete(k)}
                         disabled={del.isPending}
-                        className="btn-danger hover:underline disabled:opacity-50"
+                        className="inline-flex min-h-10 items-center rounded-md px-2 btn-danger hover:underline disabled:opacity-50"
                       >
                         {t('common.delete')}
                       </button>
@@ -167,7 +167,7 @@ function CreateKeyModal({
           <button type="button" onClick={onClose} className="btn btn-secondary">
             {t('common.cancel')}
           </button>
-          <button type="submit" disabled={submitting} className="btn btn-primary">
+          <button type="submit" disabled={submitting} className="btn btn-primary min-h-10">
             {submitting ? t('portalKeys.creating') : t('portalKeys.createKey')}
           </button>
         </div>
@@ -194,7 +194,7 @@ function RevealKey({ result, onClose }: { result: CreatePortalKeyResult; onClose
         </button>
       </div>
       <div className="mt-5 flex justify-end">
-        <button onClick={onClose} className="btn btn-primary">
+        <button onClick={onClose} className="btn btn-primary min-h-10">
           {t('portalKeys.done')}
         </button>
       </div>

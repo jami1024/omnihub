@@ -26,7 +26,7 @@ export function PortalOverviewPage() {
   return (
     <PortalLayout>
       <main className="mx-auto max-w-5xl px-6 py-8">
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-xl font-semibold">{t('portalOverview.title')}</h2>
             <p className="text-sm text-muted">{t('portalOverview.subtitle')}</p>
@@ -36,7 +36,7 @@ export function PortalOverviewPage() {
               <button
                 key={w}
                 onClick={() => setDays(w)}
-                className="rounded-full px-2.5 py-1 transition-colors"
+                className="min-h-10 rounded-full px-3 transition-colors"
                 style={{
                   color: days === w ? 'var(--brand-ink)' : 'var(--muted)',
                   background: days === w ? 'var(--brand)' : 'transparent',

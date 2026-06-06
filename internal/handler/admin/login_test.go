@@ -1,7 +1,6 @@
 package admin_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,32 +11,23 @@ import (
 	"github.com/gin-gonic/gin"
 
 	handler "github.com/jami1024/omnihub/internal/handler/admin"
-	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/admin"
 	"github.com/jami1024/omnihub/internal/service/guard"
 )
 
-// stubRepo satisfies the (unexported) userLookup interface in the
-// login handler — we feed it a fixed user and toggle the failure mode
-// per test.
-type stubRepo struct {
-	user *admin.User
-	err  error
-}
-
-func (s *stubRepo) GetByUsername(_ context.Context, _ string) (*admin.User, error) {
-	if s.err != nil {
-		return nil, s.err
-	}
-	return s.user, nil
-}
-
-func newLoginEngine(t *testing.T, repo *stubRepo) (*gin.Engine, *admin.Issuer) {
+func newLoginEngine(t *testing.T, email, password string) (*gin.Engine, *admin.Issuer) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	iss := admin.NewIssuer([]byte("test-secret"), time.Hour)
+	hash, err := admin.HashPassword(password)
+	if err != nil {
+		t.Fatal(err)
+	}
 	r := gin.New()
-	r.POST("/admin/api/login", handler.LoginHandler(repo, iss))
+	r.POST("/admin/api/login", handler.LoginHandler(handler.EnvAdminCredentials{
+		Email:        email,
+		PasswordHash: hash,
+	}, iss))
 	return r, iss
 }
 
@@ -50,12 +40,9 @@ func doJSON(r *gin.Engine, body string) *httptest.ResponseRecorder {
 }
 
 func TestLoginSuccess(t *testing.T) {
-	hash, _ := admin.HashPassword("hunter2")
-	r, iss := newLoginEngine(t, &stubRepo{
-		user: &admin.User{ID: 7, Username: "root", PasswordHash: hash, Enabled: true},
-	})
+	r, iss := newLoginEngine(t, "root@example.com", "hunter2")
 
-	rec := doJSON(r, `{"username":"root","password":"hunter2"}`)
+	rec := doJSON(r, `{"email":"ROOT@example.com","password":"hunter2"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -63,28 +50,28 @@ func TestLoginSuccess(t *testing.T) {
 		Token     string `json:"token"`
 		ExpiresAt int64  `json:"expires_at"`
 		Username  string `json:"username"`
+		Email     string `json:"email"`
+		Role      string `json:"role"`
+		Redirect  string `json:"redirect_to"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.Username != "root" || resp.Token == "" {
+	if resp.Username != "root@example.com" || resp.Email != "root@example.com" || resp.Role != "admin" || resp.Redirect != "/admin" || resp.Token == "" {
 		t.Errorf("login response = %+v", resp)
 	}
 	claims, err := iss.Verify(resp.Token)
 	if err != nil {
 		t.Fatalf("issued token does not verify: %v", err)
 	}
-	if claims.Sub != "root" || claims.UID != 7 {
-		t.Errorf("claims = %+v, want sub=root uid=7", claims)
+	if claims.Sub != "root@example.com" || claims.Kind != admin.KindAdmin {
+		t.Errorf("claims = %+v, want admin email subject", claims)
 	}
 }
 
 func TestLoginWrongPassword(t *testing.T) {
-	hash, _ := admin.HashPassword("hunter2")
-	r, _ := newLoginEngine(t, &stubRepo{
-		user: &admin.User{ID: 7, Username: "root", PasswordHash: hash, Enabled: true},
-	})
-	rec := doJSON(r, `{"username":"root","password":"wrong"}`)
+	r, _ := newLoginEngine(t, "root@example.com", "hunter2")
+	rec := doJSON(r, `{"email":"root@example.com","password":"wrong"}`)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -93,33 +80,19 @@ func TestLoginWrongPassword(t *testing.T) {
 	}
 }
 
-func TestLoginUnknownUser(t *testing.T) {
-	r, _ := newLoginEngine(t, &stubRepo{err: repository.ErrAdminUserNotFound})
-	rec := doJSON(r, `{"username":"nobody","password":"x"}`)
+func TestLoginUnknownEmail(t *testing.T) {
+	r, _ := newLoginEngine(t, "root@example.com", "hunter2")
+	rec := doJSON(r, `{"email":"nobody@example.com","password":"hunter2"}`)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "invalid_credentials") {
-		t.Errorf("unknown user should look like a wrong password, got %s", rec.Body.String())
-	}
-}
-
-func TestLoginDisabledUser(t *testing.T) {
-	hash, _ := admin.HashPassword("hunter2")
-	r, _ := newLoginEngine(t, &stubRepo{
-		user: &admin.User{ID: 7, Username: "root", PasswordHash: hash, Enabled: false},
-	})
-	rec := doJSON(r, `{"username":"root","password":"hunter2"}`)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "invalid_credentials") {
-		t.Errorf("disabled user should mask as wrong-password, got %s", rec.Body.String())
+		t.Errorf("unknown email should look like a wrong password, got %s", rec.Body.String())
 	}
 }
 
 func TestLoginBadJSON(t *testing.T) {
-	r, _ := newLoginEngine(t, &stubRepo{})
+	r, _ := newLoginEngine(t, "root@example.com", "hunter2")
 	rec := doJSON(r, `{not json`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d", rec.Code)

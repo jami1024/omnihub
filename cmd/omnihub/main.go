@@ -21,6 +21,7 @@ import (
 	"github.com/jami1024/omnihub/internal/crypto"
 	"github.com/jami1024/omnihub/internal/db"
 	adminhandler "github.com/jami1024/omnihub/internal/handler/admin"
+	authhandler "github.com/jami1024/omnihub/internal/handler/auth"
 	"github.com/jami1024/omnihub/internal/handler/gateway"
 	portalhandler "github.com/jami1024/omnihub/internal/handler/portal"
 	"github.com/jami1024/omnihub/internal/repository"
@@ -278,8 +279,9 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 //     would sign with no key, so we refuse to mount instead of crashing
 //     later. Operators see a single startup warn and the gateway keeps
 //     serving /v1/messages normally.
-//   - A database must be configured (the admin_users table is the source
-//     of truth for login). Log-only deployments skip the admin UI.
+//   - OMNIHUB_ADMIN_EMAIL and a password source must be set. The admin
+//     identity is env-owned; public signup only creates portal users.
+//   - A database must be configured. Log-only deployments skip the web UI.
 //
 // The SPA is served via gin's NoRoute fallback rather than a wildcard
 // route because /admin/api/* already lives under /admin/ and gin
@@ -290,13 +292,17 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 		slog.Warn("/admin disabled: OMNIHUB_ADMIN_JWT_SECRET not set; the web UI will not authenticate")
 		return
 	}
+	adminCreds, ok := adminCredentialsFromEnv()
+	if !ok {
+		slog.Warn("/admin disabled: set OMNIHUB_ADMIN_EMAIL and OMNIHUB_ADMIN_PASSWORD_HASH (or OMNIHUB_ADMIN_PASSWORD)")
+		return
+	}
 	if pool == nil {
 		slog.Warn("/admin disabled: no database configured (set OMNIHUB_DATABASE_URL)")
 		return
 	}
 
 	issuer := admin.NewIssuer([]byte(secret), 24*time.Hour)
-	adminUserRepo := repository.NewAdminUserRepo(pool)
 	accountRepo := repository.NewAccountRepo(pool, accountCipher)
 	groupRepo := repository.NewProviderGroupRepo(pool)
 	apiKeyRepo := repository.NewApiKeyRepo(pool)
@@ -317,7 +323,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	}
 
 	api := r.Group("/admin/api")
-	api.POST("/login", adminhandler.LoginHandler(adminUserRepo, issuer))
+	api.POST("/login", adminhandler.LoginHandler(adminCreds, issuer))
 
 	authed := api.Group("", adminAuth.Middleware())
 	authed.GET("/me", adminhandler.MeHandler())
@@ -393,8 +399,10 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	userRepo := repository.NewUserRepo(pool)
 	portalSettingsRepo := repository.NewPortalSettingsRepo(pool)
 	userAuth := guard.NewUserAuthenticator(issuer)
+	authAPI := r.Group("/auth/api")
+	authAPI.POST("/login", authhandler.LoginHandler(adminCreds, userRepo, issuer))
 	papi := r.Group("/portal/api")
-	papi.POST("/signup", portalhandler.SignupHandler(userRepo, portalSettingsRepo, walletRepo, issuer))
+	papi.POST("/signup", portalhandler.SignupHandlerWithReservedEmail(userRepo, portalSettingsRepo, walletRepo, issuer, adminCreds.Email))
 	papi.POST("/login", portalhandler.LoginHandler(userRepo, issuer))
 	puser := papi.Group("", userAuth.Middleware())
 	puser.GET("/me", portalhandler.MeHandler(userRepo))
@@ -430,7 +438,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 		spa := web.SPAHandler("")
 		r.NoRoute(func(c *gin.Context) {
 			p := c.Request.URL.Path
-			if strings.HasPrefix(p, "/admin") || strings.HasPrefix(p, "/portal") ||
+			if strings.HasPrefix(p, "/admin") || strings.HasPrefix(p, "/portal") || p == "/login" ||
 				strings.HasPrefix(p, "/assets") || p == "/" {
 				spa(c)
 				return
@@ -442,6 +450,27 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 		slog.Info("admin API mounted (devui build, SPA served by external Vite dev server)",
 			"api_paths", []string{"/admin/api/login", "/admin/api/me"})
 	}
+}
+
+func adminCredentialsFromEnv() (adminhandler.EnvAdminCredentials, bool) {
+	email := strings.ToLower(strings.TrimSpace(os.Getenv("OMNIHUB_ADMIN_EMAIL")))
+	hash := strings.TrimSpace(os.Getenv("OMNIHUB_ADMIN_PASSWORD_HASH"))
+	if email == "" {
+		return adminhandler.EnvAdminCredentials{}, false
+	}
+	if hash == "" {
+		password := os.Getenv("OMNIHUB_ADMIN_PASSWORD")
+		if password == "" {
+			return adminhandler.EnvAdminCredentials{}, false
+		}
+		var err error
+		hash, err = admin.HashPassword(password)
+		if err != nil {
+			slog.Error("admin password hash failed", "err", err.Error())
+			return adminhandler.EnvAdminCredentials{}, false
+		}
+	}
+	return adminhandler.EnvAdminCredentials{Email: email, PasswordHash: hash}, true
 }
 
 // mountGatewayRoutes wires the LLM forwarding endpoints onto r.

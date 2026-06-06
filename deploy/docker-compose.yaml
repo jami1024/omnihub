@@ -64,6 +64,11 @@ services:
       # refuses to mount /admin (see mountAdminRoutes), so the console is
       # unreachable. Generate with `openssl rand -hex 32`.
       OMNIHUB_ADMIN_JWT_SECRET: ${OMNIHUB_ADMIN_JWT_SECRET:?OMNIHUB_ADMIN_JWT_SECRET must be set in deploy/.env}
+      # Single admin login identity. Public registration creates only
+      # portal users and cannot claim this email.
+      OMNIHUB_ADMIN_EMAIL: ${OMNIHUB_ADMIN_EMAIL:?OMNIHUB_ADMIN_EMAIL must be set in deploy/.env}
+      OMNIHUB_ADMIN_PASSWORD_HASH: ${OMNIHUB_ADMIN_PASSWORD_HASH:-}
+      OMNIHUB_ADMIN_PASSWORD: ${OMNIHUB_ADMIN_PASSWORD:-}
       # AES-256 key (base64 of 32 bytes) that encrypts account secrets at
       # rest. Empty = encryption disabled (plaintext, legacy). Generate
       # with `openssl rand -base64 32`. WARNING: losing this key makes

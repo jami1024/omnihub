@@ -52,7 +52,7 @@ export function SettingsPage() {
               <label className="flex items-start gap-3">
                 <input
                   type="checkbox"
-                  className="mt-1"
+                  className="mt-1 h-5 w-5 shrink-0"
                   checked={form.signup_enabled}
                   onChange={(e) => setForm({ ...form, signup_enabled: e.target.checked })}
                 />
@@ -72,7 +72,7 @@ export function SettingsPage() {
                   {t('settings.userKeyLimitsHint')}
                 </p>
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid gap-4 sm:grid-cols-3">
                 <Field label={t('settings.defaultDailyUsd')}>
                   <input
                     className="field"

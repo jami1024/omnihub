@@ -67,7 +67,7 @@ export function DashboardPage() {
               <button
                 key={w}
                 onClick={() => setDays(w)}
-                className={`rounded px-2.5 py-1 ${
+                className={`min-h-10 rounded px-3 py-1 ${
                   days === w
                     ? 'bg-brand text-brand-ink'
                     : 'text-muted hover:bg-surface-2 hover:text-ink'

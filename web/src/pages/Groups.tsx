@@ -113,14 +113,14 @@ export function GroupsPage() {
                     <Td className="text-right">
                       <button
                         onClick={() => setEditing(g)}
-                        className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
+                        className="mr-1 inline-flex min-h-10 items-center rounded-md px-2 text-muted underline-offset-4 hover:bg-surface-2 hover:text-ink hover:underline sm:mr-3 sm:px-1"
                       >
                         {t('common.edit')}
                       </button>
                       <button
                         onClick={() => remove(g)}
                         disabled={del.isPending}
-                        className="btn-danger hover:underline disabled:opacity-50"
+                        className="inline-flex min-h-10 items-center rounded-md px-2 btn-danger hover:underline disabled:opacity-50"
                       >
                         {t('common.delete')}
                       </button>

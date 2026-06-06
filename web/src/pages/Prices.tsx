@@ -118,7 +118,7 @@ export function PricesPage() {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder={t('prices.filterPlaceholder')}
-          className="field my-4 max-w-sm"
+          className="field my-4 h-10 max-w-sm"
         />
 
         {isLoading && <LoadingTable columns={5} />}
@@ -184,14 +184,14 @@ export function PricesPage() {
                             setFormErr(null)
                             setEditing(p)
                           }}
-                          className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
+                          className="mr-1 inline-flex min-h-10 items-center rounded-md px-2 text-muted underline-offset-4 hover:bg-surface-2 hover:text-ink hover:underline sm:mr-3 sm:px-1"
                         >
                           {t('common.edit')}
                         </button>
                         <button
                           onClick={() => handleDelete(p)}
                           disabled={del.isPending}
-                          className="btn-danger hover:underline disabled:opacity-50"
+                          className="inline-flex min-h-10 items-center rounded-md px-2 btn-danger hover:underline disabled:opacity-50"
                         >
                           {t('common.delete')}
                         </button>

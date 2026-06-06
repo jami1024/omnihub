@@ -104,28 +104,28 @@ export function UsersPage() {
                     <Td className="text-right">
                       <button
                         onClick={() => setRecharging(u)}
-                        className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline"
+                        className="mr-1 inline-flex min-h-10 items-center rounded-md px-2 text-muted underline-offset-4 hover:bg-surface-2 hover:text-ink hover:underline sm:mr-3 sm:px-1"
                       >
                         {t('users.recharge')}
                       </button>
                       <button
                         onClick={() => editRatio(u)}
                         disabled={setRatio.isPending}
-                        className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline disabled:opacity-50"
+                        className="mr-1 inline-flex min-h-10 items-center rounded-md px-2 text-muted underline-offset-4 hover:bg-surface-2 hover:text-ink hover:underline disabled:opacity-50 sm:mr-3 sm:px-1"
                       >
                         {t('users.ratio')}
                       </button>
                       <button
                         onClick={() => toggle(u)}
                         disabled={setEnabled.isPending}
-                        className="mr-3 text-muted underline-offset-4 hover:text-ink hover:underline disabled:opacity-50"
+                        className="mr-1 inline-flex min-h-10 items-center rounded-md px-2 text-muted underline-offset-4 hover:bg-surface-2 hover:text-ink hover:underline disabled:opacity-50 sm:mr-3 sm:px-1"
                       >
                         {u.enabled ? t('common.disable') : t('common.enable')}
                       </button>
                       <button
                         onClick={() => remove(u)}
                         disabled={del.isPending}
-                        className="btn-danger hover:underline disabled:opacity-50"
+                        className="inline-flex min-h-10 items-center rounded-md px-2 btn-danger hover:underline disabled:opacity-50"
                       >
                         {t('common.delete')}
                       </button>

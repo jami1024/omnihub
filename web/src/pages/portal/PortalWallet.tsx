@@ -104,7 +104,7 @@ function RedeemBox() {
       <h3 className="mb-2 text-sm font-semibold">{t('portalWallet.redeemTitle')}</h3>
       <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
         <input
-          className="field max-w-xs flex-1"
+          className="field h-10 min-w-0 flex-1 sm:max-w-xs"
           value={code}
           onChange={(e) => setCode(e.target.value)}
           placeholder="OMNI-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"

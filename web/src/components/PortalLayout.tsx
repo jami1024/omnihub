@@ -21,19 +21,19 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-bg text-ink">
       <header className="sticky top-0 z-40 border-b border-line bg-surface/80 backdrop-blur supports-[backdrop-filter]:bg-surface/60">
-        <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between gap-4 px-6">
-          <div className="flex min-w-0 items-center gap-4">
+        <div className="mx-auto flex min-h-16 w-full max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:flex-nowrap sm:gap-4 sm:px-6">
+          <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
             <div className="flex shrink-0 items-center gap-2">
               <BrandMark />
               <span className="text-[15px] font-semibold tracking-tight">OmniHub</span>
             </div>
-            <nav className="flex items-center gap-1 rounded-full border border-line bg-bg/60 px-1 py-1">
+            <nav className="order-3 flex w-full min-w-0 items-center gap-1 overflow-x-auto rounded-full border border-line bg-bg/60 px-1 py-1 sm:order-none sm:w-auto">
               {NAV.map((n) => (
                 <NavLink
                   key={n.to}
                   to={n.to}
                   end={n.to === '/portal'}
-                  className="whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium transition-colors"
+                  className="inline-flex min-h-10 items-center whitespace-nowrap rounded-full px-3 text-sm font-medium transition-colors"
                   style={({ isActive }) =>
                     ({
                       color: isActive ? 'var(--ink)' : 'var(--muted)',
@@ -50,7 +50,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
             <LangSwitch />
             <ThemeToggle />
             <span className="hidden text-sm text-muted sm:inline">{me?.username}</span>
-            <button onClick={logout} className="btn btn-secondary h-8">
+            <button onClick={logout} className="btn btn-secondary min-h-10">
               {t('common.signOut')}
             </button>
           </div>
@@ -87,7 +87,7 @@ function ThemeToggle() {
     setLocal(next)
   }
   return (
-    <button onClick={cycle} className="btn btn-ghost h-8 w-8 px-0" title="Toggle theme" aria-label="Toggle theme">
+    <button onClick={cycle} className="btn btn-ghost h-10 w-10 px-0" title="Toggle theme" aria-label="Toggle theme">
       {theme === 'system' ? (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="2" y="4" width="20" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></svg>
       ) : theme === 'light' ? (

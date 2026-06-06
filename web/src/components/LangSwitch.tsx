@@ -12,7 +12,7 @@ export function LangSwitch({ className = '' }: { className?: string }) {
       title={t('lang.label')}
       aria-label={t('lang.label')}
       className={
-        'inline-flex h-9 items-center justify-center rounded-lg border border-line px-2 text-xs font-medium text-muted transition-colors hover:text-ink ' +
+        'inline-flex h-10 min-w-10 items-center justify-center rounded-lg border border-line px-3 text-xs font-medium text-muted transition-colors hover:text-ink ' +
         className
       }
     >

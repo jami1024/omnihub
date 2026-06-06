@@ -10,8 +10,8 @@ export interface PortalMe {
 interface PortalAuthState {
   me: PortalMe | null
   loading: boolean
-  login(username: string, password: string): Promise<void>
-  signup(username: string, password: string): Promise<void>
+  login(email: string, password: string): Promise<void>
+  signup(email: string, password: string): Promise<void>
   logout(): void
 }
 
@@ -43,10 +43,10 @@ export function PortalAuthProvider({ children }: { children: React.ReactNode }) 
     }
   }, [])
 
-  const authed = useCallback(async (path: string, username: string, password: string) => {
-    const res = await papi<{ token: string; username: string }>(path, {
+  const authed = useCallback(async (path: string, email: string, password: string) => {
+    const res = await papi<{ token: string; username: string; email: string }>(path, {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ email, password }),
     })
     setToken(res.token)
     const profile = await papi<PortalMe>('/me')

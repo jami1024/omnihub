@@ -4,9 +4,9 @@ import { ApiError } from '../../lib/portalApi'
 import { usePortalAuth } from '../../lib/portalAuth'
 import { useI18n } from '../../lib/i18n'
 
-// PortalLogin handles both sign in and open registration, toggled in
-// place. A graphite "control plane" brand panel sits beside the form on
-// large screens and collapses to a compact header on mobile.
+// PortalLogin mirrors the admin login composition: a calm product-intro
+// column beside a standard card form. It keeps portal registration in the
+// same place without changing the auth flow.
 export function PortalLoginPage({ initialMode = 'login' }: { initialMode?: 'login' | 'signup' }) {
   const { t } = useI18n()
   const { me, login, signup } = usePortalAuth()
@@ -37,124 +37,175 @@ export function PortalLoginPage({ initialMode = 'login' }: { initialMode?: 'logi
   const isSignup = mode === 'signup'
 
   return (
-    <div className="grid min-h-screen bg-bg text-ink lg:grid-cols-[1.1fr_1fr]">
-      <BrandPanel t={t} />
+    <div className="relative min-h-screen overflow-hidden bg-bg text-ink">
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(circle at 18% 20%, color-mix(in oklch, var(--brand-subtle) 72%, transparent), transparent 34%), linear-gradient(135deg, var(--surface) 0%, var(--bg) 52%, var(--surface-2) 100%)',
+        }}
+      />
+      <div
+        className="pointer-events-none absolute left-1/2 top-0 hidden h-full w-px bg-line lg:block"
+        aria-hidden
+      />
 
-      <main className="flex items-center justify-center px-6 py-12">
-        <form onSubmit={onSubmit} className="reveal w-full max-w-sm space-y-5">
-          {/* Compact brand header for mobile (panel is hidden < lg). */}
-          <div className="flex items-center gap-2 lg:hidden">
+      <main className="relative mx-auto grid min-h-screen w-full max-w-6xl items-center gap-10 px-6 py-10 lg:grid-cols-[1.05fr_0.95fr] lg:px-8">
+        <section className="hidden max-w-xl lg:block" aria-labelledby="portal-login-intro-title">
+          <div className="mb-12 flex items-center gap-3">
             <Logo />
-            <span className="text-lg font-semibold tracking-tight">OmniHub</span>
+            <div>
+              <p className="text-sm font-semibold tracking-tight">OmniHub</p>
+              <p className="text-xs text-muted">{t('portalLogin.brandFootnote')}</p>
+            </div>
           </div>
 
-          <div className="space-y-1">
-            <h1 className="text-xl font-semibold tracking-tight">
-              {isSignup ? t('portalLogin.signupTitle') : t('portalLogin.loginTitle')}
-            </h1>
-            <p className="text-sm text-muted">
-              {isSignup ? t('portalLogin.signupSubtitle') : t('portalLogin.loginSubtitle')}
-            </p>
-          </div>
-
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">{t('portalLogin.username')}</span>
-            <input className="field py-2" autoFocus autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">{t('portalLogin.password')}</span>
-            <input
-              className="field py-2"
-              type="password"
-              autoComplete={isSignup ? 'new-password' : 'current-password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-            {isSignup && <span className="text-xs text-muted">{t('portalLogin.passwordHint')}</span>}
-          </label>
-
-          {error && <p className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
-
-          <button type="submit" disabled={busy} className="btn btn-primary h-11 w-full">
-            {busy ? t('portalLogin.pleaseWait') : isSignup ? t('portalLogin.createAccount') : t('portalLogin.signIn')}
-          </button>
-
-          <p className="text-center text-sm text-muted">
-            {isSignup ? t('portalLogin.alreadyHaveAccount') : t('portalLogin.newHere')}{' '}
-            <button
-              type="button"
-              onClick={() => {
-                setMode(isSignup ? 'login' : 'signup')
-                setError(null)
-              }}
-              className="font-medium text-brand hover:underline"
-            >
-              {isSignup ? t('portalLogin.signIn') : t('portalLogin.createOne')}
-            </button>
+          <p className="mb-4 text-xs font-medium uppercase tracking-[0.18em] text-muted">
+            {t('portalLogin.userPortal')}
           </p>
-        </form>
+          <h1
+            id="portal-login-intro-title"
+            className="max-w-[13ch] text-5xl font-semibold leading-[0.98] tracking-[-0.045em]"
+          >
+            {t('portalLogin.brandTitle')}
+          </h1>
+          <p className="mt-6 max-w-md text-base leading-7 text-muted">
+            {t('portalLogin.brandSub')}
+          </p>
+
+          <PortalPath />
+        </section>
+
+        <section className="mx-auto w-full max-w-md lg:mx-0 lg:justify-self-end">
+          <div className="mb-8 flex items-center justify-center gap-3 lg:hidden">
+            <Logo />
+            <div>
+              <p className="text-sm font-semibold tracking-tight">OmniHub</p>
+              <p className="text-xs text-muted">{t('portalLogin.brandFootnote')}</p>
+            </div>
+          </div>
+
+          <form
+            onSubmit={onSubmit}
+            aria-busy={busy}
+            className="card relative overflow-hidden p-6 shadow-panel sm:p-7"
+          >
+            <header className="mb-6">
+              <p className="mb-2 text-xs font-medium uppercase tracking-[0.16em] text-muted">
+                {t('portalLogin.portalAccess')}
+              </p>
+              <h2 className="text-2xl font-semibold tracking-tight">
+                {isSignup ? t('portalLogin.signupTitle') : t('portalLogin.loginTitle')}
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-muted">
+                {isSignup ? t('portalLogin.signupSubtitle') : t('portalLogin.loginSubtitle')}
+              </p>
+            </header>
+
+            <div className="space-y-4">
+              <label className="block">
+                <span className="text-sm font-medium">{t('portalLogin.username')}</span>
+                <input
+                  className="field mt-1.5 h-10"
+                  autoFocus
+                  autoComplete="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder={t('portalLogin.username')}
+                  required
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium">{t('portalLogin.password')}</span>
+                <input
+                  className="field mt-1.5 h-10"
+                  type="password"
+                  autoComplete={isSignup ? 'new-password' : 'current-password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                />
+                {isSignup && <span className="mt-1.5 block text-xs text-muted">{t('portalLogin.passwordHint')}</span>}
+              </label>
+            </div>
+
+            {error && (
+              <p
+                className="mt-4 rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger"
+                role="alert"
+                aria-live="polite"
+              >
+                {error}
+              </p>
+            )}
+
+            <button type="submit" disabled={busy} className="btn btn-primary mt-6 h-10 w-full">
+              {busy ? t('portalLogin.pleaseWait') : isSignup ? t('portalLogin.createAccount') : t('portalLogin.signIn')}
+            </button>
+
+            <div className="mt-5 border-t border-line pt-4 text-center text-sm text-muted">
+              {isSignup ? t('portalLogin.alreadyHaveAccount') : t('portalLogin.newHere')}{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  setMode(isSignup ? 'login' : 'signup')
+                  setError(null)
+                }}
+                className="inline-flex min-h-10 items-center rounded-md px-2 font-medium text-brand hover:bg-surface-2 hover:underline"
+              >
+                {isSignup ? t('portalLogin.signIn') : t('portalLogin.createOne')}
+              </button>
+            </div>
+          </form>
+
+          <Link to="/" className="mx-auto mt-5 flex min-h-10 w-fit items-center rounded-md px-2 text-sm text-muted transition-colors hover:bg-surface-2 hover:text-ink">
+            {t('portalLogin.backHome')}
+          </Link>
+        </section>
       </main>
     </div>
   )
 }
 
-/* The graphite brand panel: a deliberate dark "control plane" moment that
-   stays dark in both themes (art direction), with the real portal motifs
-   a user is signing in to manage. */
-function BrandPanel({ t }: { t: (k: string) => string }) {
+function PortalPath() {
+  const rows = [
+    ['KEY', 'omni-7f3c…a91'],
+    ['BALANCE', '$9.9959'],
+    ['REQUESTS', '1,284 · 24h'],
+    ['TTFB', '510ms · p95'],
+  ] as const
+
   return (
-    <aside
-      className="relative hidden flex-col justify-between overflow-hidden p-10 lg:flex"
-      style={{ background: 'linear-gradient(155deg, oklch(0.2 0.008 286), oklch(0.141 0.005 285.8))', color: 'oklch(0.985 0 0)' }}
-    >
-      <div aria-hidden className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full" style={{ background: 'radial-gradient(closest-side, oklch(0.55 0.06 255 / 0.35), transparent)' }} />
-
-      <div className="relative flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-2">
-          <Logo />
-          <span className="text-lg font-semibold tracking-tight">OmniHub</span>
-        </Link>
-        <Link to="/" className="font-mono text-xs text-white/55 transition-colors hover:text-white/90">{t('portalLogin.backHome')}</Link>
-      </div>
-
-      <div className="relative">
-        <h2 className="max-w-md text-balance text-3xl font-semibold tracking-tight" style={{ letterSpacing: '-0.02em' }}>
-          {t('portalLogin.brandTitle')}
-        </h2>
-        <p className="mt-3 max-w-sm text-pretty text-sm leading-relaxed text-white/65">{t('portalLogin.brandSub')}</p>
-
-        <div className="mt-8 max-w-sm space-y-px overflow-hidden rounded-xl border border-white/10 font-mono text-[13px]">
-          <PanelRow label="key" value="omni-7f3c…a91" />
-          <PanelRow label="balance" value="$9.9959" tinted />
-          <PanelRow label="requests · 24h" value="1,284" />
-          <PanelRow label="ttfb · p95" value="510ms" tinted />
+    <div className="mt-10 max-w-lg border-y border-line py-2">
+      {rows.map(([label, value]) => (
+        <div key={label} className="grid grid-cols-[5rem_1fr] items-center gap-4 py-3">
+          <span className="font-mono text-[11px] font-medium tracking-[0.16em] text-muted">
+            {label}
+          </span>
+          <span className="font-mono text-sm text-ink">{value}</span>
         </div>
-      </div>
-
-      <p className="relative font-mono text-xs text-white/40">{t('portalLogin.brandFootnote')}</p>
-    </aside>
-  )
-}
-
-function PanelRow({ label, value, tinted }: { label: string; value: string; tinted?: boolean }) {
-  return (
-    <div className={`flex items-center justify-between px-4 py-2.5 ${tinted ? 'bg-white/[0.03]' : ''}`}>
-      <span className="text-white/45">{label}</span>
-      <span className="text-white/90">{value}</span>
+      ))}
     </div>
   )
 }
 
 function Logo() {
   return (
-    <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: 'linear-gradient(135deg, var(--brand), var(--brand-2))' }}>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <span
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+      style={{
+        background: 'linear-gradient(135deg, var(--brand), var(--brand-2))',
+        boxShadow: '0 4px 12px -4px var(--glow)',
+      }}
+    >
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden>
         <circle cx="12" cy="12" r="2.6" fill="white" />
         <circle cx="5" cy="6" r="1.8" fill="white" opacity="0.7" />
         <circle cx="19" cy="6" r="1.8" fill="white" opacity="0.7" />
         <circle cx="5" cy="18" r="1.8" fill="white" opacity="0.7" />
         <circle cx="19" cy="18" r="1.8" fill="white" opacity="0.7" />
+        <path d="M12 12 5 6M12 12l7-6M12 12l-7 6M12 12l7 6" stroke="white" strokeWidth="1.2" opacity="0.55" />
       </svg>
     </span>
   )

@@ -9,7 +9,7 @@ export interface Me {
 interface AuthState {
   me: Me | null
   loading: boolean
-  login(username: string, password: string): Promise<void>
+  login(email: string, password: string): Promise<void>
   logout(): void
 }
 
@@ -47,12 +47,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  const login = useCallback(async (username: string, password: string) => {
-    const res = await api<{ token: string; expires_at: number; username: string }>(
+  const login = useCallback(async (email: string, password: string) => {
+    const res = await api<{ token: string; expires_at: number; username: string; email?: string }>(
       '/login',
       {
         method: 'POST',
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ email, password }),
       },
     )
     setToken(res.token)

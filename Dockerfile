@@ -82,7 +82,7 @@ WORKDIR /app
 EXPOSE 8080
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://localhost:8080/healthz || exit 1
+    CMD wget --quiet --tries=1 -Y off --spider http://localhost:8080/healthz || exit 1
 
 # OCI labels link the image back to the source repo on GitHub
 # Container Registry and surface licence info on hub UIs.

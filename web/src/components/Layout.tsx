@@ -45,7 +45,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <LangSwitch />
             <ThemeToggle />
             <span className="hidden text-sm text-muted sm:inline">{me?.username}</span>
-            <button onClick={logout} className="btn btn-secondary h-8">
+            <button onClick={logout} className="btn btn-secondary min-h-10">
               {t('common.signOut')}
             </button>
           </div>
@@ -67,7 +67,7 @@ function PillLink({ to, label }: { to: string; label: string }) {
     <NavLink
       to={to}
       end={to === '/admin'}
-      className="whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium transition-colors"
+      className="inline-flex min-h-10 items-center whitespace-nowrap rounded-full px-3 text-sm font-medium transition-colors"
       style={({ isActive }) =>
         ({
           color: isActive ? 'var(--ink)' : 'var(--muted)',
@@ -110,7 +110,7 @@ function ThemeToggle() {
   }
   const label = theme === 'system' ? 'System theme' : theme === 'light' ? 'Light theme' : 'Dark theme'
   return (
-    <button onClick={cycle} className="btn btn-ghost h-8 w-8 px-0" title={`${label} (click to change)`} aria-label={label}>
+    <button onClick={cycle} className="btn btn-ghost h-10 w-10 px-0" title={`${label} (click to change)`} aria-label={label}>
       {theme === 'system' ? <IconMonitor /> : theme === 'light' ? <IconSun /> : <IconMoon />}
     </button>
   )
