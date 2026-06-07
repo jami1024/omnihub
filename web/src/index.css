@@ -131,6 +131,47 @@
 /* ── Component vocabulary ──────────────────────────────────────────
    One button, one input, one card, one badge — used on every page. */
 @layer components {
+
+  .admin-shell-nav {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    background:
+      linear-gradient(180deg, color-mix(in oklch, var(--surface) 92%, transparent), color-mix(in oklch, var(--surface-2) 68%, transparent));
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklch, var(--surface) 84%, white 16%),
+      0 1px 2px oklch(0 0 0 / 0.04);
+  }
+  .admin-shell-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .admin-shell-nav-link {
+    border: 1px solid transparent;
+    color: var(--muted);
+    letter-spacing: -0.01em;
+  }
+  .admin-shell-nav-link:hover {
+    color: var(--ink);
+    background: color-mix(in oklch, var(--surface-2) 72%, transparent);
+  }
+  .admin-shell-nav-link[data-active="true"] {
+    color: var(--ink);
+    background: color-mix(in oklch, var(--surface) 76%, var(--brand-subtle));
+    border-color: color-mix(in oklch, var(--brand) 10%, var(--border));
+  }
+
+  .settings-side-link:hover {
+    background: var(--surface-2);
+    color: var(--ink) !important;
+  }
+  @media (max-width: 720px) {
+    .admin-shell-nav-link {
+      min-height: 2.25rem;
+      padding-left: 0.625rem;
+      padding-right: 0.625rem;
+      font-size: 0.8125rem;
+    }
+  }
+
   .btn {
     @apply inline-flex min-h-10 select-none items-center justify-center gap-1.5 rounded-lg px-3 py-1.5
       text-sm font-medium transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50;

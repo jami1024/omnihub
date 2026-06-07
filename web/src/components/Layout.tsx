@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { useI18n } from '../lib/i18n'
 import { getTheme, nextTheme, setTheme, type Theme } from '../lib/theme'
@@ -9,18 +9,18 @@ import { LangSwitch } from './LangSwitch'
 // header (blurred card surface) with a rounded-pill nav, centered to
 // max-w-7xl, and right-side theme + identity controls. Pages render
 // their own <main> inside {children}.
-const NAV = [
+const SETTINGS_ROUTES = ['/admin/settings', '/admin/blocked-ips', '/admin/alert-channels', '/admin/prices', '/admin/redemptions']
+
+type NavItem = { to: string; labelKey: string; activeWhen?: string[] }
+
+const NAV: NavItem[] = [
   { to: '/admin', labelKey: 'nav.dashboard' },
   { to: '/admin/accounts', labelKey: 'nav.accounts' },
   { to: '/admin/groups', labelKey: 'nav.groups' },
   { to: '/admin/keys', labelKey: 'nav.keys' },
-  { to: '/admin/blocked-ips', labelKey: 'nav.blockedIps' },
-  { to: '/admin/alert-channels', labelKey: 'nav.alertChannels' },
   { to: '/admin/health', labelKey: 'nav.health' },
-  { to: '/admin/prices', labelKey: 'nav.prices' },
   { to: '/admin/users', labelKey: 'nav.users' },
-  { to: '/admin/redemptions', labelKey: 'nav.redemptions' },
-  { to: '/admin/settings', labelKey: 'nav.settings' },
+  { to: '/admin/settings', labelKey: 'nav.settings', activeWhen: SETTINGS_ROUTES },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -28,55 +28,46 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { t } = useI18n()
   return (
     <div className="min-h-screen bg-bg text-ink">
-      <header className="sticky top-0 z-40 border-b border-line bg-surface/80 backdrop-blur supports-[backdrop-filter]:bg-surface/60">
-        <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 px-6">
-          <div className="flex min-w-0 items-center gap-4">
-            <div className="flex shrink-0 items-center gap-2">
+      <header className="sticky top-0 z-40 border-b border-line bg-surface/86 backdrop-blur supports-[backdrop-filter]:bg-surface/72">
+        <div className="mx-auto flex h-16 w-full max-w-[96rem] items-center gap-4 px-4 sm:px-6">
+          <div className="flex min-w-0 flex-1 items-center gap-4">
+            <div className="flex shrink-0 items-center gap-2.5">
               <BrandMark />
               <span className="hidden text-[15px] font-semibold tracking-tight sm:inline">OmniHub</span>
             </div>
-            <nav className="hidden items-center gap-1 overflow-x-auto rounded-full border border-line bg-bg/60 px-1 py-1 md:flex">
+            <nav className="admin-shell-nav flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-[1.35rem] border border-line bg-bg/60 p-1">
               {NAV.map((n) => (
-                <PillLink key={n.to} to={n.to} label={t(n.labelKey)} />
+                <PillLink key={n.to} to={n.to} label={t(n.labelKey)} activeWhen={n.activeWhen} />
               ))}
             </nav>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <LangSwitch />
             <ThemeToggle />
-            <span className="hidden text-sm text-muted sm:inline">{me?.username}</span>
+            <span className="hidden max-w-[14rem] truncate text-sm text-muted xl:inline">{me?.username}</span>
             <button onClick={logout} className="btn btn-secondary min-h-10">
               {t('common.signOut')}
             </button>
           </div>
         </div>
-        {/* Mobile: the pill nav scrolls under the header on narrow screens. */}
-        <nav className="flex items-center gap-1 overflow-x-auto border-t border-line px-4 py-1.5 md:hidden">
-          {NAV.map((n) => (
-            <PillLink key={n.to} to={n.to} label={t(n.labelKey)} />
-          ))}
-        </nav>
       </header>
       {children}
     </div>
   )
 }
 
-function PillLink({ to, label }: { to: string; label: string }) {
+function PillLink({ to, label, activeWhen = [] }: { to: string; label: string; activeWhen?: string[] }) {
+  const { pathname } = useLocation()
+  const active = to === '/admin' ? pathname === '/admin' : pathname === to || activeWhen.includes(pathname)
   return (
-    <NavLink
+    <Link
       to={to}
-      end={to === '/admin'}
-      className="inline-flex min-h-10 items-center whitespace-nowrap rounded-full px-3 text-sm font-medium transition-colors"
-      style={({ isActive }) =>
-        ({
-          color: isActive ? 'var(--ink)' : 'var(--muted)',
-          background: isActive ? 'color-mix(in oklch, var(--brand) 12%, transparent)' : 'transparent',
-        }) as React.CSSProperties
-      }
+      aria-current={active ? 'page' : undefined}
+      data-active={active ? 'true' : undefined}
+      className="admin-shell-nav-link inline-flex min-h-9 flex-1 basis-0 items-center justify-center whitespace-nowrap rounded-full px-3 text-sm font-medium transition-colors"
     >
       {label}
-    </NavLink>
+    </Link>
   )
 }
 

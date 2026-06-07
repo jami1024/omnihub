@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Layout } from '../components/Layout'
+import { SettingsLayout } from '../components/SettingsLayout'
 import { ErrorNotice, PageHeader } from '../components/PageChrome'
 import { ApiError } from '../lib/api'
 import { useI18n } from '../lib/i18n'
@@ -34,8 +34,8 @@ export function SettingsPage() {
   }
 
   return (
-    <Layout>
-      <main className="mx-auto w-full max-w-3xl px-6 py-8">
+    <SettingsLayout>
+      <div className="max-w-3xl">
         <PageHeader
           eyebrow={t('settings.eyebrow')}
           context={t('settings.context')}
@@ -136,8 +136,8 @@ export function SettingsPage() {
             </div>
           </form>
         )}
-      </main>
-    </Layout>
+      </div>
+    </SettingsLayout>
   )
 }
 

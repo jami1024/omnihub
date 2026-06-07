@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Layout } from '../components/Layout'
+import { SettingsLayout } from '../components/SettingsLayout'
 import { Modal } from '../components/Modal'
 import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { Td, Th } from '../components/Table'
@@ -70,8 +70,8 @@ export function PricesPage() {
   }
 
   return (
-    <Layout>
-      <main className="mx-auto w-full max-w-7xl px-6 py-8">
+    <SettingsLayout>
+      <div>
         <PageHeader
           eyebrow={t('prices.eyebrow')}
           context={t('prices.context')}
@@ -216,7 +216,7 @@ export function PricesPage() {
             </ErrorNotice>
           </div>
         )}
-      </main>
+      </div>
 
       {editing && (
         <Modal title={editing === 'new' ? t('prices.addPrice') : t('prices.editModel', { model: editing.model })} onClose={close}>
@@ -229,7 +229,7 @@ export function PricesPage() {
           />
         </Modal>
       )}
-    </Layout>
+    </SettingsLayout>
   )
 }
 

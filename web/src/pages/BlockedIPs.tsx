@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Layout } from '../components/Layout'
+import { SettingsLayout } from '../components/SettingsLayout'
 import { Modal } from '../components/Modal'
 import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { Td, Th } from '../components/Table'
@@ -57,8 +57,8 @@ export function BlockedIPsPage() {
   }
 
   return (
-    <Layout>
-      <main className="mx-auto w-full max-w-7xl px-6 py-8">
+    <SettingsLayout>
+      <div>
         <PageHeader
           eyebrow={t('blockedIps.eyebrow')}
           context={t('blockedIps.context')}
@@ -161,7 +161,7 @@ export function BlockedIPsPage() {
             </ErrorNotice>
           </div>
         )}
-      </main>
+      </div>
 
       {editing && (
         <Modal title={editing === 'new' ? t('blockedIps.blockAnIp') : t('blockedIps.editTitle', { ip: editing.ip })} onClose={close}>
@@ -174,7 +174,7 @@ export function BlockedIPsPage() {
           />
         </Modal>
       )}
-    </Layout>
+    </SettingsLayout>
   )
 }
 

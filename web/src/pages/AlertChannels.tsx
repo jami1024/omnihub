@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Layout } from '../components/Layout'
+import { SettingsLayout } from '../components/SettingsLayout'
 import { Modal } from '../components/Modal'
 import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { Td, Th } from '../components/Table'
@@ -65,8 +65,8 @@ export function AlertChannelsPage() {
   }
 
   return (
-    <Layout>
-      <main className="mx-auto w-full max-w-7xl px-6 py-8">
+    <SettingsLayout>
+      <div>
         <PageHeader
           eyebrow={t('alertChannels.eyebrow')}
           context={t('alertChannels.context')}
@@ -188,7 +188,7 @@ export function AlertChannelsPage() {
             </ErrorNotice>
           </div>
         )}
-      </main>
+      </div>
 
       {editing && (
         <Modal
@@ -204,7 +204,7 @@ export function AlertChannelsPage() {
           />
         </Modal>
       )}
-    </Layout>
+    </SettingsLayout>
   )
 }
 

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Layout } from '../components/Layout'
+import { SettingsLayout } from '../components/SettingsLayout'
 import { Modal } from '../components/Modal'
 import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { Td, Th } from '../components/Table'
@@ -34,8 +34,8 @@ export function RedemptionsPage() {
   }
 
   return (
-    <Layout>
-      <main className="mx-auto w-full max-w-7xl px-6 py-8">
+    <SettingsLayout>
+      <div>
         <PageHeader
           eyebrow={t('redemptions.eyebrow')}
           context={t('redemptions.context')}
@@ -104,7 +104,7 @@ export function RedemptionsPage() {
             </table>
           </div>
         )}
-      </main>
+      </div>
 
       {open && (
         <Modal title={t('redemptions.generate')} onClose={() => setOpen(false)}>
@@ -136,7 +136,7 @@ export function RedemptionsPage() {
           </div>
         </Modal>
       )}
-    </Layout>
+    </SettingsLayout>
   )
 }
 
