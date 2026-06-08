@@ -70,6 +70,26 @@ var clientMetadataHeaders = []string{
 // will try for one inbound request before surfacing a 503.
 const maxFailoverAttempts = 3
 
+// RuntimeSettings exposes hot-path gateway knobs that may be changed from the
+// admin UI. Nil settings fall back to the historical constants.
+type RuntimeSettings interface {
+	FailoverMaxAttempts() int
+}
+
+func configuredFailoverAttempts(settings []RuntimeSettings) int {
+	if len(settings) == 0 || settings[0] == nil {
+		return maxFailoverAttempts
+	}
+	n := settings[0].FailoverMaxAttempts()
+	if n < 1 {
+		return 1
+	}
+	if n > 10 {
+		return 10
+	}
+	return n
+}
+
 // AnthropicMessagesHandler returns a gin.HandlerFunc for the
 // Anthropic-compatible POST /v1/messages endpoint.
 //
@@ -94,9 +114,12 @@ func AnthropicMessagesHandler(
 	prices pricing.Calculator,
 	limiter *limits.Limiter,
 	blockedIPs *blockedip.Pool,
+	charger BillingCharger,
+	settings ...RuntimeSettings,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		startedAt := time.Now()
+		maxAttempts := configuredFailoverAttempts(settings)
 
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
@@ -153,7 +176,7 @@ func AnthropicMessagesHandler(
 			signatureRectified bool
 		)
 
-		for attempt := 0; attempt < maxFailoverAttempts; attempt++ {
+		for attempt := 0; attempt < maxAttempts; attempt++ {
 			account, driver, rerr := res.ResolveForProviders(sessionKey, anthropicCompatibleProviders, attempted)
 			if rerr != nil {
 				if errors.Is(rerr, resolver.ErrNoUpstream) {
@@ -272,7 +295,12 @@ func AnthropicMessagesHandler(
 			if buffer != nil {
 				rec := buildMessageRequest(c, &req, driver, account, &result, writeErr, startedAt)
 				rec.CostUSD = costUSD
-				rec.BilledUSD = billedUSD(c, costUSD)
+				billed := billedUSD(c, costUSD)
+				rec.BilledUSD = billed
+				split := chargeBilling(c.Request.Context(), guard.APIKey(c), billed, charger, limiter)
+				rec.PlanBilledUSD = floatPtrIfPositive(split.PlanUSD)
+				rec.WalletBilledUSD = floatPtrIfPositive(split.WalletUSD)
+				rec.PlanGrantID = split.PlanGrantID
 				rec.CostBreakdown = costBreakdown
 				buffer.Enqueue(rec)
 			}

@@ -2,8 +2,11 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/jami1024/omnihub/internal/service/pricing"
 )
 
 // Usage aggregation queries over message_requests, powering the admin
@@ -167,15 +170,21 @@ func (r *MessageRequestRepo) UsageByModelSinceFor(ctx context.Context, since tim
 // non-sensitive subset of message_requests safe to show an end user
 // (no upstream account / provider / internal request id).
 type RequestLogRow struct {
-	CreatedAt    time.Time
-	KeyName      string
-	Model        string // actual_model when known, else the requested model
-	StatusCode   *int
-	InputTokens  int64
-	OutputTokens int64
-	CostUSD      float64
-	DurationMs   *int64
-	Error        string // truncated error_message for failed requests
+	CreatedAt                time.Time
+	KeyName                  string
+	Model                    string // actual_model when known, else the requested model
+	StatusCode               *int
+	InputTokens              int64
+	OutputTokens             int64
+	CacheCreationInputTokens int64
+	CacheReadInputTokens     int64
+	CostUSD                  float64
+	BilledUSD                *float64
+	PlanBilledUSD            *float64
+	WalletBilledUSD          *float64
+	CostBreakdown            *pricing.Breakdown
+	DurationMs               *int64
+	Error                    string // truncated error_message for failed requests
 }
 
 // ListByKeyNames returns one page of message_requests scoped to the given
@@ -206,7 +215,10 @@ func (r *MessageRequestRepo) ListByKeyNames(ctx context.Context, names []string,
         SELECT created_at, COALESCE(key_name, ''),
                COALESCE(NULLIF(actual_model, ''), model),
                status_code, input_tokens, output_tokens,
-               COALESCE(cost_usd, 0)::float8, duration_ms,
+               cache_creation_input_tokens, cache_read_input_tokens,
+               COALESCE(cost_usd, 0)::float8, billed_usd::float8,
+               plan_billed_usd::float8, wallet_billed_usd::float8, cost_breakdown,
+               duration_ms,
                COALESCE(error_message, '')
           FROM message_requests
          WHERE created_at >= $1 AND key_name = ANY($2)
@@ -221,9 +233,19 @@ func (r *MessageRequestRepo) ListByKeyNames(ctx context.Context, names []string,
 	out := []RequestLogRow{}
 	for rows.Next() {
 		var row RequestLogRow
+		var breakdownJSON []byte
 		if err := rows.Scan(&row.CreatedAt, &row.KeyName, &row.Model, &row.StatusCode,
-			&row.InputTokens, &row.OutputTokens, &row.CostUSD, &row.DurationMs, &row.Error); err != nil {
+			&row.InputTokens, &row.OutputTokens, &row.CacheCreationInputTokens, &row.CacheReadInputTokens,
+			&row.CostUSD, &row.BilledUSD, &row.PlanBilledUSD, &row.WalletBilledUSD, &breakdownJSON,
+			&row.DurationMs, &row.Error); err != nil {
 			return nil, 0, fmt.Errorf("scan request row: %w", err)
+		}
+		if len(breakdownJSON) > 0 {
+			var breakdown pricing.Breakdown
+			if err := json.Unmarshal(breakdownJSON, &breakdown); err != nil {
+				return nil, 0, fmt.Errorf("decode cost_breakdown: %w", err)
+			}
+			row.CostBreakdown = &breakdown
 		}
 		if len(row.Error) > 300 {
 			row.Error = row.Error[:300]

@@ -14,10 +14,13 @@ import { HealthPage } from './pages/Health'
 import { PricesPage } from './pages/Prices'
 import { UsersPage } from './pages/Users'
 import { SettingsPage } from './pages/Settings'
+import { AnnouncementsPage } from './pages/Announcements'
+import { PlansPage } from './pages/Plans'
 import { PortalOverviewPage } from './pages/portal/PortalOverview'
 import { PortalKeysPage } from './pages/portal/PortalKeys'
 import { PortalRequestsPage } from './pages/portal/PortalRequests'
 import { PortalWalletPage } from './pages/portal/PortalWallet'
+import { PortalPlansPage } from './pages/portal/PortalPlans'
 
 // The admin Dashboard pulls in recharts (~180 kB gzip). Lazy-load it so
 // the charting library lands in its own chunk.
@@ -79,6 +82,8 @@ function AdminRoutes() {
       <Route path="prices" element={<AdminProtected><PricesPage /></AdminProtected>} />
       <Route path="users" element={<AdminProtected><UsersPage /></AdminProtected>} />
       <Route path="redemptions" element={<AdminProtected><RedemptionsPage /></AdminProtected>} />
+      <Route path="announcements" element={<AdminProtected><AnnouncementsPage /></AdminProtected>} />
+      <Route path="plans" element={<AdminProtected><PlansPage /></AdminProtected>} />
       <Route path="settings" element={<AdminProtected><SettingsPage /></AdminProtected>} />
       <Route path="*" element={<Navigate to="/admin" replace />} />
     </Routes>
@@ -94,6 +99,7 @@ function PortalRoutes() {
       <Route path="keys" element={<PortalProtected><PortalKeysPage /></PortalProtected>} />
       <Route path="requests" element={<PortalProtected><PortalRequestsPage /></PortalProtected>} />
       <Route path="wallet" element={<PortalProtected><PortalWalletPage /></PortalProtected>} />
+      <Route path="plans" element={<PortalProtected><PortalPlansPage /></PortalProtected>} />
       <Route path="*" element={<Navigate to="/portal" replace />} />
     </Routes>
   )

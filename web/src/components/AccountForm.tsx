@@ -280,21 +280,34 @@ export function AccountForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {!isEdit && (
+        <div className="rounded-lg border border-line bg-surface-2 px-3 py-3 text-sm text-muted">
+          <p className="font-medium text-ink">{t('accountForm.quickStartTitle')}</p>
+          <p className="mt-1">{t('accountForm.quickStartBody')}</p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4">
-        <Field label={t('common.name')}>
-          <input className={FIELD} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <Field label={t('common.name')} help={t('accountForm.nameHelp')}>
+          <input
+            className={FIELD}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+            placeholder={t('accountForm.namePlaceholder')}
+          />
         </Field>
-        <Field label={t('accountForm.provider')}>
+        <Field label={t('accountForm.provider')} help={t('accountForm.providerHelp')}>
           <input
             className={FIELD}
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
-            placeholder="anthropic, openai, …"
+            placeholder="anthropic, openai, claude-platform"
           />
         </Field>
       </div>
 
-      <Field label={t('accountForm.baseUrlOptional')}>
+      <Field label={t('accountForm.baseUrlOptional')} help={t('accountForm.baseUrlHelp')}>
         <input
           className={FIELD}
           value={baseURL}
@@ -351,13 +364,13 @@ export function AccountForm({
       </details>
 
       <div className="grid grid-cols-3 gap-4">
-        <Field label={t('accountForm.weight')}>
+        <Field label={t('accountForm.weight')} help={t('accountForm.weightHelp')}>
           <input className={FIELD} type="number" value={weight} onChange={(e) => setWeight(e.target.value)} />
         </Field>
-        <Field label={t('accountForm.priority')}>
+        <Field label={t('accountForm.priority')} help={t('accountForm.priorityHelp')}>
           <input className={FIELD} type="number" value={priority} onChange={(e) => setPriority(e.target.value)} />
         </Field>
-        <Field label={t('accountForm.costMultiplier')}>
+        <Field label={t('accountForm.costMultiplier')} help={t('accountForm.costMultiplierHelp')}>
           <input
             className={FIELD}
             type="number"
@@ -369,7 +382,7 @@ export function AccountForm({
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label={t('accountForm.groupOptional')}>
+        <Field label={t('accountForm.groupOptional')} help={t('accountForm.groupHelp')}>
           <select className={FIELD} value={groupID} onChange={(e) => setGroupID(e.target.value)}>
             <option value="">{t('accountForm.ungrouped')}</option>
             {(groups ?? []).map((g) => (
@@ -379,7 +392,7 @@ export function AccountForm({
             ))}
           </select>
         </Field>
-        <Field label={t('accountForm.activeHealthProbe')}>
+        <Field label={t('accountForm.activeHealthProbe')} help={t('accountForm.activeHealthProbeHelp')}>
           <select className={FIELD} value={healthProbe} onChange={(e) => setHealthProbe(e.target.value)}>
             <option value="">{t('accountForm.inheritDefault')}</option>
             <option value="true">{t('common.enabled')}</option>
@@ -395,6 +408,7 @@ export function AccountForm({
 
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium">{t('accountForm.credentials')}</legend>
+        <p className="text-xs text-muted">{t('accountForm.credentialsHelp')}</p>
         {isEdit && account!.credential_keys.length > 0 && (
           <p className="text-xs text-muted">
             {t('accountForm.credentialsCurrentlySet', { keys: account!.credential_keys.join(', ') })}
@@ -645,6 +659,9 @@ export function AccountForm({
         <summary className="cursor-pointer text-sm text-muted">
           {t('accountForm.circuitBreakerSummary')}
         </summary>
+        <p className="mt-2 text-xs text-muted">
+          {t('accountForm.circuitBreakerHelp')}
+        </p>
         <div className="mt-3 grid grid-cols-3 gap-4">
           <Field label={t('accountForm.failureThreshold')}>
             <input
@@ -746,11 +763,20 @@ function TestVerdict({ result, error }: { result?: TestResult; error: string | n
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  help,
+  children,
+}: {
+  label: string
+  help?: string
+  children: React.ReactNode
+}) {
   return (
     <label className="block space-y-1">
       <span className="text-sm text-muted">{label}</span>
       {children}
+      {help ? <span className="block text-xs leading-5 text-muted">{help}</span> : null}
     </label>
   )
 }

@@ -52,9 +52,12 @@ func OpenAIChatCompletionsHandler(
 	prices pricing.Calculator,
 	limiter *limits.Limiter,
 	blockedIPs *blockedip.Pool,
+	charger BillingCharger,
+	settings ...RuntimeSettings,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		startedAt := time.Now()
+		maxAttempts := configuredFailoverAttempts(settings)
 
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
@@ -98,7 +101,7 @@ func OpenAIChatCompletionsHandler(
 			lastBody      []byte
 		)
 
-		for attempt := 0; attempt < maxFailoverAttempts; attempt++ {
+		for attempt := 0; attempt < maxAttempts; attempt++ {
 			account, driver, rerr := res.ResolveForProviders(sessionKey, openaiCompatibleProviders, attempted)
 			if rerr != nil {
 				if errors.Is(rerr, resolver.ErrNoUpstream) {
@@ -173,7 +176,12 @@ func OpenAIChatCompletionsHandler(
 			if buffer != nil {
 				rec := buildMessageRequest(c, req, driver, account, &result, writeErr, startedAt)
 				rec.CostUSD = costUSD
-				rec.BilledUSD = billedUSD(c, costUSD)
+				billed := billedUSD(c, costUSD)
+				rec.BilledUSD = billed
+				split := chargeBilling(c.Request.Context(), guard.APIKey(c), billed, charger, limiter)
+				rec.PlanBilledUSD = floatPtrIfPositive(split.PlanUSD)
+				rec.WalletBilledUSD = floatPtrIfPositive(split.WalletUSD)
+				rec.PlanGrantID = split.PlanGrantID
 				rec.CostBreakdown = costBreakdown
 				buffer.Enqueue(rec)
 			}

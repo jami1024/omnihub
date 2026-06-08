@@ -233,3 +233,20 @@ func TestSpendCache_AddIsNoOpForAbsentKey(t *testing.T) {
 		t.Fatalf("Add without prior Spend leaked %.2f into the cache", got)
 	}
 }
+
+func TestRecordWalletSpendDebitsOnlyWalletAmount(t *testing.T) {
+	src := &stubBalance{values: map[int64]float64{7: 10}}
+	guard := NewBalanceGuard(src, time.Hour)
+	l := New(nil, nil)
+	l.SetBalanceGuard(guard)
+	uid := int64(7)
+	k := &apikey.Key{Name: "alice", UserID: &uid}
+	ctx := context.Background()
+	if _, err := guard.Balance(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	l.RecordWalletSpend(k, 2)
+	if got, _ := guard.Balance(ctx, 7); got != 8 {
+		t.Fatalf("balance = %.2f, want 8.00", got)
+	}
+}

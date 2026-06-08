@@ -59,6 +59,12 @@ type MessageRequest struct {
 	// price_ratio. Nil for ownerless keys / unpriced models (billed == cost).
 	BilledUSD *float64
 
+	// PlanBilledUSD and WalletBilledUSD split BilledUSD by payment source.
+	// Nil means legacy row or billing split unavailable.
+	PlanBilledUSD   *float64
+	WalletBilledUSD *float64
+	PlanGrantID     *int64
+
 	// CostBreakdown carries the per-bucket detail (input / output /
 	// cache_creation_5m / cache_creation_1h / cache_read / multiplier)
 	// that backs cost_breakdown JSONB. Nil persists NULL.
@@ -101,7 +107,7 @@ func (r *MessageRequestRepo) InsertBatch(ctx context.Context, batch []MessageReq
 		return nil
 	}
 
-	const colsPerRow = 24
+	const colsPerRow = 27
 	var sb strings.Builder
 	sb.Grow(512 + len(batch)*64)
 	sb.WriteString(`INSERT INTO message_requests (
@@ -109,7 +115,8 @@ func (r *MessageRequestRepo) InsertBatch(ctx context.Context, batch []MessageReq
         status_code, duration_ms, ttfb_ms, error_message,
         input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
         provider_name, account_name, upstream_request_id, cost_usd, cost_breakdown,
-        client_ip, user_agent, session_id, billed_usd
+        client_ip, user_agent, session_id, billed_usd,
+        plan_billed_usd, wallet_billed_usd, plan_grant_id
     ) VALUES `)
 
 	args := make([]any, 0, len(batch)*colsPerRow)
@@ -142,6 +149,7 @@ func (r *MessageRequestRepo) InsertBatch(ctx context.Context, batch []MessageReq
 			m.InputTokens, m.OutputTokens, m.CacheCreationInputTokens, m.CacheReadInputTokens,
 			m.ProviderName, m.AccountName, m.UpstreamRequestID, m.CostUSD, breakdownJSON,
 			m.ClientIP, m.UserAgent, m.SessionID, m.BilledUSD,
+			m.PlanBilledUSD, m.WalletBilledUSD, m.PlanGrantID,
 		)
 	}
 
@@ -190,14 +198,14 @@ func (r *MessageRequestRepo) SumCostByUser(ctx context.Context, userID int64) (f
 	return total, nil
 }
 
-// SumBilledByUser returns the LIFETIME amount BILLED to a portal user
-// across every key they own — billed_usd when present, falling back to
-// cost_usd for legacy rows. This is the consumption side of the prepaid
-// balance (credits minus this).
+// SumBilledByUser returns the LIFETIME amount charged to a portal user
+// wallet across every key they own. New rows use wallet_billed_usd so
+// plan-covered usage does not reduce wallet balance; legacy rows fall
+// back to billed_usd / cost_usd.
 func (r *MessageRequestRepo) SumBilledByUser(ctx context.Context, userID int64) (float64, error) {
 	var total float64
 	err := r.pool.QueryRow(ctx, `
-        SELECT COALESCE(SUM(COALESCE(mr.billed_usd, mr.cost_usd)), 0)::float8
+        SELECT COALESCE(SUM(COALESCE(mr.wallet_billed_usd, mr.billed_usd, mr.cost_usd)), 0)::float8
           FROM message_requests mr
           JOIN api_keys k ON k.name = mr.key_name
          WHERE k.user_id = $1`,
