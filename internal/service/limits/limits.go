@@ -136,17 +136,25 @@ func (l *Limiter) Check(ctx context.Context, k *apikey.Key, model string) *Rejec
 	return nil
 }
 
-// RecordSpend folds the cost of a just-completed request into the per-key
-// spend cache and, when billing is enabled and the key has a portal owner,
-// debits that user's prepaid balance — so the next request sees
-// up-to-date data without waiting for the WriteBuffer flush or a TTL
-// refresh. Safe to call with a nil Limiter / key or a zero-cost request.
+// RecordSpend folds the upstream cost of a just-completed request into
+// the per-key daily spend cache so the next request sees up-to-date data
+// without waiting for the WriteBuffer flush or a TTL refresh. Wallet
+// balance is debited separately via RecordWalletSpend because plan credits
+// may cover part or all of the billed amount.
 func (l *Limiter) RecordSpend(k *apikey.Key, usd float64) {
 	if l == nil || k == nil || usd <= 0 {
 		return
 	}
 	if l.cache != nil {
 		l.cache.Add(k.Name, usd)
+	}
+}
+
+// RecordWalletSpend debits only the pay-as-you-go wallet portion of a
+// completed request. Plan-covered usage must not reduce wallet balance.
+func (l *Limiter) RecordWalletSpend(k *apikey.Key, usd float64) {
+	if l == nil || k == nil || usd <= 0 {
+		return
 	}
 	if l.balance != nil && k.UserID != nil {
 		l.balance.Charge(*k.UserID, usd)

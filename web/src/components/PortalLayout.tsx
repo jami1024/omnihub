@@ -11,6 +11,7 @@ import { LangSwitch } from './LangSwitch'
 const NAV = [
   { to: '/portal', labelKey: 'portalNav.overview' },
   { to: '/portal/requests', labelKey: 'portalNav.requests' },
+  { to: '/portal/plans', labelKey: 'portalNav.plans' },
   { to: '/portal/keys', labelKey: 'portalNav.apiKeys' },
   { to: '/portal/wallet', labelKey: 'portalNav.wallet' },
 ]

@@ -24,12 +24,14 @@ import (
 	authhandler "github.com/jami1024/omnihub/internal/handler/auth"
 	"github.com/jami1024/omnihub/internal/handler/gateway"
 	portalhandler "github.com/jami1024/omnihub/internal/handler/portal"
+	publichandler "github.com/jami1024/omnihub/internal/handler/public"
 	"github.com/jami1024/omnihub/internal/repository"
 	"github.com/jami1024/omnihub/internal/service/account"
 	"github.com/jami1024/omnihub/internal/service/admin"
 	"github.com/jami1024/omnihub/internal/service/alert"
 	"github.com/jami1024/omnihub/internal/service/alertchannel"
 	"github.com/jami1024/omnihub/internal/service/apikey"
+	"github.com/jami1024/omnihub/internal/service/billing"
 	"github.com/jami1024/omnihub/internal/service/blockedip"
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
@@ -69,6 +71,7 @@ var (
 	pricePool        *pricing.Pool
 	priceRefresher   *pricesync.Refresher
 	accountCipher    *crypto.Cipher
+	gatewaySettings  *liveGatewaySettings
 )
 
 const accountPoolRefreshInterval = 30 * time.Second
@@ -180,6 +183,7 @@ func runGateway() {
 		slog.Error("model_prices pool init failed", "err", err)
 		os.Exit(1)
 	}
+	setupGatewaySettings(rootCtx)
 
 	defer func() {
 		if writeBuffer != nil {
@@ -398,7 +402,12 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	// rest is scoped to the authenticated user's own keys and usage.
 	userRepo := repository.NewUserRepo(pool)
 	portalSettingsRepo := repository.NewPortalSettingsRepo(pool)
+	gatewaySettingsRepo := repository.NewGatewaySettingsRepo(pool)
+	announcementRepo := repository.NewAnnouncementRepo(pool)
+	planRepo := repository.NewPlanRepo(pool)
 	userAuth := guard.NewUserAuthenticator(issuer)
+	publicAPI := r.Group("/public/api")
+	publicAPI.GET("/pricing", publichandler.PricingHandler(planRepo, modelPriceRepo))
 	authAPI := r.Group("/auth/api")
 	authAPI.POST("/login", authhandler.LoginHandler(adminCreds, userRepo, issuer))
 	papi := r.Group("/portal/api")
@@ -413,6 +422,10 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	puser.GET("/wallet", portalhandler.WalletHandler(walletRepo, messageRepo))
 	puser.POST("/redeem", portalhandler.RedeemHandler(redemptionRepo, balanceGuard))
 	puser.GET("/requests", portalhandler.RequestsHandler(messageRepo, apiKeyRepo))
+	puser.GET("/announcements", portalhandler.AnnouncementsHandler(announcementRepo))
+	puser.GET("/plans", portalhandler.PlansHandler(planRepo))
+	puser.GET("/me/plan", portalhandler.CurrentPlanHandler(planRepo))
+	puser.POST("/plans/:id/claim", portalhandler.ClaimPlanHandler(planRepo))
 
 	// M7 — admin oversight of portal users + the portal policy (signup
 	// toggle, per-key limit default/ceiling).
@@ -428,6 +441,16 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	authed.POST("/redemptions", adminhandler.GenerateRedemptionsHandler(redemptionRepo))
 	authed.GET("/settings", adminhandler.GetSettingsHandler(portalSettingsRepo))
 	authed.PUT("/settings", adminhandler.UpdateSettingsHandler(portalSettingsRepo))
+	authed.GET("/gateway-settings", adminhandler.GetGatewaySettingsHandler(gatewaySettingsRepo))
+	authed.PUT("/gateway-settings", adminhandler.UpdateGatewaySettingsHandler(gatewaySettingsRepo, gatewaySettings))
+	authed.GET("/announcements", adminhandler.ListAnnouncementsHandler(announcementRepo))
+	authed.POST("/announcements", adminhandler.CreateAnnouncementHandler(announcementRepo))
+	authed.PATCH("/announcements/:id", adminhandler.UpdateAnnouncementHandler(announcementRepo))
+	authed.DELETE("/announcements/:id", adminhandler.DeleteAnnouncementHandler(announcementRepo))
+	authed.GET("/plans", adminhandler.ListPlansHandler(planRepo))
+	authed.POST("/plans", adminhandler.CreatePlanHandler(planRepo))
+	authed.PATCH("/plans/:id", adminhandler.UpdatePlanHandler(planRepo))
+	authed.POST("/users/:id/plan-grants", adminhandler.GrantPlanToUserHandler(planRepo))
 
 	if web.Available() {
 		// One bundle, served from the root, backs both surfaces: the admin
@@ -512,7 +535,7 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 		slog.Warn("api_keys table is empty (and no OMNIHUB_API_KEYS env to seed); /v1/messages is OPEN — set OMNIHUB_API_KEYS or run `omnihub key add`")
 	}
 
-	healthCfg := loadHealthConfig()
+	healthCfg := currentCircuitConfig()
 	tracker := health.New(healthCfg)
 	// Per-account overrides: when an account row has non-NULL
 	// circuit_* columns, those values replace the global defaults
@@ -522,7 +545,7 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 		if a == nil {
 			return healthCfg
 		}
-		cfg := healthCfg
+		cfg := currentCircuitConfig()
 		if a.CircuitFailureThreshold != nil {
 			cfg.FailureThreshold = *a.CircuitFailureThreshold
 		}
@@ -589,8 +612,10 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 	// circuit breaker the resolver already honours, so a sick upstream is
 	// taken out of rotation before user traffic hits it. Globally off by
 	// default (probes cost a real upstream GET); opt in per account.
-	probeCfg := loadHealthProbeConfig()
-	prober := health.NewProber(tracker, registry, probeCfg.GlobalDefault, probeCfg.Concurrency)
+	probeCfg := currentProbeConfig()
+	prober := health.NewProberWithConfig(tracker, registry, func() health.ProbeConfig {
+		return currentProbeConfig()
+	})
 	prober.Start(context.Background(), accountPool.All, probeCfg.Interval)
 	slog.Info("active health probes started",
 		"global_default", probeCfg.GlobalDefault,
@@ -613,6 +638,14 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 	}
 
 	limiter, rpmCache := buildLimiter()
+	var billingCharger gateway.BillingCharger
+	if pool != nil && billingEnabled() {
+		billingCharger = billing.New(billing.NewRepositoryStore(
+			repository.NewPlanRepo(pool),
+			repository.NewWalletRepo(pool),
+			repository.NewMessageRequestRepo(pool),
+		))
+	}
 
 	gw := r.Group("/",
 		guard.IPBlockMiddleware(blockedIPPool, rpmCache),
@@ -620,7 +653,7 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 		auth.Middleware(),
 		guard.RequestLog(),
 	)
-	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool))
+	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, gatewaySettings))
 
 	// OpenAI Chat Completions endpoint. OpenAI SDK clients are not Claude
 	// CLI, so the Claude-CLI client gate is intentionally omitted here;
@@ -632,7 +665,7 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 		auth.Middleware(),
 		guard.RequestLog(),
 	)
-	gwOpenAI.POST("/v1/chat/completions", gateway.OpenAIChatCompletionsHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool))
+	gwOpenAI.POST("/v1/chat/completions", gateway.OpenAIChatCompletionsHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, gatewaySettings))
 
 	stickyDesc := "off"
 	if sessions != nil {
@@ -976,13 +1009,6 @@ func loadHealthConfig() health.Config {
 	return cfg
 }
 
-// healthProbeConfig is the resolved active-health-probe configuration.
-type healthProbeConfig struct {
-	GlobalDefault bool          // default for accounts with health_probe_enabled = NULL
-	Interval      time.Duration // between probe passes
-	Concurrency   int           // max simultaneous upstream probes
-}
-
 // loadHealthProbeConfig builds the active-health-probe configuration.
 //
 //   - OMNIHUB_HEALTH_PROBE_ENABLED      bool ("true"/"false"); default false.
@@ -991,8 +1017,13 @@ type healthProbeConfig struct {
 //     per-account true is still honoured.
 //   - OMNIHUB_HEALTH_PROBE_INTERVAL     Go duration; default 60s, min 10s.
 //   - OMNIHUB_HEALTH_PROBE_CONCURRENCY  integer; default 4, clamped 1..16.
-func loadHealthProbeConfig() healthProbeConfig {
-	cfg := healthProbeConfig{GlobalDefault: false, Interval: 60 * time.Second, Concurrency: 4}
+//   - OMNIHUB_HEALTH_PROBE_RED_THRESHOLD integer; consecutive red probes.
+//   - OMNIHUB_HEALTH_PROBE_GREEN_THRESHOLD integer; consecutive green probes.
+//   - OMNIHUB_HEALTH_PROBE_TIMEOUT      Go duration; per-probe timeout.
+//   - OMNIHUB_HEALTH_PROBE_SLOW_THRESHOLD Go duration; green probe above
+//     this latency is treated as yellow and will not eject a supplier.
+func loadHealthProbeConfig() health.ProbeConfig {
+	cfg := health.DefaultProbeConfig()
 
 	if v := os.Getenv("OMNIHUB_HEALTH_PROBE_ENABLED"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
@@ -1021,7 +1052,58 @@ func loadHealthProbeConfig() healthProbeConfig {
 		}
 	}
 
-	return cfg
+	if v := os.Getenv("OMNIHUB_HEALTH_PROBE_RED_THRESHOLD"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
+			cfg.RedThreshold = n
+		} else {
+			slog.Warn("OMNIHUB_HEALTH_PROBE_RED_THRESHOLD invalid; using default",
+				"value", v, "default", cfg.RedThreshold)
+		}
+	}
+
+	if v := os.Getenv("OMNIHUB_HEALTH_PROBE_GREEN_THRESHOLD"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
+			cfg.GreenThreshold = n
+		} else {
+			slog.Warn("OMNIHUB_HEALTH_PROBE_GREEN_THRESHOLD invalid; using default",
+				"value", v, "default", cfg.GreenThreshold)
+		}
+	}
+
+	if v := os.Getenv("OMNIHUB_HEALTH_PROBE_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.Timeout = d
+		} else {
+			slog.Warn("OMNIHUB_HEALTH_PROBE_TIMEOUT invalid; using default",
+				"value", v, "default", cfg.Timeout)
+		}
+	}
+
+	if v := os.Getenv("OMNIHUB_HEALTH_PROBE_SLOW_THRESHOLD"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.SlowThreshold = d
+		} else {
+			slog.Warn("OMNIHUB_HEALTH_PROBE_SLOW_THRESHOLD invalid; using default",
+				"value", v, "default", cfg.SlowThreshold)
+		}
+	}
+
+	return health.NormalizeProbeConfig(cfg)
+}
+
+func loadFailoverMaxAttempts() int {
+	const def = 3
+	v := os.Getenv("OMNIHUB_FAILOVER_MAX_ATTEMPTS")
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > 10 {
+		slog.Warn("OMNIHUB_FAILOVER_MAX_ATTEMPTS invalid; using default",
+			"value", v, "default", def)
+		return def
+	}
+	return n
 }
 
 // spendCacheTTL bounds how long a cached per-key 24h USD total may

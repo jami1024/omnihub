@@ -19,6 +19,16 @@ const SETTINGS_NAV = [
     descriptionKey: 'settings.toolAlertsHint',
   },
   {
+    to: '/admin/announcements',
+    labelKey: 'nav.announcements',
+    descriptionKey: 'settings.toolAnnouncementsHint',
+  },
+  {
+    to: '/admin/plans',
+    labelKey: 'nav.plans',
+    descriptionKey: 'settings.toolPlansHint',
+  },
+  {
     to: '/admin/prices',
     labelKey: 'nav.prices',
     descriptionKey: 'settings.toolPricesHint',

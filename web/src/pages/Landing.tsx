@@ -1,5 +1,8 @@
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useI18n } from '../lib/i18n'
+import type { Plan } from '../lib/plans'
+import { PER_MILLION_TOKENS, type PublicModelPrice, type PublicPricing, usePublicPricing } from '../lib/publicPricing'
 
 // OmniHub marketing landing at "/". Brand register: a dark-capable
 // "control plane" page that shows the real product (one endpoint, a
@@ -36,6 +39,30 @@ const COPY = {
     billing: {
       title: 'Meter usage before you expose the endpoint.',
       body: 'Every request stores provider cost and billed amount. You can give users prepaid balances, set a price ratio per user, cap daily key spend, and issue redemption codes for self-serve top-ups.',
+      pricingTitle: 'Plans make the effective price visible.',
+      pricingBody: 'The public pricing block reads enabled plans and official model prices from OmniHub. Users can see the RMB payment amount, USD credit, and usage multiplier before they sign in.',
+      officialLabel: 'Official model price',
+      effectiveLabel: 'Plan effective price',
+      ratioLabel: 'Usage multiplier',
+      planFallback: 'Plan data is not available yet. Configure enabled plans in the admin console to show them here.',
+      priceFallback: 'Official model prices are not available yet. Sync or add model prices in the admin console.',
+      planPrice: 'plan price',
+      included: 'included credit',
+      creditValue: 'USD credit',
+      modelSaving: 'model saving',
+      noModelSaving: 'official rate',
+      save: 'save',
+      noOverage: 'No wallet overage',
+      overage: 'Wallet overage allowed',
+      days: 'days',
+      input: 'Input',
+      output: 'Output',
+      perMillion: 'per 1M tokens',
+      formula: 'Official price × multiplier',
+      officialNote: 'Prices shown here are official model prices. OmniHub applies the selected plan multiplier when calculating usage.',
+      model: 'Model',
+      unlimited: 'unlimited',
+      perDay: 'day',
       cards: [
         { k: 'Prepaid balance', v: 'Stop requests when balance reaches $0.00.' },
         { k: 'Price ratio', v: 'Bill each user at provider cost × your ratio.' },
@@ -77,6 +104,30 @@ const COPY = {
     billing: {
       title: '先计量，再把端点交给用户。',
       body: '每次请求都会记录供应商成本和计费金额。你可以给用户配置预付费余额、按用户设置价格倍率、限制每个 key 的每日花费，并发放兑换码让用户自助充值。',
+      pricingTitle: '套餐优惠和实际扣费一眼看清。',
+      pricingBody: '落地页直接读取已启用套餐和官方模型价格。用户能在登录前看清人民币售价、美元额度、使用倍率，以及套餐后的实际扣费。',
+      officialLabel: '官方模型价格',
+      effectiveLabel: '套餐后价格',
+      ratioLabel: '使用倍率',
+      planFallback: '暂时没有可展示的套餐。请先在后台启用套餐。',
+      priceFallback: '暂时没有可展示的官方模型价格。请先在后台同步或添加模型价格。',
+      planPrice: '套餐售价',
+      included: '包含额度',
+      creditValue: '美元额度',
+      modelSaving: '模型扣费优惠',
+      noModelSaving: '官方价扣费',
+      save: '约省',
+      noOverage: '不允许钱包超额',
+      overage: '允许钱包超额',
+      days: '天',
+      input: '输入',
+      output: '输出',
+      perMillion: '每 100 万 tokens',
+      formula: '官方价格 × 使用倍率',
+      officialNote: '这里展示的是官方模型价格。OmniHub 会按所选套餐的使用倍率计算实际扣费。',
+      model: '模型',
+      unlimited: '不限时长',
+      perDay: '天',
       cards: [
         { k: '预付费余额', v: '余额到 $0.00 时停止请求。' },
         { k: '价格倍率', v: '按「供应商成本 × 你的倍率」向用户计费。' },
@@ -95,6 +146,7 @@ const COPY = {
 export function LandingPage() {
   const { lang } = useI18n()
   const c = lang === 'zh' ? COPY.zh : COPY.en
+  const pricing = usePublicPricing()
 
   return (
     <div id="top" className="min-h-screen bg-bg text-ink">
@@ -162,6 +214,7 @@ export function LandingPage() {
               </div>
             ))}
           </div>
+          <PublicPricingBlock c={c.billing} pricing={pricing.data} loading={pricing.isLoading} />
         </section>
 
         {/* Observability */}
@@ -236,6 +289,220 @@ function Feature({
       </div>
     </section>
   )
+}
+
+/* ── Public pricing ──────────────────────────────────────────────── */
+
+function PublicPricingBlock({
+  c,
+  pricing,
+  loading,
+}: {
+  c: typeof COPY.en.billing
+  pricing?: PublicPricing
+  loading: boolean
+}) {
+  const plans = pricing?.plans ?? []
+  const prices = pricing?.prices ?? []
+  const [selectedPlanID, setSelectedPlanID] = useState<number | null>(null)
+  const defaultPlan = useMemo(() => chooseDefaultPlan(plans), [plans])
+  const selectedPlan = plans.find((plan) => plan.id === selectedPlanID) ?? defaultPlan
+
+  return (
+    <div className="mt-14 rounded-2xl border border-line bg-surface-2/55 p-4 sm:p-5">
+      <div className="grid gap-8 lg:grid-cols-[0.94fr_1.06fr] lg:items-start">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="badge badge-brand font-mono text-[11px]">{c.formula}</span>
+            {selectedPlan ? <span className="badge badge-neutral text-[11px]">{c.ratioLabel} {formatRatio(selectedPlan.price_ratio)}</span> : null}
+          </div>
+          <h3 className="mt-4 text-2xl font-semibold tracking-tight">{c.pricingTitle}</h3>
+          <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted">{c.pricingBody}</p>
+
+          {loading ? (
+            <div className="mt-6 grid gap-3">
+              {[0, 1, 2].map((i) => <PricingSkeleton key={i} />)}
+            </div>
+          ) : plans.length > 0 ? (
+            <div className="mt-6 grid gap-3">
+              {plans.map((plan) => (
+                <PlanPriceCard
+                  key={plan.id}
+                  c={c}
+                  plan={plan}
+                  selected={selectedPlan?.id === plan.id}
+                  onSelect={() => setSelectedPlanID(plan.id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="mt-6 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-muted">{c.planFallback}</div>
+          )}
+        </div>
+
+        <div className="card overflow-hidden p-0">
+          <div className="border-b border-line px-4 py-3 sm:px-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold">{c.officialLabel}</div>
+                <p className="mt-1 text-xs text-muted">{c.officialNote}</p>
+              </div>
+              <span className="badge badge-neutral font-mono text-[11px]">{c.perMillion}</span>
+            </div>
+          </div>
+          {loading ? (
+            <div className="space-y-3 p-4">
+              {[0, 1, 2, 3].map((i) => <div key={i} className="h-10 rounded-lg bg-surface-2" />)}
+            </div>
+          ) : prices.length > 0 ? (
+            <OfficialPriceTable c={c} prices={prices} plan={selectedPlan} />
+          ) : (
+            <div className="p-5 text-sm text-muted">{c.priceFallback}</div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PlanPriceCard({
+  c,
+  plan,
+  selected,
+  onSelect,
+}: {
+  c: typeof COPY.en.billing
+  plan: Plan
+  selected: boolean
+  onSelect: () => void
+}) {
+  const savingPct = plan.price_ratio > 0 && plan.price_ratio < 1 ? (1 - plan.price_ratio) * 100 : 0
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`w-full rounded-xl border bg-surface p-4 text-left transition-all duration-150 hover:border-line-strong hover:bg-bg ${
+        selected ? 'border-line-strong shadow-sm ring-2 ring-[var(--ring)]' : 'border-line'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-base font-semibold">{plan.name}</div>
+          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted">{plan.description}</p>
+        </div>
+        <div className="text-right">
+          <div className="font-mono text-lg font-semibold">{formatCNY(plan.price_usd)}</div>
+          <div className="mt-1 font-mono text-[11px] text-muted">{plan.valid_days ? `${plan.valid_days} ${c.days}` : c.unlimited}</div>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+        <PlanMetric label={c.planPrice} value={formatCNY(plan.price_usd)} />
+        <PlanMetric label={c.creditValue} value={formatUSD(plan.included_credit_usd)} />
+        <PlanMetric
+          label={savingPct > 0 ? c.modelSaving : c.noModelSaving}
+          value={savingPct > 0 ? `${c.save} ${Math.round(savingPct)}%` : `× ${formatRatio(plan.price_ratio)}`}
+        />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="badge badge-neutral text-[11px]">{plan.allow_payg_overage ? c.overage : c.noOverage}</span>
+        {plan.rpm_limit ? <span className="badge badge-neutral font-mono text-[11px]">{plan.rpm_limit} RPM</span> : null}
+        {plan.daily_usd_limit ? <span className="badge badge-neutral font-mono text-[11px]">{formatUSD(plan.daily_usd_limit)} / {c.perDay}</span> : null}
+      </div>
+    </button>
+  )
+}
+
+function PlanMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-surface-2 px-3 py-2">
+      <div className="text-[11px] text-muted">{label}</div>
+      <div className="mt-0.5 font-mono text-sm font-semibold text-ink">{value}</div>
+    </div>
+  )
+}
+
+function OfficialPriceTable({ c, prices, plan }: { c: typeof COPY.en.billing; prices: PublicModelPrice[]; plan?: Plan }) {
+  const ratio = plan?.price_ratio ?? 1
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[620px] text-left text-sm">
+        <thead>
+          <tr className="border-b border-line bg-surface-2/70 text-xs text-muted">
+            <th className="px-4 py-3 font-medium sm:px-5">{c.model}</th>
+            <th className="px-4 py-3 font-medium">{c.officialLabel}</th>
+            <th className="px-4 py-3 font-medium">{c.effectiveLabel}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {prices.map((price) => {
+            const officialInput = price.input_cost_per_token * PER_MILLION_TOKENS
+            const officialOutput = price.output_cost_per_token * PER_MILLION_TOKENS
+            return (
+              <tr key={price.model} className="border-b border-line last:border-0">
+                <td className="px-4 py-3 sm:px-5">
+                  <div className="font-mono text-[13px] text-ink">{price.model}</div>
+                  <div className="mt-1 font-mono text-[11px] text-muted">{price.source}</div>
+                </td>
+                <td className="px-4 py-3 font-mono text-[12px] text-muted">
+                  <div>{c.input}: <span className="text-ink">{formatUSD(officialInput)}</span></div>
+                  <div className="mt-1">{c.output}: <span className="text-ink">{formatUSD(officialOutput)}</span></div>
+                </td>
+                <td className="px-4 py-3 font-mono text-[12px] text-muted">
+                  <div>{c.input}: <span className="text-brand">{formatUSD(officialInput * ratio)}</span></div>
+                  <div className="mt-1">{c.output}: <span className="text-brand">{formatUSD(officialOutput * ratio)}</span></div>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function PricingSkeleton() {
+  return (
+    <div className="rounded-xl border border-line bg-surface p-4">
+      <div className="h-4 w-32 rounded bg-surface-2" />
+      <div className="mt-3 h-3 w-full rounded bg-surface-2" />
+      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+        <div className="h-12 rounded-lg bg-surface-2" />
+        <div className="h-12 rounded-lg bg-surface-2" />
+        <div className="h-12 rounded-lg bg-surface-2" />
+      </div>
+    </div>
+  )
+}
+
+function chooseDefaultPlan(plans: Plan[]) {
+  if (plans.length === 0) return undefined
+  const paid = plans.filter((plan) => plan.price_usd > 0)
+  if (paid.length > 0) return paid[Math.min(1, paid.length - 1)]
+  return plans[0]
+}
+
+function formatUSD(value: number) {
+  const digits = Math.abs(value) > 0 && Math.abs(value) < 1 ? 4 : 2
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: Math.abs(value) >= 100 ? 0 : 2,
+    maximumFractionDigits: digits,
+  }).format(value)
+}
+
+function formatCNY(value: number) {
+  return new Intl.NumberFormat('zh-CN', {
+    style: 'currency',
+    currency: 'CNY',
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+function formatRatio(value: number) {
+  return value.toFixed(2)
 }
 
 /* ── Visuals (honest UI / diagram motifs, not stock photos) ──────── */

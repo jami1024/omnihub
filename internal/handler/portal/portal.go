@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/mail"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -197,4 +198,13 @@ func validEmail(s string) bool {
 	}
 	addr, err := mail.ParseAddress(s)
 	return err == nil && normalizeEmail(addr.Address) == s
+}
+
+func parseIDParam(c *gin.Context) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeBadRequest(c, "invalid id")
+		return 0, false
+	}
+	return id, true
 }

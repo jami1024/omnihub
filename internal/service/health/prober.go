@@ -25,6 +25,65 @@ const (
 	probeTimeout = 15 * time.Second
 )
 
+// ProbeConfig tunes the active background prober. It is intentionally separate
+// from the circuit-breaker Config: probe de-bouncing decides when probe
+// verdicts become breaker events; the breaker then decides when to open.
+type ProbeConfig struct {
+	GlobalDefault  bool
+	Interval       time.Duration
+	Concurrency    int
+	RedThreshold   int
+	GreenThreshold int
+	Timeout        time.Duration
+	SlowThreshold  time.Duration
+}
+
+// DefaultProbeConfig returns the historical defaults used before gateway
+// settings became runtime-configurable.
+func DefaultProbeConfig() ProbeConfig {
+	return ProbeConfig{
+		GlobalDefault:  false,
+		Interval:       60 * time.Second,
+		Concurrency:    4,
+		RedThreshold:   probeRedThreshold,
+		GreenThreshold: probeGreenThreshold,
+		Timeout:        probeTimeout,
+		SlowThreshold:  provider.DefaultSlowThreshold,
+	}
+}
+
+// NormalizeProbeConfig clamps unsafe or invalid values to production-safe
+// ranges. It is used both for env parsing and DB-backed runtime settings.
+func NormalizeProbeConfig(cfg ProbeConfig) ProbeConfig {
+	def := DefaultProbeConfig()
+	if cfg.Interval < 10*time.Second {
+		cfg.Interval = def.Interval
+	}
+	if cfg.Concurrency < 1 {
+		cfg.Concurrency = 1
+	}
+	if cfg.Concurrency > 16 {
+		cfg.Concurrency = 16
+	}
+	if cfg.RedThreshold < 1 {
+		cfg.RedThreshold = def.RedThreshold
+	}
+	if cfg.GreenThreshold < 1 {
+		cfg.GreenThreshold = def.GreenThreshold
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = def.Timeout
+	}
+	if cfg.SlowThreshold <= 0 {
+		cfg.SlowThreshold = def.SlowThreshold
+	}
+	return cfg
+}
+
+// ProbeConfigSource provides the latest prober settings. A nil source or
+// zero-valued config falls back to DefaultProbeConfig().
+type ProbeConfigSource func() ProbeConfig
+
 // ProbeRegistry is the slice of provider.Registry the prober needs: look
 // up an account's driver so it can type-assert the optional Tester.
 type ProbeRegistry interface {
@@ -53,10 +112,9 @@ type probeState struct {
 // accounts whose driver has no Tester (e.g. claude-platform) produce NO
 // tracker call and never mark an account down.
 type Prober struct {
-	tracker     *Tracker
-	registry    ProbeRegistry
-	global      bool // default for accounts with HealthProbeEnabled == nil
-	concurrency int
+	tracker  *Tracker
+	registry ProbeRegistry
+	config   ProbeConfigSource
 
 	mu    sync.Mutex
 	state map[int64]*probeState
@@ -66,18 +124,22 @@ type Prober struct {
 // default applied to accounts that don't override; concurrency caps how
 // many upstream probes run at once (clamped to 1..16).
 func NewProber(tracker *Tracker, registry ProbeRegistry, global bool, concurrency int) *Prober {
-	if concurrency < 1 {
-		concurrency = 1
-	}
-	if concurrency > 16 {
-		concurrency = 16
-	}
+	cfg := NormalizeProbeConfig(ProbeConfig{GlobalDefault: global, Concurrency: concurrency})
+	cfg.Interval = DefaultProbeConfig().Interval
+	cfg.Timeout = DefaultProbeConfig().Timeout
+	cfg.RedThreshold = DefaultProbeConfig().RedThreshold
+	cfg.GreenThreshold = DefaultProbeConfig().GreenThreshold
+	cfg.SlowThreshold = DefaultProbeConfig().SlowThreshold
+	return NewProberWithConfig(tracker, registry, func() ProbeConfig { return cfg })
+}
+
+// NewProberWithConfig wires a prober to a dynamic config source.
+func NewProberWithConfig(tracker *Tracker, registry ProbeRegistry, source ProbeConfigSource) *Prober {
 	return &Prober{
-		tracker:     tracker,
-		registry:    registry,
-		global:      global,
-		concurrency: concurrency,
-		state:       make(map[int64]*probeState),
+		tracker:  tracker,
+		registry: registry,
+		config:   source,
+		state:    make(map[int64]*probeState),
 	}
 }
 
@@ -93,14 +155,18 @@ func (p *Prober) Start(ctx context.Context, snapshot func() []*provider.Account,
 	}
 	p.probeAll(ctx, snapshot())
 	go func() {
-		t := time.NewTicker(interval)
-		defer t.Stop()
+		if interval <= 0 {
+			interval = p.currentConfig().Interval
+		}
+		timer := time.NewTimer(interval)
+		defer timer.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-t.C:
+			case <-timer.C:
 				p.probeAll(ctx, snapshot())
+				timer.Reset(p.currentConfig().Interval)
 			}
 		}
 	}()
@@ -117,11 +183,12 @@ type probeResult struct {
 // concurrency), then applies the verdicts to the tracker, then GCs state
 // for accounts no longer present.
 func (p *Prober) probeAll(ctx context.Context, accounts []*provider.Account) {
+	cfg := p.currentConfig()
 	live := make(map[int64]struct{}, len(accounts))
 	var targets []*provider.Account
 	for _, a := range accounts {
 		live[a.ID] = struct{}{}
-		if !p.shouldProbe(a) {
+		if !p.shouldProbe(a, cfg) {
 			continue
 		}
 		if _, ok := p.tester(a); ok {
@@ -131,7 +198,7 @@ func (p *Prober) probeAll(ctx context.Context, accounts []*provider.Account) {
 
 	results := make([]probeResult, 0, len(targets))
 	var rmu sync.Mutex
-	sem := make(chan struct{}, p.concurrency)
+	sem := make(chan struct{}, cfg.Concurrency)
 	var wg sync.WaitGroup
 	for _, a := range targets {
 		wg.Add(1)
@@ -143,9 +210,13 @@ func (p *Prober) probeAll(ctx context.Context, accounts []*provider.Account) {
 			if !ok {
 				return
 			}
-			cctx, cancel := context.WithTimeout(ctx, probeTimeout)
+			cctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 			defer cancel()
 			r := tester.Test(cctx, a)
+			if r.Status == provider.TestGreen && time.Duration(r.LatencyMs)*time.Millisecond > cfg.SlowThreshold {
+				r.Status = provider.TestYellow
+				r.Message = "reachable but slow"
+			}
 			if r.Status == provider.TestYellow {
 				return // slow / rate-limited but reachable → never eject
 			}
@@ -168,7 +239,7 @@ func (p *Prober) probeAll(ctx context.Context, accounts []*provider.Account) {
 		case provider.TestGreen:
 			s.consecReds = 0
 			s.consecGreens++
-			if s.consecGreens >= probeGreenThreshold {
+			if s.consecGreens >= cfg.GreenThreshold {
 				// RecordSuccess on a closed account just zeroes failure
 				// noise; on open/half-open it walks the breaker toward
 				// closed — recovery before real traffic.
@@ -177,12 +248,12 @@ func (p *Prober) probeAll(ctx context.Context, accounts []*provider.Account) {
 		case provider.TestRed:
 			s.consecGreens = 0
 			s.consecReds++
-			if s.consecReds >= probeRedThreshold {
+			if s.consecReds >= cfg.RedThreshold {
 				// Feed RecordFailure EVERY sustained-red tick (not once)
 				// so the breaker's own FailureThreshold is eventually
 				// crossed and the account opens.
 				p.tracker.RecordFailure(r.id, errors.New("health probe: "+r.msg))
-				if s.consecReds == probeRedThreshold {
+				if s.consecReds == cfg.RedThreshold {
 					slog.Warn("active health probe failing",
 						"account", r.name, "consecutive_reds", s.consecReds, "reason", r.msg)
 				}
@@ -200,14 +271,21 @@ func (p *Prober) probeAll(ctx context.Context, accounts []*provider.Account) {
 // shouldProbe resolves the per-account opt-in against the global default.
 // NOTE: provider.Account has no Enabled field — the pool only ever holds
 // enabled rows — so there is nothing to check here beyond the opt-in.
-func (p *Prober) shouldProbe(a *provider.Account) bool {
+func (p *Prober) currentConfig() ProbeConfig {
+	if p == nil || p.config == nil {
+		return DefaultProbeConfig()
+	}
+	return NormalizeProbeConfig(p.config())
+}
+
+func (p *Prober) shouldProbe(a *provider.Account, cfg ProbeConfig) bool {
 	if a == nil {
 		return false
 	}
 	if a.HealthProbeEnabled != nil {
 		return *a.HealthProbeEnabled
 	}
-	return p.global
+	return cfg.GlobalDefault
 }
 
 // tester returns the account driver's optional connectivity Tester, or

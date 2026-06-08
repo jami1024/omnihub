@@ -39,8 +39,8 @@ type Tester interface {
 // deadline; this is the hard ceiling.
 var testClient = &http.Client{Timeout: 12 * time.Second}
 
-// slowThresholdMs above which a successful probe is downgraded to yellow.
-const slowThresholdMs = 2500
+// DefaultSlowThreshold above which a successful probe is downgraded to yellow.
+var DefaultSlowThreshold = 2500 * time.Millisecond
 
 // ProbeGET sends a GET to url with the given headers and classifies the
 // outcome. It's the shared engine behind each driver's Test — a driver
@@ -61,14 +61,14 @@ func ProbeGET(ctx context.Context, url string, headers map[string]string) TestRe
 			Message: "could not reach upstream: " + cleanErr(err)}
 	}
 	defer resp.Body.Close()
-	return classify(resp.StatusCode, latency)
+	return classify(resp.StatusCode, latency, DefaultSlowThreshold)
 }
 
-func classify(status int, latencyMs int64) TestResult {
+func classify(status int, latencyMs int64, slowThreshold time.Duration) TestResult {
 	r := TestResult{HTTPStatus: status, LatencyMs: latencyMs}
 	switch {
 	case status >= 200 && status < 300:
-		if latencyMs > slowThresholdMs {
+		if time.Duration(latencyMs)*time.Millisecond > slowThreshold {
 			r.Status, r.Message = TestYellow, "reachable but slow"
 			return r
 		}

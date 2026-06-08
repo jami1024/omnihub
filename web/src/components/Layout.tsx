@@ -9,7 +9,7 @@ import { LangSwitch } from './LangSwitch'
 // header (blurred card surface) with a rounded-pill nav, centered to
 // max-w-7xl, and right-side theme + identity controls. Pages render
 // their own <main> inside {children}.
-const SETTINGS_ROUTES = ['/admin/settings', '/admin/blocked-ips', '/admin/alert-channels', '/admin/prices', '/admin/redemptions']
+const SETTINGS_ROUTES = ['/admin/settings', '/admin/blocked-ips', '/admin/alert-channels', '/admin/prices', '/admin/redemptions', '/admin/announcements', '/admin/plans']
 
 type NavItem = { to: string; labelKey: string; activeWhen?: string[] }
 

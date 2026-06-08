@@ -14,6 +14,8 @@ import { PortalLayout } from '../../components/PortalLayout'
 import { Td, Th } from '../../components/Table'
 import { ApiError } from '../../lib/portalApi'
 import { usePortalUsage } from '../../lib/portalData'
+import { usePortalAnnouncements } from '../../lib/announcements'
+import { useCurrentPlan } from '../../lib/plans'
 import { useI18n } from '../../lib/i18n'
 
 const WINDOWS = [7, 14, 30, 90]
@@ -22,6 +24,8 @@ export function PortalOverviewPage() {
   const { t } = useI18n()
   const [days, setDays] = useState(7)
   const { data, isLoading, error } = usePortalUsage(days)
+  const { data: announcements } = usePortalAnnouncements('portal_home')
+  const { data: currentPlan } = useCurrentPlan()
 
   return (
     <PortalLayout>
@@ -47,6 +51,32 @@ export function PortalOverviewPage() {
             ))}
           </div>
         </div>
+
+
+        {announcements && announcements.length > 0 && (
+          <div className="mb-6 space-y-2">
+            {announcements.map((a) => (
+              <div key={a.id} className="rounded-xl border border-line bg-surface px-4 py-3">
+                <div className="text-sm font-semibold">{a.title}</div>
+                <p className="mt-1 text-sm leading-6 text-muted">{a.body}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {currentPlan?.grant && (
+          <section className="mb-6 rounded-xl border border-line bg-surface px-5 py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-muted">{t('portalPlans.current')}</div>
+                <h3 className="mt-1 text-lg font-semibold">{currentPlan.grant.plan_name_snapshot}</h3>
+              </div>
+              <div className="text-sm text-muted">
+                {t('portalPlans.remaining', { amount: fmtUSD(currentPlan.grant.credit_remaining_usd) })}
+              </div>
+            </div>
+          </section>
+        )}
 
         {isLoading && <p className="text-sm text-muted">{t('common.loading')}</p>}
         {error && (

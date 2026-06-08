@@ -64,7 +64,21 @@ export interface PortalRequestRow {
   status_code: number | null
   input_tokens: number
   output_tokens: number
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
   cost_usd: number
+  billed_usd: number | null
+  plan_billed_usd: number | null
+  wallet_billed_usd: number | null
+  cost_breakdown: {
+    input: number
+    output: number
+    cache_creation_5m?: number
+    cache_creation_1h?: number
+    cache_read?: number
+    total: number
+    multiplier?: number
+  } | null
   duration_ms: number | null
   error: string
 }

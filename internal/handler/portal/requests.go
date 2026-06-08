@@ -60,15 +60,21 @@ func RequestsHandler(store requestStore, keys keyStore) gin.HandlerFunc {
 		out := make([]gin.H, 0, len(rows))
 		for _, r := range rows {
 			out = append(out, gin.H{
-				"created_at":    r.CreatedAt,
-				"key_name":      r.KeyName,
-				"model":         r.Model,
-				"status_code":   r.StatusCode,
-				"input_tokens":  r.InputTokens,
-				"output_tokens": r.OutputTokens,
-				"cost_usd":      r.CostUSD,
-				"duration_ms":   r.DurationMs,
-				"error":         r.Error,
+				"created_at":                  r.CreatedAt,
+				"key_name":                    r.KeyName,
+				"model":                       r.Model,
+				"status_code":                 r.StatusCode,
+				"input_tokens":                r.InputTokens,
+				"output_tokens":               r.OutputTokens,
+				"cache_creation_input_tokens": r.CacheCreationInputTokens,
+				"cache_read_input_tokens":     r.CacheReadInputTokens,
+				"cost_usd":                    r.CostUSD,
+				"billed_usd":                  r.BilledUSD,
+				"plan_billed_usd":             r.PlanBilledUSD,
+				"wallet_billed_usd":           r.WalletBilledUSD,
+				"cost_breakdown":              r.CostBreakdown,
+				"duration_ms":                 r.DurationMs,
+				"error":                       r.Error,
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{

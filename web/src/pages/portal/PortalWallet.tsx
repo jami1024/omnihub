@@ -17,6 +17,7 @@ export function PortalWalletPage() {
         <div className="mb-6">
           <h2 className="text-xl font-semibold">{t('portalWallet.title')}</h2>
           <p className="text-sm text-muted">{t('portalWallet.subtitle')}</p>
+          <p className="mt-1 text-sm text-muted">{t('portalWallet.paygHint')}</p>
         </div>
 
         {isLoading && <p className="text-sm text-muted">{t('common.loading')}</p>}
