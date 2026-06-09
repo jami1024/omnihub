@@ -237,6 +237,22 @@ func (r *PlanRepo) ActiveGrantForUser(ctx context.Context, userID int64, now tim
 	return g, nil
 }
 
+func (r *PlanRepo) ListGrantsByUser(ctx context.Context, userID int64) ([]UserPlanGrant, error) {
+	rows, err := r.pool.Query(ctx, `
+        SELECT id, user_id, plan_id, plan_name_snapshot, starts_at, expires_at,
+               credit_granted_usd::float8, credit_remaining_usd::float8,
+               price_ratio_snapshot::float8, allow_payg_overage_snapshot,
+               status, created_at, updated_at
+          FROM user_plan_grants
+         WHERE user_id = $1
+         ORDER BY starts_at DESC, id DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list grants for user %d: %w", userID, err)
+	}
+	defer rows.Close()
+	return scanUserPlanGrants(rows)
+}
+
 func (r *PlanRepo) ConsumeGrantCredit(ctx context.Context, grantID, userID int64, amount float64, requestCreatedAt *time.Time) (float64, error) {
 	if amount <= 0 {
 		return 0, nil
@@ -317,6 +333,18 @@ func scanPlan(row interface{ Scan(...any) error }) (*Plan, error) {
 		p.AllowedModels = []string{}
 	}
 	return &p, nil
+}
+
+func scanUserPlanGrants(rows pgx.Rows) ([]UserPlanGrant, error) {
+	out := []UserPlanGrant{}
+	for rows.Next() {
+		g, err := scanUserPlanGrant(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *g)
+	}
+	return out, rows.Err()
 }
 
 func scanUserPlanGrant(row interface{ Scan(...any) error }) (*UserPlanGrant, error) {

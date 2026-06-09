@@ -6,6 +6,7 @@ import { StatusBadge, Td, Th } from '../components/Table'
 import { ApiError } from '../lib/api'
 import { useI18n } from '../lib/i18n'
 import { useDeleteUser, useRechargeUser, useSetUserEnabled, useSetUserRatio, useUsers, type AdminUser } from '../lib/users'
+import { useUserPlanGrants } from '../lib/plans'
 
 export function UsersPage() {
   const { t } = useI18n()
@@ -15,6 +16,7 @@ export function UsersPage() {
   const del = useDeleteUser()
   const recharge = useRechargeUser()
   const [recharging, setRecharging] = useState<AdminUser | null>(null)
+  const [viewingGrants, setViewingGrants] = useState<AdminUser | null>(null)
 
   function editRatio(u: AdminUser) {
     const raw = window.prompt(t('users.ratioPrompt', { name: u.username }), String(u.price_ratio))
@@ -109,6 +111,12 @@ export function UsersPage() {
                         {t('users.recharge')}
                       </button>
                       <button
+                        onClick={() => setViewingGrants(u)}
+                        className="mr-1 inline-flex min-h-10 items-center rounded-md px-2 text-muted underline-offset-4 hover:bg-surface-2 hover:text-ink hover:underline sm:mr-3 sm:px-1"
+                      >
+                        {t('users.plans')}
+                      </button>
+                      <button
                         onClick={() => editRatio(u)}
                         disabled={setRatio.isPending}
                         className="mr-1 inline-flex min-h-10 items-center rounded-md px-2 text-muted underline-offset-4 hover:bg-surface-2 hover:text-ink hover:underline disabled:opacity-50 sm:mr-3 sm:px-1"
@@ -163,7 +171,49 @@ export function UsersPage() {
           />
         </Modal>
       )}
+
+      {viewingGrants && (
+        <Modal title={t('users.grantsTitle', { name: viewingGrants.username })} onClose={() => setViewingGrants(null)}>
+          <GrantsList userId={viewingGrants.id} />
+        </Modal>
+      )}
     </Layout>
+  )
+}
+
+function GrantsList({ userId }: { userId: number }) {
+  const { t } = useI18n()
+  const { data: grants, isLoading, error } = useUserPlanGrants(userId)
+
+  if (isLoading) return <p className="text-sm text-muted">{t('common.loading')}</p>
+  if (error) return <ErrorNotice>{error instanceof ApiError ? error.message : t('common.actionFailed')}</ErrorNotice>
+  if (!grants || grants.length === 0) return <p className="text-sm text-muted">{t('users.grantsEmpty')}</p>
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm">
+        <thead className="border-b border-line text-xs uppercase tracking-wide text-muted">
+          <tr>
+            <Th>{t('users.grantsColPlan')}</Th>
+            <Th className="text-right">{t('users.grantsColRemaining')}</Th>
+            <Th>{t('users.grantsColExpires')}</Th>
+            <Th>{t('common.status')}</Th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-line">
+          {grants.map((g) => (
+            <tr key={g.id}>
+              <Td className="font-medium">{g.plan_name_snapshot}</Td>
+              <Td className="text-right tabular-nums">
+                ${g.credit_remaining_usd.toFixed(2)} / ${g.credit_granted_usd.toFixed(2)}
+              </Td>
+              <Td className="text-muted">{g.expires_at ? new Date(g.expires_at).toLocaleDateString() : '—'}</Td>
+              <Td className="text-muted">{g.status}</Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 

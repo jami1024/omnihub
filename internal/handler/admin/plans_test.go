@@ -23,6 +23,7 @@ type fakePlanStore struct {
 	lastPlanID  int64
 	lastPlan    repository.Plan
 	lastStartAt time.Time
+	grants      []repository.UserPlanGrant
 }
 
 func (f *fakePlanStore) ListPlans(context.Context) ([]repository.Plan, error) {
@@ -40,6 +41,10 @@ func (f *fakePlanStore) GrantPlanToUser(_ context.Context, userID, planID int64,
 	f.lastUserID, f.lastPlanID, f.lastStartAt = userID, planID, startsAt
 	return f.grantID, nil
 }
+func (f *fakePlanStore) ListGrantsByUser(_ context.Context, userID int64) ([]repository.UserPlanGrant, error) {
+	f.lastUserID = userID
+	return f.grants, nil
+}
 
 func newPlanEngine(store *fakePlanStore) *gin.Engine {
 	gin.SetMode(gin.TestMode)
@@ -47,6 +52,7 @@ func newPlanEngine(store *fakePlanStore) *gin.Engine {
 	r.GET("/admin/api/plans", handler.ListPlansHandler(store))
 	r.POST("/admin/api/plans", handler.CreatePlanHandler(store))
 	r.PATCH("/admin/api/plans/:id", handler.UpdatePlanHandler(store))
+	r.GET("/admin/api/users/:id/plan-grants", handler.ListUserPlanGrantsHandler(store))
 	r.POST("/admin/api/users/:id/plan-grants", handler.GrantPlanToUserHandler(store))
 	return r
 }
@@ -72,6 +78,28 @@ func TestListPlansReturnsRows(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(resp.Plans) != 1 || resp.Plans[0].Name != "Starter" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestListUserPlanGrantsReturnsGrants(t *testing.T) {
+	store := &fakePlanStore{grants: []repository.UserPlanGrant{
+		{ID: 5, UserID: 42, PlanNameSnapshot: "Starter", CreditGrantedUSD: 10, CreditRemainingUSD: 7.5, Status: "active"},
+	}}
+	rec := do(newPlanEngine(store), http.MethodGet, "/admin/api/users/42/plan-grants", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if store.lastUserID != 42 {
+		t.Fatalf("user id not forwarded: got %d", store.lastUserID)
+	}
+	var resp struct {
+		Grants []repository.UserPlanGrant `json:"grants"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Grants) != 1 || resp.Grants[0].CreditRemainingUSD != 7.5 {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
 }

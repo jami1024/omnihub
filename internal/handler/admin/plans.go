@@ -17,6 +17,7 @@ type planStore interface {
 	CreatePlan(ctx context.Context, p repository.Plan) (int64, error)
 	UpdatePlan(ctx context.Context, id int64, p repository.Plan) error
 	GrantPlanToUser(ctx context.Context, userID, planID int64, startsAt time.Time) (int64, error)
+	ListGrantsByUser(ctx context.Context, userID int64) ([]repository.UserPlanGrant, error)
 }
 
 func ListPlansHandler(store planStore) gin.HandlerFunc {
@@ -79,6 +80,22 @@ func UpdatePlanHandler(store planStore) gin.HandlerFunc {
 		}
 		slog.Info("admin: plan updated", "id", id, "admin", adminActor(c))
 		c.Status(http.StatusNoContent)
+	}
+}
+
+func ListUserPlanGrantsHandler(store planStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, ok := parseIDParam(c)
+		if !ok {
+			return
+		}
+		grants, err := store.ListGrantsByUser(c.Request.Context(), userID)
+		if err != nil {
+			slog.Error("admin: list user plan grants failed", "user", userID, "err", err.Error())
+			writeInternal(c, "could not list plan grants")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"grants": grants})
 	}
 }
 

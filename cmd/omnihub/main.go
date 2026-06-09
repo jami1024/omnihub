@@ -450,6 +450,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	authed.GET("/plans", adminhandler.ListPlansHandler(planRepo))
 	authed.POST("/plans", adminhandler.CreatePlanHandler(planRepo))
 	authed.PATCH("/plans/:id", adminhandler.UpdatePlanHandler(planRepo))
+	authed.GET("/users/:id/plan-grants", adminhandler.ListUserPlanGrantsHandler(planRepo))
 	authed.POST("/users/:id/plan-grants", adminhandler.GrantPlanToUserHandler(planRepo))
 
 	if web.Available() {

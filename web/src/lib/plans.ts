@@ -58,6 +58,13 @@ export function useSavePlan() {
 export function useGrantPlanToUser() {
   return useMutation({ mutationFn: ({ userId, planId }: { userId: number; planId: number }) => api<{ id: number }>(`/users/${userId}/plan-grants`, { method: 'POST', body: JSON.stringify({ plan_id: planId }) }) })
 }
+export function useUserPlanGrants(userId: number | null) {
+  return useQuery({
+    queryKey: ['user-plan-grants', userId],
+    queryFn: () => api<{ grants: UserPlanGrant[] }>(`/users/${userId}/plan-grants`).then((r) => r.grants),
+    enabled: userId != null,
+  })
+}
 export function usePortalPlans() {
   return useQuery({ queryKey: PORTAL_KEY, queryFn: () => papi<{ plans: Plan[] }>('/plans').then((r) => r.plans) })
 }
