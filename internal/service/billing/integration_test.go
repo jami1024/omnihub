@@ -202,6 +202,38 @@ func TestIntegrationPlanExhaustedNoOverage(t *testing.T) {
 	}
 }
 
+// TestIntegrationAvailableBalanceForPlanOnlyUser is the regression guard for
+// the admission bug found during end-to-end testing: a user with an active
+// plan grant but ZERO wallet top-up was rejected at the admission gate with
+// insufficient_balance, because the gate only summed wallet credit. The
+// available balance must include active plan credit so plan-only users pass
+// admission and reach plan-first charging. Against the old wallet-only logic
+// this returns 0 and fails.
+func TestIntegrationAvailableBalanceForPlanOnlyUser(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	store := newStore(pool)
+	svc := billing.New(store)
+	plans := repository.NewPlanRepo(pool)
+
+	uid := createUser(t, pool, "billing-planonly-"+uniq())
+	planID, err := plans.CreatePlan(ctx, repository.Plan{Name: "PlanOnly", IncludedCreditUSD: 0.5, PriceRatio: 1, AllowPaygOverage: true, Enabled: true})
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	if _, err := plans.GrantPlanToUser(ctx, uid, planID, time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("grant plan: %v", err)
+	}
+
+	bal, err := svc.AvailableBalance(ctx, uid)
+	if err != nil {
+		t.Fatalf("available balance: %v", err)
+	}
+	if !approx(bal, 0.5) {
+		t.Fatalf("expected plan-only available balance 0.5, got %v", bal)
+	}
+}
+
 // TestIntegrationConcurrentConsumeIsAtomic: many concurrent charges against a
 // single grant must never over-consume below zero — the FOR UPDATE lock in
 // ConsumeGrantCredit must serialize them. Plan credit 10, twenty concurrent

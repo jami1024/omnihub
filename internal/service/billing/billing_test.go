@@ -56,3 +56,44 @@ func TestChargeRejectsWhenPlanExhaustedAndNoOverage(t *testing.T) {
 		t.Fatal("expected rejection")
 	}
 }
+
+func TestAvailableBalanceIncludesPlanCreditForZeroWalletUser(t *testing.T) {
+	// Plan-only user: $0 wallet, $0.50 active plan credit. Admission must
+	// see a positive balance, otherwise the gate 402s them before plan
+	// credit is ever consulted.
+	store := &fakeStore{grantCredit: 0.5, walletBalance: 0, allowPayg: true}
+	svc := New(store)
+	bal, err := svc.AvailableBalance(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bal != 0.5 {
+		t.Fatalf("expected available balance 0.5, got %v", bal)
+	}
+}
+
+func TestAvailableBalanceSumsPlanAndWallet(t *testing.T) {
+	store := &fakeStore{grantCredit: 3, walletBalance: 10, allowPayg: true}
+	svc := New(store)
+	bal, err := svc.AvailableBalance(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bal != 13 {
+		t.Fatalf("expected available balance 13, got %v", bal)
+	}
+}
+
+func TestAvailableBalanceFallsBackToWalletWithoutPlan(t *testing.T) {
+	// No active grant (grantCredit 0, overage allowed → store returns nil):
+	// available balance is just the wallet.
+	store := &fakeStore{grantCredit: 0, walletBalance: 4, allowPayg: true}
+	svc := New(store)
+	bal, err := svc.AvailableBalance(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bal != 4 {
+		t.Fatalf("expected available balance 4, got %v", bal)
+	}
+}

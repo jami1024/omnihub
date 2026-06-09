@@ -1137,18 +1137,16 @@ func buildLimiter() (*limits.Limiter, *limits.RPMCache) {
 	// users (who would otherwise have a zero balance). Balance = lifetime
 	// wallet credits minus lifetime request cost, cached like spend.
 	if billingEnabled() {
-		wallet := repository.NewWalletRepo(pool)
-		balSrc := limits.BalanceFunc(func(ctx context.Context, userID int64) (float64, error) {
-			credits, err := wallet.Credits(ctx, userID)
-			if err != nil {
-				return 0, err
-			}
-			billed, err := src.SumBilledByUser(ctx, userID)
-			if err != nil {
-				return 0, err
-			}
-			return credits - billed, nil
-		})
+		// Admission balance must reflect what Charge actually draws down:
+		// active plan credit first, then the pay-as-you-go wallet. Reusing
+		// the billing store keeps the gate and the charge path in lockstep,
+		// so a plan-only user (no wallet top-up) is not wrongly rejected.
+		billingStore := billing.NewRepositoryStore(
+			repository.NewPlanRepo(pool),
+			repository.NewWalletRepo(pool),
+			src,
+		)
+		balSrc := limits.BalanceFunc(billing.New(billingStore).AvailableBalance)
 		balanceGuard = limits.NewBalanceGuard(balSrc, spendCacheTTL)
 		l.SetBalanceGuard(balanceGuard)
 		slog.Info("prepaid balance billing enabled", "balance_cache_ttl", spendCacheTTL)

@@ -36,6 +36,27 @@ func New(store Store) *Service {
 	return &Service{store: store, now: time.Now}
 }
 
+// AvailableBalance reports a user's total spendable balance for request
+// admission: active plan credit plus pay-as-you-go wallet balance. It
+// mirrors what Charge draws down (plan first, then wallet), so a user
+// who holds a plan grant but never topped up their wallet still passes
+// the admission gate — without it, plan-only users are wrongly rejected
+// with insufficient_balance before plan credit is ever consulted.
+func (s *Service) AvailableBalance(ctx context.Context, userID int64) (float64, error) {
+	wallet, err := s.store.WalletBalance(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	grant, err := s.store.ActiveGrantForUser(ctx, userID, s.now())
+	if err != nil {
+		return 0, err
+	}
+	if grant != nil {
+		return wallet + grant.CreditRemainingUSD, nil
+	}
+	return wallet, nil
+}
+
 func (s *Service) Charge(ctx context.Context, userID int64, amount float64) (Result, error) {
 	if amount <= 0 {
 		return Result{}, nil
