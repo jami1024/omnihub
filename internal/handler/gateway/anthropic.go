@@ -295,12 +295,16 @@ func AnthropicMessagesHandler(
 			if buffer != nil {
 				rec := buildMessageRequest(c, &req, driver, account, &result, writeErr, startedAt)
 				rec.CostUSD = costUSD
-				billed := billedUSD(c, costUSD)
-				rec.BilledUSD = billed
-				split := chargeBilling(c.Request.Context(), guard.APIKey(c), billed, charger, limiter)
-				rec.PlanBilledUSD = floatPtrIfPositive(split.PlanUSD)
-				rec.WalletBilledUSD = floatPtrIfPositive(split.WalletUSD)
-				rec.PlanGrantID = split.PlanGrantID
+				if k := guard.APIKey(c); k != nil && k.UserID != nil && costUSD != nil && *costUSD > 0 {
+					split := chargeBilling(c.Request.Context(), k, costUSD, charger, limiter)
+					rec.BilledUSD = &split.BilledUSD
+					rec.PlanBilledUSD = floatPtrIfPositive(split.PlanUSD)
+					// wallet_billed_usd is stored explicitly (even 0) so a
+					// plan-covered request is not re-counted as wallet spend
+					// via SumBilledByUser's legacy cost fallback.
+					rec.WalletBilledUSD = &split.WalletUSD
+					rec.PlanGrantID = split.PlanGrantID
+				}
 				rec.CostBreakdown = costBreakdown
 				buffer.Enqueue(rec)
 			}
@@ -444,22 +448,6 @@ func emitMetrics(providerName, requestedModel string, result *forward.Result, co
 		OutputTokens: outTok,
 		CostUSD:      cost,
 	})
-}
-
-// billedUSD returns what the owning user is charged: cost times the key
-// owner's price ratio. Nil when cost is nil; falls back to the raw cost
-// when there is no authenticated key (open mode). A ratio of 0 bills 0
-// (a deliberate free tier).
-func billedUSD(c *gin.Context, cost *float64) *float64 {
-	if cost == nil {
-		return nil
-	}
-	ratio := 1.0
-	if k := guard.APIKey(c); k != nil {
-		ratio = k.PriceRatio
-	}
-	b := *cost * ratio
-	return &b
 }
 
 func recordExhaustedFailure(

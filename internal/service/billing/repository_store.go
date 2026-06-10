@@ -45,6 +45,7 @@ func (s *RepositoryStore) ActiveGrantForUser(ctx context.Context, userID int64, 
 		ID:                 grant.ID,
 		UserID:             grant.UserID,
 		CreditRemainingUSD: grant.CreditRemainingUSD,
+		PriceRatioSnapshot: grant.PriceRatioSnapshot,
 		AllowPaygOverage:   grant.AllowPaygOverageSnapshot,
 	}, nil
 }

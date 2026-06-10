@@ -263,38 +263,37 @@ func (r *PlanRepo) ConsumeGrantCredit(ctx context.Context, grantID, userID int64
 	}
 	defer tx.Rollback(ctx)
 
-	var remaining float64
+	// Lock the active grant, then deduct in SQL numeric and derive the
+	// consumed amount as (old − new) at the column's stored 6-dp scale. Doing
+	// the arithmetic in Postgres (rather than reading ::float8, subtracting in
+	// Go, and writing back) keeps the ledger amount and credit_remaining
+	// rounded identically, so the ledger always sums to granted − remaining
+	// with no float drift.
+	var consumed float64
 	err = tx.QueryRow(ctx, `
-        SELECT credit_remaining_usd::float8
-          FROM user_plan_grants
-         WHERE id = $1 AND user_id = $2 AND status = 'active'
-         FOR UPDATE`, grantID, userID).Scan(&remaining)
+        WITH locked AS (
+            SELECT credit_remaining_usd AS rem
+              FROM user_plan_grants
+             WHERE id = $1 AND user_id = $2 AND status = 'active'
+             FOR UPDATE
+        ), upd AS (
+            UPDATE user_plan_grants g
+               SET credit_remaining_usd = GREATEST(l.rem - $3::numeric, 0),
+                   status = CASE WHEN GREATEST(l.rem - $3::numeric, 0) <= 0 THEN 'depleted' ELSE 'active' END,
+                   updated_at = NOW()
+              FROM locked l
+             WHERE g.id = $1 AND g.user_id = $2
+            RETURNING (l.rem - g.credit_remaining_usd)::float8 AS consumed
+        )
+        SELECT consumed FROM upd`, grantID, userID, amount).Scan(&consumed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("select grant credit: %w", err)
+		return 0, fmt.Errorf("consume grant credit: %w", err)
 	}
-	if remaining <= 0 {
+	if consumed <= 0 {
 		return 0, nil
-	}
-	consumed := amount
-	if remaining < amount {
-		consumed = remaining
-	}
-	newRemaining := remaining - consumed
-	status := "active"
-	if newRemaining <= 0 {
-		newRemaining = 0
-		status = "depleted"
-	}
-	if _, err := tx.Exec(ctx, `
-        UPDATE user_plan_grants
-           SET credit_remaining_usd = $3,
-               status = $4,
-               updated_at = NOW()
-         WHERE id = $1 AND user_id = $2`, grantID, userID, newRemaining, status); err != nil {
-		return 0, fmt.Errorf("update grant credit: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
         INSERT INTO plan_usage_ledger (user_plan_grant_id, user_id, amount_usd, request_created_at, note)

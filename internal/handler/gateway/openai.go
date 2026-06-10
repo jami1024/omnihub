@@ -176,12 +176,16 @@ func OpenAIChatCompletionsHandler(
 			if buffer != nil {
 				rec := buildMessageRequest(c, req, driver, account, &result, writeErr, startedAt)
 				rec.CostUSD = costUSD
-				billed := billedUSD(c, costUSD)
-				rec.BilledUSD = billed
-				split := chargeBilling(c.Request.Context(), guard.APIKey(c), billed, charger, limiter)
-				rec.PlanBilledUSD = floatPtrIfPositive(split.PlanUSD)
-				rec.WalletBilledUSD = floatPtrIfPositive(split.WalletUSD)
-				rec.PlanGrantID = split.PlanGrantID
+				if k := guard.APIKey(c); k != nil && k.UserID != nil && costUSD != nil && *costUSD > 0 {
+					split := chargeBilling(c.Request.Context(), k, costUSD, charger, limiter)
+					rec.BilledUSD = &split.BilledUSD
+					rec.PlanBilledUSD = floatPtrIfPositive(split.PlanUSD)
+					// wallet_billed_usd is stored explicitly (even 0) so a
+					// plan-covered request is not re-counted as wallet spend
+					// via SumBilledByUser's legacy cost fallback.
+					rec.WalletBilledUSD = &split.WalletUSD
+					rec.PlanGrantID = split.PlanGrantID
+				}
 				rec.CostBreakdown = costBreakdown
 				buffer.Enqueue(rec)
 			}

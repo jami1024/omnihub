@@ -127,7 +127,7 @@ func TestIntegrationPlanCoversFullAmount(t *testing.T) {
 		t.Fatalf("grant plan: %v", err)
 	}
 
-	res, err := svc.Charge(ctx, uid, 4)
+	res, err := svc.Charge(ctx, uid, 4, 1)
 	if err != nil {
 		t.Fatalf("charge: %v", err)
 	}
@@ -139,6 +139,39 @@ func TestIntegrationPlanCoversFullAmount(t *testing.T) {
 	}
 	if s := ledgerSum(t, pool, uid); !approx(s, 4) {
 		t.Fatalf("expected plan ledger sum=4, got %v", s)
+	}
+}
+
+// TestIntegrationPlanRatioGovernsBilledAmount: a plan with a price_ratio != 1
+// bills cost × the grant's snapshot ratio, drawn from plan credit. Here a $4
+// cost on a 1.5× plan bills $6, leaving $4 of the $10 grant.
+func TestIntegrationPlanRatioGovernsBilledAmount(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	store := newStore(pool)
+	svc := billing.New(store)
+	plans := repository.NewPlanRepo(pool)
+
+	uid := createUser(t, pool, "billing-ratio-"+uniq())
+	planID, err := plans.CreatePlan(ctx, repository.Plan{Name: "Markup", IncludedCreditUSD: 10, PriceRatio: 1.5, AllowPaygOverage: false, Enabled: true})
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	grantID, err := plans.GrantPlanToUser(ctx, uid, planID, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("grant plan: %v", err)
+	}
+
+	// userRatio 0.5 is intentionally different; the plan ratio must win.
+	res, err := svc.Charge(ctx, uid, 4, 0.5)
+	if err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	if !approx(res.BilledUSD, 6) || !approx(res.PlanUSD, 6) || !approx(res.WalletUSD, 0) {
+		t.Fatalf("expected billed=6 plan=6 wallet=0, got %+v", res)
+	}
+	if rem, _ := grantRemaining(t, pool, grantID); !approx(rem, 4) {
+		t.Fatalf("expected remaining=4, got %v", rem)
 	}
 }
 
@@ -166,7 +199,7 @@ func TestIntegrationPlanThenWalletOverage(t *testing.T) {
 		t.Fatalf("grant plan: %v", err)
 	}
 
-	res, err := svc.Charge(ctx, uid, 5)
+	res, err := svc.Charge(ctx, uid, 5, 1)
 	if err != nil {
 		t.Fatalf("charge: %v", err)
 	}
@@ -197,7 +230,7 @@ func TestIntegrationPlanExhaustedNoOverage(t *testing.T) {
 		t.Fatalf("grant plan: %v", err)
 	}
 
-	if _, err := svc.Charge(ctx, uid, 2); err != billing.ErrInsufficientBalance {
+	if _, err := svc.Charge(ctx, uid, 2, 1); err != billing.ErrInsufficientBalance {
 		t.Fatalf("expected ErrInsufficientBalance, got %v", err)
 	}
 }
@@ -258,7 +291,7 @@ func TestIntegrationConcurrentConsumeIsAtomic(t *testing.T) {
 	const n = 20
 	results := make(chan error, n)
 	for i := 0; i < n; i++ {
-		go func() { _, err := svc.Charge(ctx, uid, 1); results <- err }()
+		go func() { _, err := svc.Charge(ctx, uid, 1, 1); results <- err }()
 	}
 	var ok, rejected int
 	for i := 0; i < n; i++ {
