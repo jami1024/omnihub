@@ -1,130 +1,377 @@
-# 上游供应商 OAuth 插件方案
+# 上游订阅账号 OAuth 插件与账号分发方案
 
-## 背景
+## 1. 结论先行
 
-OmniHub 当前的上游账号模型已经围绕 `accounts` 表、`provider.Driver`、`provider.Registry`、Resolver 和 Forwarder 构建。一个上游账号代表一组供应商凭证，Resolver 负责选账号，Driver 负责把内部统一请求转换成供应商请求，Forwarder 负责发送请求、流式转发、错误处理和重试。
+OmniHub 要支持的 OAuth 不是“用户用 OAuth 登录 OmniHub”，而是“上游供应商账号使用 OAuth / CLI 登录态接入 OmniHub”。典型场景包括：
 
-后续要支持的“OAuth”不是终端用户登录 OmniHub，而是**上游供应商账号的认证方式**。例如管理员添加一个 GPT Pro / Codex、Claude Code、Gemini CLI 订阅账号，OmniHub 用该账号的 OAuth 登录态调用对应上游能力。
+- GPT Pro / Codex 订阅账号。
+- Claude Pro / Max / Claude Code 账号。
+- Gemini CLI / Google OAuth 账号。
+- Kiro、Antigravity、Qwen Code、iFlow 等订阅型或 CLI 型账号。
 
-根据开源项目调研，常见做法是：
+推荐架构是：
 
-- Codex / ChatGPT 订阅：读取或生成 Codex OAuth 登录态，将 `/v1/responses`、`/v1/chat/completions` 转发到 Codex 后端。
-- Claude 订阅：通过 Claude Code OAuth、Claude Code SDK、Claude CLI 或 OAuth 代理封装成 Anthropic-compatible / OpenAI-compatible API。
-- Gemini CLI：通过 Google OAuth 登录态访问 Gemini / Code Assist 能力。
-- 多账号项目通常会做账号池、轮询、sticky、token 自动刷新、quota 统计和 401/429 处理。
+```text
+上游认证插件 UpstreamAuthPlugin
+  负责登录、导入、刷新、校验、撤销
 
-本方案把这类能力设计为插件化的**上游账号认证能力**，不混入用户登录 `AuthProvider`，也不混入支付订阅 `PaymentProvider`。
+ProviderDriver
+  负责请求参数、协议转换、header 注入、响应解析
 
-## 目标
+Resolver / Account Pool
+  负责账号组、sticky、quota、cooldown、failover、计费归因
 
-1. 管理员添加上游账号时，可以选择 `API Key`、`OAuth 登录`、`导入 auth.json`、`Service Account` 等认证方式。
-2. OAuth 登录、回调交换、token 刷新、凭证校验由插件负责。
-3. 模型请求参数、协议转换和响应解析仍由 `ProviderDriver` 负责。
-4. OmniHub 核心继续负责账号池、路由、限流、计费、健康检查和日志。
-5. OAuth 插件不进入每次流式请求热路径，避免影响吞吐和稳定性。
-6. Codex / Claude 订阅账号作为实验型上游账号接入，稳定生产场景继续优先推荐官方 API Key、Bedrock、Vertex、Teams / Enterprise OAuth 等方式。
+OmniHub CLI / SDK Client Profile
+  负责 OmniHub 自己的客户端指纹、会话、能力声明和排障标识
+```
 
-## 非目标
+核心原则：
 
-- 不把 GPT Pro / Claude Pro / Claude Max 订阅伪装成正式 OpenAI Platform / Anthropic Console API。
-- 不把 OmniHub 用户登录改成 OAuth。
-- 不在 OAuth 插件里处理 prompt、messages、tools、images 等模型请求内容。
-- 不默认支持多用户高并发共享一个个人订阅账号。
-- 不要求第一阶段实现完整浏览器 OAuth；可以先支持导入现有 CLI 凭证。
+```text
+认证生命周期插件化
+请求协议 Driver 化
+账号分发 Pool 化
+客户端指纹 OmniHub 自有化
+订阅账号能力 experimental 化
+```
 
-## 核心概念
+这意味着 OmniHub 不应该把 OAuth token refresh 写进 Driver，也不应该让 OAuth 插件处理 prompt、messages、tools、images 等模型内容。OAuth 插件只产生可用认证材料；Driver 才决定上游请求怎么发。
 
-### Provider
+---
 
-`provider` 仍表示上游模型供应商或协议驱动，例如：
+## 2. 当前项目基础
 
-- `openai`
-- `anthropic`
-- `claude-platform`
-- `openai-codex`
-- `claude-code`
-- `gemini-cli`
+OmniHub 当前已有比较适合扩展的基础：
 
-### Auth Type
+- `accounts` 表：上游账号池，已有 `provider`、`credentials`、`enabled`、`weight`、`priority`、`base_url` 等字段。
+- `provider.Driver`：负责把 `ir.UnifiedRequest` 转成上游 HTTP 请求。
+- `provider.Registry`：注册内置 provider driver。
+- Resolver：选择具体上游账号。
+- Forwarder：发送请求、处理流式响应、endpoint failover、custom headers、安全 header 清理。
+- Provider Group：已有账号分组概念，可扩展成订阅账号池。
+- Billing / Wallet / Plan：已有计费基础，可做用户、Key、账号、组维度成本归因。
 
-`auth_type` 表示这个上游账号如何获得访问权限：
+现有 Driver 参数行为：
 
-- `api_key`
-- `oauth`
-- `imported_oauth`
-- `service_account`
-- `adc`
-- `worker`
+### Anthropic Driver
 
-### Auth Plugin
+`internal/service/provider/drivers/anthropic/request.go` 当前发送：
 
-`auth_plugin` 表示由哪个插件管理认证生命周期：
+```http
+Content-Type: application/json
+Accept: application/json
+x-api-key: <api_key>
+anthropic-version: <version>
+anthropic-beta: <comma-separated beta list>
+```
 
-- `codex-oauth`
-- `claude-oauth`
-- `claude-code-worker`
-- `gemini-oauth`
+body 是 Anthropic Messages 结构：
 
-### Provider Driver
+```json
+{
+  "model": "...",
+  "messages": [],
+  "system": [],
+  "tools": [],
+  "tool_choice": {},
+  "stream": true,
+  "max_tokens": 4096,
+  "temperature": 0.7,
+  "top_p": 1,
+  "top_k": 0,
+  "stop_sequences": [],
+  "thinking": {},
+  "metadata": {}
+}
+```
 
-`ProviderDriver` 负责：
+### OpenAI Driver
 
-- 构造上游 URL。
-- 构造上游请求 body。
-- 注入认证 header。
-- 将 OpenAI Chat、Responses、Anthropic Messages 等协议做转换。
-- 解析非流式和流式响应。
+`internal/service/provider/drivers/openai/request.go` 当前发送：
 
-OAuth 插件不做这些事。
+```http
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer <api_key>
+OpenAI-Organization: <organization>
+OpenAI-Project: <project>
+```
 
-## 推荐架构
+body 由 `internal/protocol/openai` 转成 OpenAI Chat Completions 格式。
+
+### Claude Platform Driver
+
+`internal/service/provider/drivers/claudeplatform/request.go` 当前发送：
+
+```http
+Content-Type: application/json
+Accept: application/json
+x-api-key: <api_key>
+anthropic-version: <version>
+anthropic-workspace-id: <workspace_id>
+anthropic-beta: <comma-separated beta list>
+```
+
+### Forwarder 现有统一约束
+
+Forwarder 当前会：
+
+- 应用 `account.CustomHeaders`。
+- 删除 `X-Forwarded-Host`、`X-Forwarded-Proto`、`X-Real-IP`、`Forwarded` 等转发链路 header。
+- 默认删除 `X-Forwarded-For`，除非账号显式开启 `ForwardClientIP`。
+- 强制 `Accept-Encoding: identity`，避免流式 SSE 被压缩缓冲破坏。
+
+这说明现在已经有两个参数入口：
+
+```text
+协议字段：ir.UnifiedRequest → ProviderDriver → upstream body
+额外 header：account.CustomHeaders / ClientMetadata → Driver / Forwarder
+```
+
+本方案要做的是把它们升级成更清晰的“认证插件 + Driver 参数 + Client Profile + 账号分发”体系。
+
+---
+
+## 3. 开源项目调研结论
+
+### 3.1 Codex / Claude / Gemini 代理类项目
+
+调研对象：
+
+- `codexProapi`
+- `codex-openai-proxy`
+- `codex-gateway`
+- `CLIProxyAPI`
+- `proxypool-hub`
+- `auth2api`
+- `claude-oauth-proxy`
+- `openai-codex-lb`
+- `codex-pooler`
+- `oauth-mux`
+
+共同做法：
+
+```text
+1. 管理多个 OAuth / CLI 登录态 / API Key 账号
+2. 对下游暴露 OpenAI-compatible / Anthropic-compatible API
+3. 请求进来后选择一个上游账号
+4. 检查 token 是否过期，必要时 refresh
+5. 根据协议转换请求 body
+6. 将响应转回下游协议
+7. 记录 usage、状态、quota、日志
+```
+
+常见账号分发策略：
+
+- `round_robin`
+- `sticky`
+- `random`
+- `usage_balanced`
+- `quota_aware`
+- `least_loaded`
+- `pinned account`
+- `fallback chain`
+- `cooldown after 429/5xx`
+- `disable after 401/403`
+
+### 3.2 sub2api 调研
+
+项目：<https://github.com/Wei-Shaw/sub2api>
+
+`sub2api` 的定位更接近 OmniHub：
+
+```text
+AI API Gateway Platform for Subscription Quota Distribution
+```
+
+它不是简单 OAuth proxy，而是完整平台：
+
+```text
+上游订阅账号 / API Key
+  ↓
+账号组 / 调度器
+  ↓
+平台 API Key
+  ↓
+用户请求
+  ↓
+鉴权、计费、限流、sticky、转发
+```
+
+值得借鉴的关键点：
+
+#### 平台 API Key 与上游账号解耦
+
+用户拿到的是平台生成的 API Key，而不是上游账号凭证：
+
+```text
+用户 API Key
+  ↓
+OmniHub 鉴权 / 计费 / 限流
+  ↓
+选择上游 OAuth 或 API Key 账号
+```
+
+这与 OmniHub 的 virtual key 模型一致。
+
+#### sticky session 是账号分发核心
+
+sub2api 文档特别提醒 Nginx 要开启：
+
+```nginx
+underscores_in_headers on;
+```
+
+原因是 Codex CLI 等客户端可能使用 `session_id` 这类带下划线的 header。Nginx 默认会丢弃带下划线的 header，导致多账号环境下 sticky session 失效。
+
+OmniHub 应在部署文档里明确提醒：
+
+```text
+如果使用 Nginx / API Gateway / CDN，必须保留 session_id、conversation_id、prompt_cache_key 等会话信号。
+```
+
+#### session hash 必须在账号选择前生成
+
+sub2api 的 issue 中暴露过一个问题：如果没有显式 `session_id`、`conversation_id`、`prompt_cache_key`，请求会随机分配到不同账号，影响 prompt cache 和上下文连续性。
+
+OmniHub 应在 Resolver 前生成 `RouteContext.SessionHash`：
+
+```text
+1. X-OmniHub-Session-ID
+2. session_id
+3. conversation_id
+4. prompt_cache_key
+5. metadata.user_id
+6. cache_control ephemeral marker
+7. system + tools + 前 N 条 messages 的内容摘要
+```
+
+#### sticky 命中的账号必须重新校验
+
+sticky 不是简单：
+
+```text
+session_hash -> account_id
+```
+
+而是：
+
+```text
+virtual_key_id + provider_group_id + model_family + session_hash
+  ↓
+account_id
+```
+
+命中后仍必须检查：
+
+- account 是否 enabled。
+- account 是否仍属于当前 group。
+- auth_status 是否可用。
+- 是否 cooldown。
+- quota 是否足够。
+- concurrency 是否可用。
+- 是否支持当前模型。
+
+### 3.3 sub2api fork 优化趋势
+
+调研了 `sub2api` 的主要 fork：
+
+| Fork | 优化方向 |
+| --- | --- |
+| `nianzs/sub2api` | 长期维护 Kiro；OAuth / AWS Builder ID / token 导入；Kiro 缓存模拟；按分组控制缓存模拟比例 |
+| `xiangking/sub2api-kiro` | 专注 Kiro；授权、refresh、转发、模型映射、quota 展示；Claude Code 风格兼容 |
+| `TokenFlux/TokenRouter` | 支付增强、安全限流、Sora 媒体签名 URL、h2c、外部系统 iframe、Antigravity 混合调度 |
+| `Blue-Seventeen/sub2api` | Claude Code / Codex / Cherry Studio 深链路兼容；Kimi / GLM 修复；Responses 链路增强；图片返回归一；成本统计优化；账号自动运维和代理池 |
+| `AFreeCoder/apipool` | 安装向导、Redis、优雅退出、Nginx header 注意事项、批量账号操作约束 |
+| `Ming-321/sub2api-openai_pro` | 针对 OpenAI 订阅优化，公开 README 差异较少 |
+
+对 OmniHub 的启发：
+
+```text
+1. 实验订阅渠道适合插件化独立维护
+2. sticky session 和 prompt cache 是分发核心
+3. 真实客户端兼容比协议兼容更细
+4. 账号健康要包含代理、区域、成功率、冷却、自动下线
+5. usage / cost / billing 需要按 user / key / group / account 归因
+6. 管理后台、部署文档、安全限流要同步完善
+```
+
+---
+
+## 4. 总体架构
 
 ```text
 Admin UI
   ↓
 Admin API
   ↓
-UpstreamAuthPlugin  ← 登录、导入、刷新、校验
+UpstreamAuthPlugin
+  - BeginAuth
+  - ExchangeCallback
+  - ImportCredentials
+  - Refresh
+  - Validate
+  - Revoke
   ↓
-accounts.credentials
+accounts.credentials / auth_status
 
-Client Request
+Client / CLI / SDK
   ↓
-Guard / Billing / Limits
+OmniHub API
+  ↓
+Guard / Virtual Key / Billing / Limits
+  ↓
+RouteContext Builder
+  - client profile
+  - session hash
+  - request id
+  - model family
   ↓
 Resolver
+  - account group
+  - sticky binding
+  - quota / health / cooldown
   ↓
 TokenManager
+  - ensure fresh token
+  - refresh lock
+  - 401 retry refresh
   ↓
 ProviderDriver
+  - protocol transform
+  - header injection
+  - stream parser
   ↓
 Forwarder
+  - endpoint failover
+  - proxy
+  - custom headers
+  - security cleanup
   ↓
 Upstream Provider
 ```
 
-热路径是：
+热路径：
 
 ```text
-Resolver → TokenManager → ProviderDriver → Forwarder
+RouteContext → Resolver → TokenManager → ProviderDriver → Forwarder
 ```
 
-其中 `TokenManager` 只有在 token 快过期、401 重试或手动刷新时才调用 OAuth 插件。
+冷路径：
 
-## 数据模型
-
-当前 `accounts` 表已有：
-
-```sql
-provider
-credentials JSONB
-base_url
-enabled
-weight
-priority
+```text
+Admin OAuth login / import / refresh / validate / revoke
 ```
 
-建议新增字段：
+OAuth 插件只在冷路径和 token refresh 时参与，不进入每个流式 chunk。
+
+---
+
+## 5. 数据模型
+
+### 5.1 accounts 扩展
+
+建议新增：
 
 ```sql
 ALTER TABLE accounts
@@ -136,24 +383,39 @@ ALTER TABLE accounts
   ADD COLUMN auth_plan TEXT,
   ADD COLUMN auth_expires_at TIMESTAMPTZ,
   ADD COLUMN last_refresh_at TIMESTAMPTZ,
-  ADD COLUMN refresh_error TEXT;
+  ADD COLUMN refresh_error TEXT,
+  ADD COLUMN client_profile TEXT,
+  ADD COLUMN client_profile_config JSONB NOT NULL DEFAULT '{}'::jsonb;
 ```
 
-推荐 `auth_status` 取值：
+`auth_type`：
 
-- `ok`
-- `expiring`
-- `refreshing`
-- `refresh_failed`
-- `login_required`
-- `revoked`
-- `quota_exceeded`
-- `unsupported_region`
-- `disabled`
+```text
+api_key
+oauth
+imported_oauth
+service_account
+adc
+worker
+```
 
-### OAuth Session 表
+`auth_status`：
 
-浏览器 OAuth 登录需要临时状态表：
+```text
+ok
+expiring
+refreshing
+refresh_failed
+login_required
+revoked
+quota_exhausted
+rate_limited
+tier_insufficient
+unsupported_region
+disabled
+```
+
+### 5.2 OAuth session 表
 
 ```sql
 CREATE TABLE upstream_oauth_sessions (
@@ -173,11 +435,68 @@ CREATE TABLE upstream_oauth_sessions (
 
 说明：
 
-- `account_id` 为空表示新建账号。
-- `account_id` 不为空表示重新登录已有账号。
-- `code_verifier` 属于敏感字段，建议复用现有 secret 加密能力。
+- `account_id` 为空：创建新账号。
+- `account_id` 不为空：重新登录已有账号。
+- `code_verifier` 属于敏感字段，应加密或短期保存。
 
-## Credentials 结构
+### 5.3 sticky binding 表
+
+```sql
+CREATE TABLE account_sticky_bindings (
+    id                 BIGSERIAL PRIMARY KEY,
+    virtual_key_id      BIGINT,
+    user_id             BIGINT,
+    provider_group_id   BIGINT NOT NULL,
+    model_family        TEXT NOT NULL,
+    session_hash        TEXT NOT NULL,
+    account_id          BIGINT NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at          TIMESTAMPTZ NOT NULL,
+    UNIQUE (virtual_key_id, provider_group_id, model_family, session_hash)
+);
+```
+
+### 5.4 account runtime state
+
+可先复用现有 health tracker，后续再落表或 Redis：
+
+```text
+account_id
+status
+cooldown_until
+rate_limit_reset_at
+quota_reset_at
+last_error_type
+last_error_message
+inflight_count
+success_count
+failure_count
+latency_ewma_ms
+```
+
+### 5.5 routing bindings
+
+用于手动绑定用户、Key、客户端或模型到账号组：
+
+```sql
+CREATE TABLE routing_bindings (
+    id              BIGSERIAL PRIMARY KEY,
+    scope_type      TEXT NOT NULL, -- virtual_key / user / client / model
+    scope_id        TEXT NOT NULL,
+    provider        TEXT NOT NULL,
+    model_pattern   TEXT,
+    group_id        BIGINT NOT NULL,
+    sticky_mode     TEXT NOT NULL DEFAULT 'session',
+    priority        INTEGER NOT NULL DEFAULT 0,
+    enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+---
+
+## 6. Credentials 规范
 
 ### API Key
 
@@ -219,7 +538,7 @@ CREATE TABLE upstream_oauth_sessions (
 
 ### 导入 CLI 凭证
 
-导入 `~/.codex/auth.json` 或 Claude Code 凭证时，不建议把原始文件全文作为长期主结构。推荐解析成标准字段，同时保留必要的源信息：
+导入 `~/.codex/auth.json`、Claude Code credentials、Gemini CLI credentials 时，不建议原样长期保存完整文件。推荐解析成标准字段：
 
 ```json
 {
@@ -233,9 +552,11 @@ CREATE TABLE upstream_oauth_sessions (
 }
 ```
 
-## 插件 SPI
+---
 
-建议新增冷路径 SPI：`UpstreamAuthProvider`。
+## 7. UpstreamAuthPlugin SPI
+
+建议新增冷路径插件接口：
 
 ```go
 type UpstreamAuthProvider interface {
@@ -249,7 +570,28 @@ type UpstreamAuthProvider interface {
 }
 ```
 
-### Metadata
+插件职责：
+
+```text
+登录
+回调
+导入凭证
+刷新 token
+校验账号 profile
+撤销登录
+```
+
+插件不负责：
+
+```text
+模型请求 body
+prompt / messages / tools / images
+账号池调度
+计费
+流式响应解析
+```
+
+### Metadata 示例
 
 ```json
 {
@@ -261,101 +603,9 @@ type UpstreamAuthProvider interface {
 }
 ```
 
-### BeginAuth
+---
 
-请求：
-
-```json
-{
-  "provider": "openai-codex",
-  "account_id": 123,
-  "account_name": "gpt-pro-main",
-  "callback_url": "https://omnihub.example.com/admin/api/upstream-auth/callback"
-}
-```
-
-响应：
-
-```json
-{
-  "authorization_url": "https://...",
-  "state": "...",
-  "expires_at": "2026-06-10T12:00:00Z"
-}
-```
-
-### ExchangeCallback
-
-请求：
-
-```json
-{
-  "state": "...",
-  "code": "...",
-  "redirect_uri": "https://omnihub.example.com/admin/api/upstream-auth/callback"
-}
-```
-
-响应：
-
-```json
-{
-  "access_token": "...",
-  "refresh_token": "...",
-  "expires_at": "2026-06-10T13:00:00Z",
-  "subject": "...",
-  "email": "user@example.com",
-  "plan": "pro",
-  "extra": {
-    "account_id": "..."
-  }
-}
-```
-
-### ImportCredentials
-
-用于导入 `auth.json`、Claude Code credentials 等：
-
-```json
-{
-  "provider": "openai-codex",
-  "source_type": "codex_auth_json",
-  "payload": "{...}"
-}
-```
-
-插件应解析、校验、规范化后返回 `TokenBundle`。
-
-### Refresh
-
-请求：
-
-```json
-{
-  "provider": "openai-codex",
-  "account_id": 123,
-  "refresh_token": "...",
-  "access_token": "...",
-  "expires_at": "2026-06-10T13:00:00Z"
-}
-```
-
-响应：
-
-```json
-{
-  "access_token": "...",
-  "refresh_token": "...",
-  "expires_at": "2026-06-10T14:00:00Z",
-  "subject": "...",
-  "email": "user@example.com",
-  "plan": "pro"
-}
-```
-
-刷新成功后，OmniHub 核心负责写回 `accounts.credentials`、`auth_expires_at`、`last_refresh_at`。
-
-## 管理端流程
+## 8. 管理端流程
 
 ### 添加账号
 
@@ -409,9 +659,13 @@ ExchangeCallback
 - token 过期时间。
 - 最近刷新时间。
 - 最近刷新错误。
+- routing group。
+- cooldown / quota 状态。
 - 是否实验功能。
 
-## 运行时请求参数设计
+---
+
+## 9. 运行时请求参数设计
 
 请求参数分三层：
 
@@ -421,46 +675,11 @@ ExchangeCallback
 3. 上游供应商请求参数
 ```
 
-OAuth 插件只处理第 3 层中的认证凭证，不接收完整模型请求内容。
-
-### 下游请求
-
-用户可以继续请求 OmniHub 已支持的入口：
-
-- Anthropic Messages。
-- OpenAI Chat Completions。
-- OpenAI Responses。
-
-示例：
-
-```json
-{
-  "model": "gpt-5-codex",
-  "messages": [
-    {
-      "role": "user",
-      "content": "解释这个函数"
-    }
-  ],
-  "stream": true
-}
-```
-
-### 内部统一请求
-
-请求先解析为 `ir.UnifiedRequest`，继续走现有 Guard / Resolver / Forwarder。
-
-核心只向 Driver 传：
-
-```text
-UnifiedRequest
-Account
-AuthMaterial
-```
+OAuth 插件只处理认证材料，不接收完整模型请求内容。
 
 ### AuthMaterial
 
-建议在核心中引入一个运行时认证材料结构：
+建议在运行时引入：
 
 ```go
 type AuthMaterial struct {
@@ -480,15 +699,15 @@ type AuthMaterial struct {
 
 Driver 根据 `AuthMaterial` 注入 header。
 
-## Header 规则
+### Header 规则
 
-### OpenAI API Key
+OpenAI API Key：
 
 ```http
 Authorization: Bearer <api_key>
 ```
 
-### Codex OAuth
+Codex OAuth：
 
 ```http
 Authorization: Bearer <access_token>
@@ -496,7 +715,7 @@ Content-Type: application/json
 Accept-Encoding: identity
 ```
 
-### Anthropic API Key
+Anthropic API Key：
 
 ```http
 x-api-key: <api_key>
@@ -504,7 +723,7 @@ anthropic-version: 2023-06-01
 Content-Type: application/json
 ```
 
-### Claude OAuth
+Claude OAuth：
 
 ```http
 Authorization: Bearer <access_token>
@@ -512,25 +731,384 @@ Content-Type: application/json
 Accept-Encoding: identity
 ```
 
-具体供应商是否需要额外 header，由对应 Driver 管理。
+### 参数合并顺序
 
-## 不透传的内容
+Driver 构造请求时按以下顺序合并：
 
-以下内容只留在 OmniHub 本地，不能传给上游：
+```text
+1. Driver 默认协议参数
+2. 请求入口解析出的标准参数
+3. 账号 ParamOverrides
+4. Client Profile 默认参数
+5. 账号 CustomHeaders
+6. Forwarder 安全约束
+```
 
-- 本地用户 ID。
-- 本地 virtual key。
-- 本地 tenant ID。
-- 本地钱包、套餐、余额信息。
-- OmniHub 管理员账号。
-- 下游原始 `Authorization`。
-- `X-OmniHub-*` 内部 header。
+第 6 步永远最后执行，防止自定义参数破坏安全边界。
 
-除非账号显式开启 `ForwardClientIP`，否则也不透传真实客户端 IP。当前 Forwarder 已默认清理 `X-Forwarded-*` 等 header，应继续保持。
+---
 
-## TokenManager
+## 10. OmniHub 自有 CLI 指纹规范
 
-新增 `TokenManager`，位于 Resolver 和 Driver 之间。
+这里的目标不是复制 Claude Code / Codex CLI 的私有字段，而是学习成熟 CLI 的参数分层方式，设计 OmniHub 自己的 CLI 协议。
+
+### 推荐 Header
+
+OmniHub CLI 请求 OmniHub 时，可以发送：
+
+```http
+User-Agent: OmniHubCLI/0.1.0 (darwin; arm64)
+X-OmniHub-Client: cli
+X-OmniHub-Client-Version: 0.1.0
+X-OmniHub-Client-Platform: darwin/arm64
+X-OmniHub-Client-Mode: interactive
+X-OmniHub-Session-ID: sess_01J...
+X-OmniHub-Request-ID: req_01J...
+X-OmniHub-Install-ID: inst_01J...
+X-OmniHub-Capabilities: streaming,tools,vision,thinking
+X-OmniHub-Protocol: openai-chat
+```
+
+这些字段默认只在“客户端 → OmniHub”之间使用，不直接透传给上游。
+
+### Session ID
+
+`X-OmniHub-Session-ID` 表示“本地工作会话”，不表示用户身份。
+
+推荐生成：
+
+```text
+sess_<ulid>
+```
+
+用途：
+
+- Resolver sticky 路由。
+- 上下文隔离。
+- 日志关联。
+- 本地重试去重。
+- 后续 session cache。
+
+不应包含：
+
+- 用户邮箱。
+- 机器名。
+- 绝对路径。
+- Git remote URL。
+- 项目名原文。
+
+### Install ID
+
+```text
+inst_<random-ulid>
+```
+
+要求：
+
+- 首次运行随机生成。
+- 保存在本地配置。
+- 用户可删除或重置。
+- 不从硬件序列号、MAC 地址、用户名派生。
+- 不透传给上游供应商。
+
+### Capabilities
+
+```http
+X-OmniHub-Capabilities: streaming,tools,vision,thinking,json-mode
+```
+
+也可以做能力协商：
+
+```http
+GET /v1/omnihub/capabilities
+Authorization: Bearer <virtual-key>
+```
+
+响应：
+
+```json
+{
+  "server_version": "0.1.0",
+  "protocols": ["openai-chat", "openai-responses", "anthropic-messages"],
+  "features": ["streaming", "tools", "vision", "thinking"],
+  "client_headers": [
+    "X-OmniHub-Session-ID",
+    "X-OmniHub-Request-ID",
+    "X-OmniHub-Capabilities"
+  ]
+}
+```
+
+### CLI 请求示例：Codex 风格
+
+```http
+POST /v1/responses
+Authorization: Bearer ohk_...
+Content-Type: application/json
+User-Agent: OmniHubCLI/0.1.0 (darwin; arm64)
+X-OmniHub-Client: cli
+X-OmniHub-Client-Version: 0.1.0
+X-OmniHub-Client-Mode: interactive
+X-OmniHub-Session-ID: sess_01J...
+X-OmniHub-Request-ID: req_01J...
+X-OmniHub-Capabilities: streaming,tools,thinking
+```
+
+body：
+
+```json
+{
+  "model": "gpt-5-codex",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "帮我分析这个仓库的认证流程"
+        }
+      ]
+    }
+  ],
+  "reasoning": {
+    "effort": "high"
+  },
+  "tools": [],
+  "stream": true,
+  "metadata": {
+    "omnihub_client": "cli",
+    "omnihub_session_id": "sess_01J...",
+    "omnihub_request_id": "req_01J..."
+  }
+}
+```
+
+Driver 映射：
+
+```text
+下游 ohk_* virtual key：只用于 OmniHub 鉴权
+上游 Authorization：由 TokenManager 注入 OAuth access_token
+X-OmniHub-Session-ID：用于 sticky 和日志，不直接变成上游 session id
+reasoning.effort：可映射到上游稳定参数
+tools / tool_choice：由 Driver 转换和过滤
+metadata.omnihub_*：默认不透传上游
+```
+
+### CLI 请求示例：Claude 风格
+
+```http
+POST /v1/messages
+Authorization: Bearer ohk_...
+Content-Type: application/json
+User-Agent: OmniHubCLI/0.1.0 (darwin; arm64)
+X-OmniHub-Client: cli
+X-OmniHub-Client-Version: 0.1.0
+X-OmniHub-Client-Mode: interactive
+X-OmniHub-Session-ID: sess_01J...
+X-OmniHub-Request-ID: req_01J...
+X-OmniHub-Capabilities: streaming,tools,thinking
+```
+
+body：
+
+```json
+{
+  "model": "claude-sonnet-4",
+  "max_tokens": 4096,
+  "system": [
+    {
+      "type": "text",
+      "text": "You are OmniHub CLI, a coding assistant running inside the user's project."
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "帮我检查这个 PR 的风险点"
+        }
+      ]
+    }
+  ],
+  "tools": [],
+  "thinking": {
+    "type": "enabled",
+    "budget_tokens": 2048
+  },
+  "stream": true,
+  "metadata": {
+    "omnihub_client": "cli",
+    "omnihub_session_id": "sess_01J...",
+    "omnihub_request_id": "req_01J..."
+  }
+}
+```
+
+Driver 映射：
+
+```text
+下游 ohk_* virtual key：只用于 OmniHub
+上游 Anthropic API Key：x-api-key
+上游 Claude OAuth：Authorization: Bearer <access_token>
+anthropic-version：由 Driver 默认值或下游显式字段控制
+anthropic-beta：只允许公开、可配置、可审计的 beta capability
+system：OmniHub CLI 可以定义自己的 system 提示
+X-OmniHub-Session-ID：用于 sticky 路由和日志，不直接透传
+```
+
+---
+
+## 11. 账号分发设计
+
+### 11.1 RouteContext
+
+请求进入 Resolver 前先构造：
+
+```go
+type RouteContext struct {
+    VirtualKeyID   int64
+    UserID         *int64
+    Provider       string
+    Model          string
+    ModelFamily    string
+    ClientType     string
+    ClientMode     string
+    RequestID      string
+    SessionHash    string
+    PromptCacheKey string
+    Capabilities   []string
+}
+```
+
+### 11.2 SessionHash 生成顺序
+
+```text
+1. X-OmniHub-Session-ID
+2. session_id
+3. conversation_id
+4. prompt_cache_key
+5. metadata.user_id
+6. cache_control ephemeral marker
+7. system + tools + 前 N 条 messages 的内容摘要
+```
+
+### 11.3 Routing Policy
+
+账号组支持：
+
+```text
+round_robin
+weighted_random
+sticky_by_session
+sticky_by_virtual_key
+usage_balanced
+quota_aware
+latency_aware
+pinned_account
+```
+
+第一版建议先实现：
+
+```text
+round_robin
+weighted_random
+sticky_by_session
+sticky_by_virtual_key
+```
+
+### 11.4 Sticky 校验
+
+sticky 命中后必须重新校验：
+
+```text
+account enabled?
+account in current group?
+auth_status ok?
+not cooldown?
+quota available?
+concurrency available?
+model supported?
+active window matched?
+```
+
+任何一个不满足，就重新调度。
+
+### 11.5 Fallback Policy
+
+```text
+subscription_first
+api_key_first
+cheapest_first
+stable_first
+same_provider_only
+no_fallback
+```
+
+示例：
+
+```text
+Codex OAuth 账号 429
+  ↓
+切到另一个 Codex OAuth 账号
+  ↓
+仍失败
+  ↓
+fallback 到 OpenAI API Key
+```
+
+### 11.6 失败状态机
+
+```text
+2xx:
+  记录成功，保持 available
+
+401 / 403:
+  标记 auth_failed 或 login_required
+  跳过账号
+  可触发一次 refresh retry
+
+429:
+  标记 rate_limited
+  设置 cooldown_until
+  换下一个账号
+
+quota exceeded:
+  标记 quota_exhausted
+  等待 quota window 恢复
+
+5xx / transport error:
+  短 cooldown
+  换下一个账号
+
+tier insufficient:
+  标记 tier_insufficient
+  不再为该模型选择此账号
+```
+
+### 11.7 状态标签
+
+参考 `oauth-mux`，推荐稳定状态词：
+
+```text
+available
+rate_limited
+quota_exhausted
+tier_insufficient
+auth_failed
+login_required
+credential_unavailable
+revalidation_needed
+cooldown
+disabled
+```
+
+---
+
+## 12. TokenManager
+
+`TokenManager` 位于 Resolver 和 Driver 之间。
 
 职责：
 
@@ -582,132 +1160,51 @@ Resolver 暂时跳过该账号
 后台提示重新登录
 ```
 
-## Resolver 和健康状态
+---
 
-Resolver 应跳过以下 OAuth 状态：
-
-- `login_required`
-- `refresh_failed`
-- `revoked`
-- `disabled`
-- `quota_exceeded`
-
-可继续参与路由：
-
-- `ok`
-- `expiring`
-
-如果请求上游返回：
-
-- `401`：触发一次强制刷新并重试。
-- `403`：标记 `login_required` 或 `unsupported_region`，视错误体判断。
-- `429`：进入 account cooldown，不一定刷新 token。
-- quota 相关错误：标记 `quota_exceeded`，等待后台或定时任务恢复。
-
-## Codex 订阅账号设计
-
-### Provider
+## 13. Codex 订阅账号设计
 
 ```text
 provider = openai-codex
 auth_type = oauth / imported_oauth
 auth_plugin = codex-oauth
+client_profile = codex-compatible
 ```
 
-### Driver 职责
+Driver 职责：
 
-`openai-codex` Driver 负责：
-
-- `/v1/responses` 透传或轻量转换到 Codex backend。
+- `/v1/responses` 透传或轻量转换到 Codex-compatible backend。
 - `/v1/chat/completions` 转换成 Responses 风格。
 - 处理 SSE 流。
 - 处理 tools / tool_calls 映射。
 - 处理 model 与 reasoning effort 映射。
-- 查询 `/backend-api/codex/models` 或兼容模型列表。
+- 支持模型列表和 quota 查询。
 
-### 第一阶段请求形态
+第一阶段优先：
 
-优先支持 Responses：
-
-```http
-POST /v1/responses
+```text
+导入 auth.json
+/v1/responses
+streaming
+refresh token
+401 refresh retry
 ```
 
-上游：
+第二阶段：
 
-```http
-POST https://chatgpt.com/backend-api/codex/responses
-Authorization: Bearer <access_token>
+```text
+OAuth PKCE
+device code
+/v1/chat/completions 转换
+quota-aware routing
+websocket / previous_response_id support
 ```
 
-下游 body：
+---
 
-```json
-{
-  "model": "gpt-5-codex",
-  "input": "帮我分析这个项目",
-  "stream": true,
-  "reasoning": {
-    "effort": "high"
-  }
-}
-```
+## 14. Claude 订阅账号设计
 
-上游 body 由 Driver 构造。第一版可以尽量保持 Responses 结构，减少 Chat Completions 转换复杂度。
-
-### 第二阶段支持 Chat Completions
-
-下游：
-
-```json
-{
-  "model": "gpt-5-codex",
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are a coding assistant."
-    },
-    {
-      "role": "user",
-      "content": "解释这个函数"
-    }
-  ],
-  "stream": true
-}
-```
-
-Driver 转换：
-
-```json
-{
-  "model": "gpt-5-codex",
-  "input": [
-    {
-      "role": "system",
-      "content": [
-        {
-          "type": "input_text",
-          "text": "You are a coding assistant."
-        }
-      ]
-    },
-    {
-      "role": "user",
-      "content": [
-        {
-          "type": "input_text",
-          "text": "解释这个函数"
-        }
-      ]
-    }
-  ],
-  "stream": true
-}
-```
-
-## Claude 订阅账号设计
-
-Claude 建议分三类支持：
+建议分三类：
 
 ```text
 anthropic-api-key         稳定
@@ -715,61 +1212,45 @@ claude-code-worker        较稳，调用官方 SDK / CLI
 claude-subscription-oauth 实验
 ```
 
-### Claude OAuth Provider
+OAuth 形态：
 
 ```text
 provider = claude-subscription
 auth_type = oauth / imported_oauth
 auth_plugin = claude-oauth
+client_profile = claude-compatible
 ```
 
-### Driver 职责
-
-`claude-subscription` Driver 负责：
+Driver 职责：
 
 - Anthropic Messages 原生请求。
 - OpenAI Chat Completions 到 Anthropic Messages 的转换。
 - Claude 流式事件到 OmniHub IR 的转换。
 - 工具调用映射。
+- thinking / beta capability 映射。
 
-### Anthropic Messages 请求
+第一阶段优先：
 
-下游：
-
-```json
-{
-  "model": "claude-sonnet-4",
-  "max_tokens": 4096,
-  "messages": [
-    {
-      "role": "user",
-      "content": "帮我重构这段代码"
-    }
-  ],
-  "stream": true
-}
+```text
+/v1/messages
+streaming
+thinking 参数
+anthropic-beta allowlist
+OAuth refresh
 ```
 
-上游 header：
+---
 
-```http
-Authorization: Bearer <access_token>
-Content-Type: application/json
-Accept-Encoding: identity
-```
+## 15. Worker 型账号
 
-上游 body 由 Driver 构造，不由 OAuth 插件构造。
-
-## Worker 型认证
-
-对于 Claude Code SDK / CLI、Codex CLI 这类官方客户端，另一个可选模式是：
+对于 Claude Code SDK / CLI、Codex CLI 这类官方客户端，可以使用 worker 模式：
 
 ```text
 provider = claude-code-worker / codex-worker
 auth_type = worker
 ```
 
-请求不直接由 Forwarder 发到供应商 HTTP API，而是进入本地 worker 队列：
+请求路径：
 
 ```text
 OmniHub
@@ -781,155 +1262,190 @@ Claude Code SDK / Codex CLI
 官方客户端自己处理认证和调用
 ```
 
-这种方式更适合代码任务、低并发、本地或小团队场景，不适合高并发普通聊天 API。
+适合：
 
-## 插件与 Driver 的边界
+- 代码任务。
+- 低并发。
+- 本地或小团队。
+- 强交互 agent。
 
-正确边界：
+不适合：
 
-```text
-OAuth 插件：
-  登录
-  回调
-  导入凭证
-  刷新 token
-  校验账号 profile
-  撤销登录
+- 高并发通用聊天 API。
+- 大规模商业分发。
+- 强 SLA 的统一模型网关。
 
-Provider Driver：
-  请求 URL
-  请求 body
-  认证 header 注入
-  协议转换
-  响应解析
-  流式事件解析
+---
 
-OmniHub Core：
-  账号池
-  路由
-  限流
-  计费
-  健康检查
-  日志
-  熔断
-```
+## 16. 安全与隐私
 
-错误边界：
+必须满足：
 
-```text
-OAuth 插件接收 messages / prompt
-OAuth 插件直接发模型请求
-OAuth 插件决定账号池路由
-Driver 自己刷新 token
-Forwarder 透传下游 Authorization
-```
+1. `credentials`、`code_verifier`、refresh token 加密存储。
+2. 后台 API 返回账号时脱敏凭证。
+3. OAuth callback 校验 `state`。
+4. OAuth session 有过期时间。
+5. Refresh token 轮换时原子写回。
+6. 同一个账号刷新加锁。
+7. 导入 `auth.json` 后只保存必要字段，不在日志输出原文。
+8. 默认不把 OAuth 代理暴露到公网。
+9. 下游用户身份不透传给上游。
+10. `X-OmniHub-*` 默认不透传给上游。
+11. session id、install id 不包含用户隐私、机器名、路径、项目名。
+12. 真实 prompt / files / images 默认不进入长期日志。
 
-## 安全要求
+---
 
-1. `credentials`、`code_verifier`、refresh token 必须加密存储。
-2. 后台 API 返回账号时继续脱敏凭证。
-3. OAuth callback 必须校验 `state`。
-4. OAuth session 必须有过期时间。
-5. Refresh token 轮换时必须原子写回。
-6. 同一个账号刷新必须加锁，避免并发刷新导致 refresh token 失效。
-7. 导入 `auth.json` 后只保存必要字段，不在日志中输出原文。
-8. 默认不暴露 OAuth 代理到公网；如果开放下游 API，必须要求 OmniHub 自己的 virtual key。
-9. 下游用户身份不透传给上游供应商。
+## 17. 分阶段落地
 
-## 分阶段落地
-
-### 阶段 1：核心数据结构
+### 阶段 1：账号认证模型
 
 - `accounts` 增加 `auth_type`、`auth_plugin`、`auth_status`、`auth_expires_at` 等字段。
 - `provider.Account` 增加对应字段。
 - Repository 读写这些字段。
 - 后台账号列表展示认证方式和状态。
 
-### 阶段 2：导入式 OAuth
+### 阶段 2：TokenManager + 导入式 OAuth
 
-- 新增 `UpstreamAuthProvider` SPI 的本地接口。
+- 新增 `UpstreamAuthProvider` 本地接口。
 - 新增 `TokenManager`。
 - 支持导入 Codex `auth.json`。
 - 支持 token 过期前刷新。
 - 支持 401 强制刷新重试。
 
-### 阶段 3：Codex 实验 Driver
+### 阶段 3：RouteContext + sticky
+
+- 构造 `RouteContext`。
+- 生成 `SessionHash`。
+- 支持 sticky binding。
+- 支持 group 校验。
+- 增加 Nginx / proxy header 文档。
+
+### 阶段 4：Codex experimental provider
 
 - 新增 `openai-codex` Driver。
 - 支持 `/v1/responses`。
 - 支持基础模型列表。
-- 支持流式透传。
+- 支持流式响应。
 - 后台可以测试 Codex OAuth 账号。
 
-### 阶段 4：浏览器 OAuth
-
-- 新增 `upstream_oauth_sessions` 表。
-- 新增：
-  - `POST /admin/api/upstream-auth/:plugin/start`
-  - `GET /admin/api/upstream-auth/:plugin/callback`
-  - `POST /admin/api/accounts/:id/relogin`
-- 支持 Codex OAuth PKCE 登录。
-
-### 阶段 5：Claude 订阅实验支持
+### 阶段 5：Claude experimental provider
 
 - 支持 Claude credentials 导入或 Claude OAuth 插件。
 - 新增 `claude-subscription` Driver 或 `claude-code-worker`。
 - 第一版优先支持 Anthropic Messages。
-- Chat Completions 转换后置。
 
 ### 阶段 6：账号池增强
 
-- OAuth 账号 sticky 路由。
+- `round_robin`、`weighted_random`、`sticky_by_session`。
 - 429 cooldown。
 - quota 查询和展示。
 - per-account 并发限制。
-- 多账号 round-robin / weighted 选择。
+- usage-balanced / quota-aware。
+- subscription-first / api-key-first fallback。
 
-## 推荐默认策略
+### 阶段 7：OmniHub CLI
 
-1. 稳定生产环境：
-   - OpenAI API Key。
-   - Anthropic API Key。
-   - Bedrock。
-   - Vertex。
-   - Teams / Enterprise OAuth。
+- 定义 OmniHub CLI headers。
+- 生成 session id、request id、install id。
+- 支持 capabilities 协商。
+- 支持本地配置与诊断命令。
 
-2. 实验功能：
-   - Codex / GPT Pro OAuth。
-   - Claude Pro / Max OAuth。
-   - Gemini CLI OAuth。
+---
 
-3. UI 标签：
-   - 实验。
-   - 适合本地/小团队。
-   - 不建议作为正式商业供应商。
+## 18. 推荐默认策略
 
-## 参考项目
+生产稳定路径：
 
-- Codex Pro API：<https://github.com/314051672/codexProapi>
-- Codex OpenAI Proxy：<https://github.com/0oAstro/codex-openai-proxy>
-- Codex Gateway：<https://github.com/LanternCX/codex-gateway>
+```text
+OpenAI API Key
+Anthropic API Key
+Bedrock
+Vertex
+Teams / Enterprise OAuth
+```
+
+实验路径：
+
+```text
+Codex / GPT Pro OAuth
+Claude Pro / Max OAuth
+Gemini CLI OAuth
+Kiro / Antigravity OAuth
+```
+
+默认 UI 标签：
+
+```text
+实验
+适合本地/小团队
+不建议作为正式商业供应商
+```
+
+默认分发策略：
+
+```text
+stable provider group: weighted_random + health check
+subscription provider group: sticky_by_session + cooldown + quota aware
+enterprise group: dedicated binding + strict concurrency
+```
+
+---
+
+## 19. 参考项目
+
+- sub2api：<https://github.com/Wei-Shaw/sub2api>
+- nianzs/sub2api：<https://github.com/nianzs/sub2api>
+- xiangking/sub2api-kiro：<https://github.com/xiangking/sub2api-kiro>
+- TokenFlux/TokenRouter：<https://github.com/TokenFlux/TokenRouter>
+- Blue-Seventeen/sub2api：<https://github.com/Blue-Seventeen/sub2api>
+- codexProapi：<https://github.com/314051672/codexProapi>
+- codex-openai-proxy：<https://github.com/0oAstro/codex-openai-proxy>
+- codex-gateway：<https://github.com/LanternCX/codex-gateway>
 - CLIProxyAPI：<https://github.com/crazyrabbit0/CLIProxyAPI>
-- ProxyPool Hub：<https://github.com/yiyao-ai/proxypool-hub>
+- proxypool-hub：<https://github.com/yiyao-ai/proxypool-hub>
+- codex-pooler：<https://github.com/icoretech/codex-pooler>
+- openai-codex-lb：<https://github.com/gngeorgiev/openai-codex-lb>
+- oauth-mux：<https://github.com/Jesssullivan/oauth-mux>
 - auth2api：<https://github.com/AmazingAng/auth2api>
 - Meridian：<https://github.com/rynfar/meridian>
 - LiteLLM Claude Code Max Subscription：<https://docs.litellm.ai/docs/tutorials/claude_code_max_subscription>
 
-## 最终结论
+---
 
-OmniHub 应把供应商 OAuth 设计成独立的上游账号认证插件体系：
+## 20. 最终建议
+
+OmniHub 的上游 OAuth 和订阅账号能力应按以下方式落地：
 
 ```text
 accounts.provider      = 调哪个供应商 / Driver
 accounts.auth_type     = 怎么认证
 accounts.auth_plugin   = 谁负责认证生命周期
 accounts.credentials   = 加密凭证
+client_profile         = OmniHub 维护的兼容请求形态
+RouteContext           = 请求路由上下文
+SessionHash            = sticky 和 cache locality 的核心键
+ProviderGroup          = 账号池和策略边界
 ```
 
-请求热路径保持：
+最终请求链路保持：
 
 ```text
-Resolver → TokenManager → ProviderDriver → Forwarder
+Client → Guard → RouteContext → Resolver → TokenManager → ProviderDriver → Forwarder → Upstream
 ```
 
-这样既能承接 Codex、Claude、Gemini 等订阅账号接入，也不会破坏现有 API Key、账号池、计费和流式转发架构。
+从 sub2api 和相关 fork 的经验看，订阅账号分发不能停留在“多个账号轮询”。真正可用的系统需要：
+
+```text
+平台 Key
+账号组
+session hash
+sticky binding
+账号健康状态机
+quota-aware 调度
+fallback chain
+usage / cost 归因
+管理后台和部署约束
+```
+
+OmniHub 已经有账号池、Provider Driver、Forwarder、计费和管理后台基础，最合适的路线是先做 `auth_type + TokenManager + sticky_by_session`，再逐步扩展到 Codex / Claude experimental provider 和 quota-aware 分发。
