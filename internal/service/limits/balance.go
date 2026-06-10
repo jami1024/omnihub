@@ -5,22 +5,34 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/jami1024/omnihub/internal/service/apikey"
 )
 
-// BalanceSource returns the authoritative prepaid balance (lifetime
-// credits minus lifetime request cost) for a portal user. Production
-// wiring combines the wallet ledger and message_requests; the interface
-// keeps the guard unit-testable without a DB.
+// BalanceSource returns the authoritative spendable balance for a portal
+// user in a given billing mode (payg → wallet; plan → grant credit, plus
+// wallet when overage is allowed). Production wiring is
+// billing.Service.AvailableBalance; the interface keeps the guard
+// unit-testable without a DB.
 type BalanceSource interface {
-	Balance(ctx context.Context, userID int64) (float64, error)
+	Balance(ctx context.Context, userID int64, mode apikey.BillingMode) (float64, error)
 }
 
 // BalanceFunc adapts a plain function to BalanceSource.
-type BalanceFunc func(ctx context.Context, userID int64) (float64, error)
+type BalanceFunc func(ctx context.Context, userID int64, mode apikey.BillingMode) (float64, error)
 
 // Balance implements BalanceSource.
-func (f BalanceFunc) Balance(ctx context.Context, userID int64) (float64, error) {
-	return f(ctx, userID)
+func (f BalanceFunc) Balance(ctx context.Context, userID int64, mode apikey.BillingMode) (float64, error) {
+	return f(ctx, userID, mode)
+}
+
+// balanceKey scopes a cached balance to (user, billing mode). The same user
+// holding both a payg key and a plan key needs two different available
+// balances — payg sees the wallet, plan sees grant credit (+ wallet overage)
+// — which a single per-user entry cannot represent.
+type balanceKey struct {
+	userID int64
+	mode   apikey.BillingMode
 }
 
 // BalanceGuard memoises per-user prepaid balance with the same
@@ -35,7 +47,7 @@ type BalanceGuard struct {
 	ttl time.Duration
 
 	mu      sync.Mutex
-	entries map[int64]*balanceEntry
+	entries map[balanceKey]*balanceEntry
 	now     func() time.Time
 }
 
@@ -53,22 +65,23 @@ func NewBalanceGuard(src BalanceSource, ttl time.Duration) *BalanceGuard {
 	return &BalanceGuard{
 		src:     src,
 		ttl:     ttl,
-		entries: make(map[int64]*balanceEntry),
+		entries: make(map[balanceKey]*balanceEntry),
 		now:     time.Now,
 	}
 }
 
-// Balance returns the prepaid balance for userID, serving a known user
-// from memory (refreshing stale entries in the background) and blocking
-// only on a cold user to seed the cache.
-func (g *BalanceGuard) Balance(ctx context.Context, userID int64) (float64, error) {
+// Balance returns the spendable balance for (userID, mode), serving a known
+// entry from memory (refreshing stale entries in the background) and blocking
+// only on a cold entry to seed the cache.
+func (g *BalanceGuard) Balance(ctx context.Context, userID int64, mode apikey.BillingMode) (float64, error) {
+	key := balanceKey{userID: userID, mode: mode}
 	g.mu.Lock()
-	if e, ok := g.entries[userID]; ok {
+	if e, ok := g.entries[key]; ok {
 		usd := e.usd
 		if g.now().Sub(e.refreshedAt) >= g.ttl && !e.refreshing {
 			e.refreshing = true
 			g.mu.Unlock()
-			go g.refresh(userID)
+			go g.refresh(key)
 			return usd, nil
 		}
 		g.mu.Unlock()
@@ -76,15 +89,15 @@ func (g *BalanceGuard) Balance(ctx context.Context, userID int64) (float64, erro
 	}
 	g.mu.Unlock()
 
-	usd, err := g.src.Balance(ctx, userID)
+	usd, err := g.src.Balance(ctx, userID, mode)
 	if err != nil {
 		return 0, err
 	}
 	g.mu.Lock()
-	if _, exists := g.entries[userID]; !exists {
-		g.entries[userID] = &balanceEntry{usd: usd, refreshedAt: g.now()}
+	if _, exists := g.entries[key]; !exists {
+		g.entries[key] = &balanceEntry{usd: usd, refreshedAt: g.now()}
 	}
-	usd = g.entries[userID].usd
+	usd = g.entries[key].usd
 	g.mu.Unlock()
 	return usd, nil
 }
@@ -100,21 +113,21 @@ func (g *BalanceGuard) Balance(ctx context.Context, userID int64) (float64, erro
 // with the bal<=0 gate's TOCTOU (concurrent requests may each pass before
 // any Charge lands), this allows small, bounded overdraft — an accepted
 // trade-off for keeping the hot path lock-free and DB-free.
-func (g *BalanceGuard) refresh(userID int64) {
+func (g *BalanceGuard) refresh(key balanceKey) {
 	ctx, cancel := context.WithTimeout(context.Background(), refreshTimeout)
 	defer cancel()
-	usd, err := g.src.Balance(ctx, userID)
+	usd, err := g.src.Balance(ctx, key.userID, key.mode)
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	e, ok := g.entries[userID]
+	e, ok := g.entries[key]
 	if !ok {
 		return
 	}
 	if err != nil {
 		e.refreshing = false
 		slog.Warn("balance guard background refresh failed; serving stale",
-			"user", userID, "err", err.Error())
+			"user", key.userID, "mode", key.mode, "err", err.Error())
 		return
 	}
 	e.usd = usd
@@ -122,30 +135,51 @@ func (g *BalanceGuard) refresh(userID int64) {
 	e.refreshing = false
 }
 
-// Charge debits a completed request's cost from the cached balance so the
-// next request from the same user sees up-to-date data. A no-op when the
-// user has no cached entry (the next Balance call seeds it from the DB,
-// which already reflects the cost via message_requests).
-func (g *BalanceGuard) Charge(userID int64, usd float64) {
+// allModes is the fixed set of billing modes a user can hold simultaneously.
+var allModes = [...]apikey.BillingMode{apikey.ModePayg, apikey.ModePlan}
+
+// ChargeWallet debits a wallet-paid amount. The wallet is shared across both
+// billing modes, so it lowers BOTH the (user,payg) and (user,plan) cached
+// entries — a payg-key spend reduces a plan key's overage headroom and vice
+// versa. A no-op for entries not yet cached (seeded fresh from the DB later).
+func (g *BalanceGuard) ChargeWallet(userID int64, usd float64) {
 	if g == nil || usd <= 0 {
 		return
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if e, ok := g.entries[userID]; ok {
+	for _, mode := range allModes {
+		if e, ok := g.entries[balanceKey{userID, mode}]; ok {
+			e.usd -= usd
+		}
+	}
+}
+
+// ChargePlan debits a plan-credit-paid amount. Plan credit is visible only to
+// plan keys, so it lowers ONLY the (user,plan) entry; the payg entry (wallet)
+// is untouched.
+func (g *BalanceGuard) ChargePlan(userID int64, usd float64) {
+	if g == nil || usd <= 0 {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if e, ok := g.entries[balanceKey{userID, apikey.ModePlan}]; ok {
 		e.usd -= usd
 	}
 }
 
-// Credit folds a just-applied top-up into the cached balance so the
-// effect is immediate rather than waiting for the next refresh.
+// Credit folds a just-applied wallet top-up into the cached balance. The
+// wallet feeds both modes, so it bumps BOTH entries.
 func (g *BalanceGuard) Credit(userID int64, usd float64) {
 	if g == nil || usd == 0 {
 		return
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if e, ok := g.entries[userID]; ok {
-		e.usd += usd
+	for _, mode := range allModes {
+		if e, ok := g.entries[balanceKey{userID, mode}]; ok {
+			e.usd += usd
+		}
 	}
 }

@@ -25,6 +25,7 @@ import (
 
 	"github.com/jami1024/omnihub/internal/db"
 	"github.com/jami1024/omnihub/internal/repository"
+	"github.com/jami1024/omnihub/internal/service/apikey"
 	"github.com/jami1024/omnihub/internal/service/billing"
 )
 
@@ -127,7 +128,7 @@ func TestIntegrationPlanCoversFullAmount(t *testing.T) {
 		t.Fatalf("grant plan: %v", err)
 	}
 
-	res, err := svc.Charge(ctx, uid, 4, 1)
+	res, err := svc.Charge(ctx, uid, 4, 1, apikey.ModePlan)
 	if err != nil {
 		t.Fatalf("charge: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestIntegrationPlanRatioGovernsBilledAmount(t *testing.T) {
 	}
 
 	// userRatio 0.5 is intentionally different; the plan ratio must win.
-	res, err := svc.Charge(ctx, uid, 4, 0.5)
+	res, err := svc.Charge(ctx, uid, 4, 0.5, apikey.ModePlan)
 	if err != nil {
 		t.Fatalf("charge: %v", err)
 	}
@@ -172,6 +173,42 @@ func TestIntegrationPlanRatioGovernsBilledAmount(t *testing.T) {
 	}
 	if rem, _ := grantRemaining(t, pool, grantID); !approx(rem, 4) {
 		t.Fatalf("expected remaining=4, got %v", rem)
+	}
+}
+
+// TestIntegrationPaygKeyNeverTouchesPlanCredit: a PAYG-mode charge for a user
+// who ALSO holds an active grant draws the wallet only and leaves the grant's
+// credit untouched — the per-key mode, not the user's plan state, decides.
+func TestIntegrationPaygKeyNeverTouchesPlanCredit(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	store := newStore(pool)
+	svc := billing.New(store)
+	plans := repository.NewPlanRepo(pool)
+	wallet := repository.NewWalletRepo(pool)
+
+	uid := createUser(t, pool, "billing-payg-"+uniq())
+	if err := wallet.AddEntry(ctx, uid, "topup", 10, "test topup", "test"); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	planID, err := plans.CreatePlan(ctx, repository.Plan{Name: "Untouched", IncludedCreditUSD: 10, PriceRatio: 1, AllowPaygOverage: true, Enabled: true})
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	grantID, err := plans.GrantPlanToUser(ctx, uid, planID, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("grant plan: %v", err)
+	}
+
+	res, err := svc.Charge(ctx, uid, 4, 1, apikey.ModePayg)
+	if err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	if !approx(res.PlanUSD, 0) || !approx(res.WalletUSD, 4) {
+		t.Fatalf("expected plan=0 wallet=4, got %+v", res)
+	}
+	if rem, status := grantRemaining(t, pool, grantID); !approx(rem, 10) || status != "active" {
+		t.Fatalf("payg charge must not touch plan credit; got remaining=%v status=%s", rem, status)
 	}
 }
 
@@ -199,7 +236,7 @@ func TestIntegrationPlanThenWalletOverage(t *testing.T) {
 		t.Fatalf("grant plan: %v", err)
 	}
 
-	res, err := svc.Charge(ctx, uid, 5, 1)
+	res, err := svc.Charge(ctx, uid, 5, 1, apikey.ModePlan)
 	if err != nil {
 		t.Fatalf("charge: %v", err)
 	}
@@ -230,7 +267,7 @@ func TestIntegrationPlanExhaustedNoOverage(t *testing.T) {
 		t.Fatalf("grant plan: %v", err)
 	}
 
-	if _, err := svc.Charge(ctx, uid, 2, 1); err != billing.ErrInsufficientBalance {
+	if _, err := svc.Charge(ctx, uid, 2, 1, apikey.ModePlan); err != billing.ErrInsufficientBalance {
 		t.Fatalf("expected ErrInsufficientBalance, got %v", err)
 	}
 }
@@ -258,7 +295,7 @@ func TestIntegrationAvailableBalanceForPlanOnlyUser(t *testing.T) {
 		t.Fatalf("grant plan: %v", err)
 	}
 
-	bal, err := svc.AvailableBalance(ctx, uid)
+	bal, err := svc.AvailableBalance(ctx, uid, apikey.ModePlan)
 	if err != nil {
 		t.Fatalf("available balance: %v", err)
 	}
@@ -291,7 +328,7 @@ func TestIntegrationConcurrentConsumeIsAtomic(t *testing.T) {
 	const n = 20
 	results := make(chan error, n)
 	for i := 0; i < n; i++ {
-		go func() { _, err := svc.Charge(ctx, uid, 1, 1); results <- err }()
+		go func() { _, err := svc.Charge(ctx, uid, 1, 1, apikey.ModePlan); results <- err }()
 	}
 	var ok, rejected int
 	for i := 0; i < n; i++ {

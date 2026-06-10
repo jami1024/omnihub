@@ -234,19 +234,29 @@ func TestSpendCache_AddIsNoOpForAbsentKey(t *testing.T) {
 	}
 }
 
-func TestRecordWalletSpendDebitsOnlyWalletAmount(t *testing.T) {
-	src := &stubBalance{values: map[int64]float64{7: 10}}
+func TestRecordBillingSpendRoutesPlanAndWalletPortions(t *testing.T) {
+	src := &stubBalance{values: map[balanceKey]float64{
+		{7, apikey.ModePayg}: 10,
+		{7, apikey.ModePlan}: 10,
+	}}
 	guard := NewBalanceGuard(src, time.Hour)
 	l := New(nil, nil)
 	l.SetBalanceGuard(guard)
 	uid := int64(7)
-	k := &apikey.Key{Name: "alice", UserID: &uid}
+	k := &apikey.Key{Name: "alice", UserID: &uid, BillingMode: apikey.ModePlan}
 	ctx := context.Background()
-	if _, err := guard.Balance(ctx, 7); err != nil {
+	if _, err := guard.Balance(ctx, 7, apikey.ModePayg); err != nil {
 		t.Fatal(err)
 	}
-	l.RecordWalletSpend(k, 2)
-	if got, _ := guard.Balance(ctx, 7); got != 8 {
-		t.Fatalf("balance = %.2f, want 8.00", got)
+	if _, err := guard.Balance(ctx, 7, apikey.ModePlan); err != nil {
+		t.Fatal(err)
+	}
+	// plan=3 (plan entry only), wallet=2 (both entries).
+	l.RecordBillingSpend(k, 3, 2)
+	if got, _ := guard.Balance(ctx, 7, apikey.ModePayg); got != 8 {
+		t.Fatalf("payg balance = %.2f, want 8.00 (wallet -2)", got)
+	}
+	if got, _ := guard.Balance(ctx, 7, apikey.ModePlan); got != 5 {
+		t.Fatalf("plan balance = %.2f, want 5.00 (plan -3, wallet -2)", got)
 	}
 }

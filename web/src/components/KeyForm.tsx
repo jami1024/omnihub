@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Key, KeyInput } from '../lib/keys'
+import type { BillingMode, Key, KeyInput } from '../lib/keys'
 import { useI18n } from '../lib/i18n'
 
 // KeyForm drives both create and edit. There is no secret-value field:
@@ -26,6 +26,7 @@ export function KeyForm({ apiKey, submitting, error, onCancel, onSubmit }: KeyFo
   const [dailyUSD, setDailyUSD] = useState(numToStr(apiKey?.daily_usd_limit))
   const [rpm, setRpm] = useState(numToStr(apiKey?.rpm_limit))
   const [models, setModels] = useState((apiKey?.allowed_models ?? []).join(', '))
+  const [billingMode, setBillingMode] = useState<BillingMode>(apiKey?.billing_mode ?? 'payg')
   const [localErr, setLocalErr] = useState<string | null>(null)
 
   function handleSubmit(e: React.FormEvent) {
@@ -57,6 +58,7 @@ export function KeyForm({ apiKey, submitting, error, onCancel, onSubmit }: KeyFo
         .split(',')
         .map((m) => m.trim())
         .filter(Boolean),
+      billing_mode: billingMode,
     }
     onSubmit(input)
   }
@@ -106,6 +108,14 @@ export function KeyForm({ apiKey, submitting, error, onCancel, onSubmit }: KeyFo
           onChange={(e) => setModels(e.target.value)}
           placeholder={t('keyForm.allowedModelsPlaceholder')}
         />
+      </Field>
+
+      <Field label={t('keyForm.billingMode')}>
+        <select className={FIELD} value={billingMode} onChange={(e) => setBillingMode(e.target.value as BillingMode)}>
+          <option value="payg">{t('keyForm.billingModePayg')}</option>
+          <option value="plan">{t('keyForm.billingModePlan')}</option>
+        </select>
+        <span className="text-xs text-muted">{t('keyForm.billingModeHint')}</span>
       </Field>
 
       <label className="flex items-center gap-2 text-sm">

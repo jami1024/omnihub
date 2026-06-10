@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 
 // Key mirrors the server's keyDTO — metadata only, no hash, no value.
+export type BillingMode = 'payg' | 'plan'
+
 export interface Key {
   id: number
   name: string
@@ -13,6 +15,7 @@ export interface Key {
   daily_usd_limit: number | null
   rpm_limit: number | null
   allowed_models: string[]
+  billing_mode: BillingMode
 }
 
 // CreateKeyResult is the 201 body: the new key's metadata plus the
@@ -31,6 +34,7 @@ export interface KeyInput {
   daily_usd_limit: number | null
   rpm_limit: number | null
   allowed_models: string[]
+  billing_mode: BillingMode
 }
 
 const KEYS_KEY = ['keys'] as const

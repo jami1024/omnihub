@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/jami1024/omnihub/internal/service/apikey"
 )
 
 var ErrInsufficientBalance = errors.New("insufficient plan credit or wallet balance")
@@ -42,53 +44,90 @@ func New(store Store) *Service {
 	return &Service{store: store, now: time.Now}
 }
 
-// AvailableBalance reports a user's total spendable balance for request
-// admission: active plan credit plus pay-as-you-go wallet balance. It
-// mirrors what Charge draws down (plan first, then wallet), so a user
-// who holds a plan grant but never topped up their wallet still passes
-// the admission gate — without it, plan-only users are wrongly rejected
-// with insufficient_balance before plan credit is ever consulted.
-func (s *Service) AvailableBalance(ctx context.Context, userID int64) (float64, error) {
-	wallet, err := s.store.WalletBalance(ctx, userID)
-	if err != nil {
-		return 0, err
+// AvailableBalance reports a key's spendable balance for request admission,
+// scoped to the key's billing mode so the gate matches exactly what Charge
+// will draw down:
+//
+//   - payg: the pay-as-you-go wallet balance only. Plan credit is invisible.
+//   - plan: the active grant's remaining credit, plus the wallet only when the
+//     grant allows overage. No active grant ⇒ 0, so a plan key with no plan is
+//     rejected at admission rather than silently falling back to the wallet.
+func (s *Service) AvailableBalance(ctx context.Context, userID int64, mode apikey.BillingMode) (float64, error) {
+	if mode == apikey.ModePlan {
+		grant, err := s.store.ActiveGrantForUser(ctx, userID, s.now())
+		if err != nil {
+			return 0, err
+		}
+		if grant == nil {
+			return 0, nil
+		}
+		avail := grant.CreditRemainingUSD
+		if grant.AllowPaygOverage {
+			wallet, err := s.store.WalletBalance(ctx, userID)
+			if err != nil {
+				return 0, err
+			}
+			avail += wallet
+		}
+		return avail, nil
 	}
-	grant, err := s.store.ActiveGrantForUser(ctx, userID, s.now())
-	if err != nil {
-		return 0, err
-	}
-	if grant != nil {
-		return wallet + grant.CreditRemainingUSD, nil
-	}
-	return wallet, nil
+	return s.store.WalletBalance(ctx, userID)
 }
 
-// Charge bills a completed request. cost is the raw upstream cost; userRatio
-// is the owner's pay-as-you-go price ratio, applied only when no active plan
-// governs the price. The effective billed amount is cost × ratio, where ratio
-// is the active grant's snapshot ratio when the user holds one, else userRatio
-// — so a plan can define its own billing rate without touching the user's
-// pay-as-you-go ratio. Billed is drawn plan-credit first, then wallet (when
-// the grant allows overage).
-func (s *Service) Charge(ctx context.Context, userID int64, cost, userRatio float64) (Result, error) {
+// Charge bills a completed request according to the key's billing mode.
+//
+//   - payg: billed = cost × userRatio, drawn from the wallet only. The active
+//     plan grant (if any) is never consulted, so a wallet key never spends
+//     plan credit.
+//   - plan: no active grant ⇒ ErrInsufficientBalance (never falls back to the
+//     wallet at the user ratio). Otherwise billed = cost × the grant's snapshot
+//     ratio, drawn plan-credit first, then wallet overage only when the grant
+//     allows it.
+func (s *Service) Charge(ctx context.Context, userID int64, cost, userRatio float64, mode apikey.BillingMode) (Result, error) {
 	if cost <= 0 {
 		return Result{}, nil
 	}
+	if mode == apikey.ModePlan {
+		return s.chargePlan(ctx, userID, cost)
+	}
+	return s.chargePayg(ctx, userID, cost, userRatio)
+}
+
+// chargePayg draws the whole billed amount from the wallet at the user ratio.
+func (s *Service) chargePayg(ctx context.Context, userID int64, cost, userRatio float64) (Result, error) {
+	amount := cost * userRatio
+	out := Result{BilledUSD: amount}
+	if amount <= 0 {
+		return out, nil
+	}
+	wallet, err := s.store.WalletBalance(ctx, userID)
+	if err != nil {
+		return Result{}, err
+	}
+	if wallet+1e-9 < amount {
+		return Result{}, ErrInsufficientBalance
+	}
+	out.WalletUSD = amount
+	return out, nil
+}
+
+// chargePlan draws plan credit first (at the grant's snapshot ratio), then
+// wallet overage when the grant allows it. No active grant is a hard reject.
+func (s *Service) chargePlan(ctx context.Context, userID int64, cost float64) (Result, error) {
 	grant, err := s.store.ActiveGrantForUser(ctx, userID, s.now())
 	if err != nil {
 		return Result{}, err
 	}
-	ratio := userRatio
-	if grant != nil {
-		ratio = grant.PriceRatioSnapshot
+	if grant == nil {
+		return Result{}, ErrInsufficientBalance
 	}
-	amount := cost * ratio
+	amount := cost * grant.PriceRatioSnapshot
 	out := Result{BilledUSD: amount}
 	if amount <= 0 {
 		return out, nil
 	}
 	remaining := amount
-	if grant != nil && grant.CreditRemainingUSD > 0 {
+	if grant.CreditRemainingUSD > 0 {
 		used, err := s.store.ConsumeGrantCredit(ctx, grant.ID, userID, remaining, nil)
 		if err != nil {
 			return Result{}, err
@@ -99,13 +138,10 @@ func (s *Service) Charge(ctx context.Context, userID int64, cost, userRatio floa
 		if remaining <= 1e-9 {
 			return out, nil
 		}
-		if !grant.AllowPaygOverage {
-			return Result{}, ErrInsufficientBalance
-		}
-	} else if grant != nil && !grant.AllowPaygOverage {
+	}
+	if !grant.AllowPaygOverage {
 		return Result{}, ErrInsufficientBalance
 	}
-
 	wallet, err := s.store.WalletBalance(ctx, userID)
 	if err != nil {
 		return Result{}, err

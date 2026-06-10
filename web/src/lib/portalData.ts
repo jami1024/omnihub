@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { papi } from './portalApi'
 
+export type BillingMode = 'payg' | 'plan'
+
 export interface PortalKey {
   id: number
   name: string
@@ -8,6 +10,7 @@ export interface PortalKey {
   daily_usd_limit: number | null
   rpm_limit: number | null
   allowed_models: string[]
+  billing_mode: BillingMode
   spend_24h: number
 }
 export interface CreatePortalKeyResult extends PortalKey {
@@ -18,6 +21,7 @@ export interface PortalKeyInput {
   daily_usd_limit: number | null
   rpm_limit: number | null
   allowed_models: string[]
+  billing_mode: BillingMode
 }
 
 export interface PortalUsage {

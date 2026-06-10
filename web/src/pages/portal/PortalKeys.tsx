@@ -8,6 +8,7 @@ import {
   useCreatePortalKey,
   useDeletePortalKey,
   usePortalKeys,
+  type BillingMode,
   type CreatePortalKeyResult,
   type PortalKey,
 } from '../../lib/portalData'
@@ -123,12 +124,13 @@ function CreateKeyModal({
   submitting: boolean
   error: string | null
   onClose: () => void
-  onCreate: (input: { name: string; daily_usd_limit: number | null; rpm_limit: number | null; allowed_models: string[] }) => void
+  onCreate: (input: { name: string; daily_usd_limit: number | null; rpm_limit: number | null; allowed_models: string[]; billing_mode: BillingMode }) => void
 }) {
   const { t } = useI18n()
   const [name, setName] = useState('')
   const [daily, setDaily] = useState('')
   const [rpm, setRpm] = useState('')
+  const [billingMode, setBillingMode] = useState<BillingMode>('payg')
   const [localErr, setLocalErr] = useState<string | null>(null)
 
   function submit(e: React.FormEvent) {
@@ -142,6 +144,7 @@ function CreateKeyModal({
       daily_usd_limit: daily.trim() ? Number(daily) : null,
       rpm_limit: rpm.trim() ? Number(rpm) : null,
       allowed_models: [],
+      billing_mode: billingMode,
     })
   }
 
@@ -162,6 +165,14 @@ function CreateKeyModal({
             <input className="field" type="number" value={rpm} onChange={(e) => setRpm(e.target.value)} placeholder={t('portalKeys.noLimit')} />
           </label>
         </div>
+        <label className="block space-y-1">
+          <span className="text-sm text-muted">{t('portalKeys.billingMode')}</span>
+          <select className="field" value={billingMode} onChange={(e) => setBillingMode(e.target.value as BillingMode)}>
+            <option value="payg">{t('portalKeys.billingModePayg')}</option>
+            <option value="plan">{t('portalKeys.billingModePlan')}</option>
+          </select>
+          <span className="text-xs text-muted">{t('portalKeys.billingModeHint')}</span>
+        </label>
         {(localErr || error) && <p className="text-sm text-danger">{localErr ?? error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="btn btn-secondary">

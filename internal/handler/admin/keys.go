@@ -35,6 +35,7 @@ type keyDTO struct {
 	DailyUSDLimit *float64 `json:"daily_usd_limit"`
 	RPMLimit      *int     `json:"rpm_limit"`
 	AllowedModels []string `json:"allowed_models"`
+	BillingMode   string   `json:"billing_mode"`
 }
 
 // createKeyResponse is the 201 body for a freshly minted key: the
@@ -51,6 +52,10 @@ func toKeyDTO(k *apikey.Key) keyDTO {
 	if models == nil {
 		models = []string{} // marshal as [] not null, so the UI can map() freely
 	}
+	mode := k.BillingMode
+	if mode == "" {
+		mode = apikey.ModePayg
+	}
 	return keyDTO{
 		ID:            k.ID,
 		Name:          k.Name,
@@ -59,6 +64,7 @@ func toKeyDTO(k *apikey.Key) keyDTO {
 		DailyUSDLimit: k.DailyUSDLimit,
 		RPMLimit:      k.RPMLimit,
 		AllowedModels: models,
+		BillingMode:   string(mode),
 	}
 }
 
@@ -73,6 +79,7 @@ type keyInput struct {
 	DailyUSDLimit *float64 `json:"daily_usd_limit"`
 	RPMLimit      *int     `json:"rpm_limit"`
 	AllowedModels []string `json:"allowed_models"`
+	BillingMode   string   `json:"billing_mode"`
 }
 
 // normalize trims and validates the shared fields, writing a 400 and
@@ -92,6 +99,12 @@ func (in *keyInput) normalize(c *gin.Context) bool {
 		writeBadRequest(c, "daily_usd_limit cannot be negative (omit it for no limit)")
 		return false
 	}
+	mode, ok := apikey.NormalizeMode(strings.TrimSpace(in.BillingMode))
+	if !ok {
+		writeBadRequest(c, "billing_mode must be 'payg' or 'plan'")
+		return false
+	}
+	in.BillingMode = string(mode)
 	// Drop blank model entries so an accidental trailing comma in the UI
 	// doesn't persist an empty allow-list member.
 	in.AllowedModels = cleanModels(in.AllowedModels)
@@ -143,6 +156,7 @@ func CreateKeyHandler(store keyStore) gin.HandlerFunc {
 			DailyUSDLimit: in.DailyUSDLimit,
 			RPMLimit:      in.RPMLimit,
 			AllowedModels: in.AllowedModels,
+			BillingMode:   apikey.BillingMode(in.BillingMode),
 		}
 
 		id, err := store.Insert(c.Request.Context(), params)
@@ -173,6 +187,7 @@ func CreateKeyHandler(store keyStore) gin.HandlerFunc {
 					DailyUSDLimit: in.DailyUSDLimit,
 					RPMLimit:      in.RPMLimit,
 					AllowedModels: cleanModels(in.AllowedModels),
+					BillingMode:   in.BillingMode,
 				},
 				Key: cleartext,
 			})
@@ -206,6 +221,7 @@ func UpdateKeyHandler(store keyStore) gin.HandlerFunc {
 			DailyUSDLimit: in.DailyUSDLimit,
 			RPMLimit:      in.RPMLimit,
 			AllowedModels: in.AllowedModels,
+			BillingMode:   apikey.BillingMode(in.BillingMode),
 		}
 
 		if err := store.UpdateMeta(c.Request.Context(), id, params); err != nil {

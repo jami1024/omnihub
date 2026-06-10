@@ -40,6 +40,7 @@ type keyDTO struct {
 	DailyUSDLimit *float64 `json:"daily_usd_limit"`
 	RPMLimit      *int     `json:"rpm_limit"`
 	AllowedModels []string `json:"allowed_models"`
+	BillingMode   string   `json:"billing_mode"`
 	Spend24h      float64  `json:"spend_24h"`
 }
 
@@ -53,10 +54,14 @@ func toKeyDTO(k *apikey.Key, spend float64) keyDTO {
 	if models == nil {
 		models = []string{}
 	}
+	mode := k.BillingMode
+	if mode == "" {
+		mode = apikey.ModePayg
+	}
 	return keyDTO{
 		ID: k.ID, Name: k.Name, Enabled: k.Enabled,
 		DailyUSDLimit: k.DailyUSDLimit, RPMLimit: k.RPMLimit,
-		AllowedModels: models, Spend24h: spend,
+		AllowedModels: models, BillingMode: string(mode), Spend24h: spend,
 	}
 }
 
@@ -85,6 +90,7 @@ type keyInput struct {
 	DailyUSDLimit *float64 `json:"daily_usd_limit"`
 	RPMLimit      *int     `json:"rpm_limit"`
 	AllowedModels []string `json:"allowed_models"`
+	BillingMode   string   `json:"billing_mode"`
 }
 
 // CreateKeyHandler handles POST /portal/api/keys. The key is generated
@@ -113,6 +119,11 @@ func CreateKeyHandler(store keyStore, settings settingsProvider) gin.HandlerFunc
 			writeBadRequest(c, "daily_usd_limit cannot be negative")
 			return
 		}
+		mode, ok := apikey.NormalizeMode(strings.TrimSpace(in.BillingMode))
+		if !ok {
+			writeBadRequest(c, "billing_mode must be 'payg' or 'plan'")
+			return
+		}
 		// Apply the admin policy: a blank limit takes the default; any
 		// limit is then capped at the ceiling.
 		if pol, err := settings.Get(c.Request.Context()); err == nil {
@@ -139,6 +150,7 @@ func CreateKeyHandler(store keyStore, settings settingsProvider) gin.HandlerFunc
 			RPMLimit:      in.RPMLimit,
 			AllowedModels: models,
 			UserID:        &uid,
+			BillingMode:   mode,
 		})
 		if err != nil {
 			if errors.Is(err, repository.ErrApiKeyNameTaken) {
@@ -152,7 +164,7 @@ func CreateKeyHandler(store keyStore, settings settingsProvider) gin.HandlerFunc
 		slog.Info("portal: key created", "uid", uid, "id", id, "name", in.Name)
 		k, err := store.GetByID(c.Request.Context(), id)
 		if err != nil {
-			c.JSON(http.StatusCreated, createKeyResponse{keyDTO: keyDTO{ID: id, Name: in.Name, Enabled: true, AllowedModels: []string{}}, Key: cleartext})
+			c.JSON(http.StatusCreated, createKeyResponse{keyDTO: keyDTO{ID: id, Name: in.Name, Enabled: true, AllowedModels: []string{}, BillingMode: string(mode)}, Key: cleartext})
 			return
 		}
 		c.JSON(http.StatusCreated, createKeyResponse{keyDTO: toKeyDTO(k, 0), Key: cleartext})

@@ -41,7 +41,7 @@ func (r *ApiKeyRepo) ListEnabled(ctx context.Context) ([]*apikey.Key, error) {
 	const q = `
         SELECT k.id, k.name, k.key_hash, COALESCE(k.label, ''),
                k.daily_usd_limit, k.rpm_limit, k.allowed_models, k.user_id,
-               COALESCE(u.price_ratio, 1.0)::float8
+               COALESCE(u.price_ratio, 1.0)::float8, k.billing_mode
           FROM api_keys k
           LEFT JOIN users u ON u.id = k.user_id
          WHERE k.enabled = TRUE
@@ -69,7 +69,7 @@ func (r *ApiKeyRepo) ListEnabled(ctx context.Context) ([]*apikey.Key, error) {
 func (r *ApiKeyRepo) ListAll(ctx context.Context) ([]*apikey.Key, error) {
 	const q = `
         SELECT id, name, key_hash, COALESCE(label, ''), enabled,
-               daily_usd_limit, rpm_limit, allowed_models
+               daily_usd_limit, rpm_limit, allowed_models, billing_mode
           FROM api_keys
          ORDER BY id ASC`
 	rows, err := r.pool.Query(ctx, q)
@@ -86,16 +86,18 @@ func (r *ApiKeyRepo) ListAll(ctx context.Context) ([]*apikey.Key, error) {
 			allowedJSON []byte
 			dailyLimit  *float64
 			rpmLimit    *int
+			billingMode string
 		)
 		if err := rows.Scan(
 			&k.ID, &k.Name, &k.Hash, &k.Label, &enabled,
-			&dailyLimit, &rpmLimit, &allowedJSON,
+			&dailyLimit, &rpmLimit, &allowedJSON, &billingMode,
 		); err != nil {
 			return nil, fmt.Errorf("scan api_key: %w", err)
 		}
 		k.Enabled = enabled
 		k.DailyUSDLimit = dailyLimit
 		k.RPMLimit = rpmLimit
+		k.BillingMode = apikey.BillingMode(billingMode)
 		if err := decodeAllowedModels(&k, allowedJSON); err != nil {
 			return nil, err
 		}
@@ -125,6 +127,7 @@ type ApiKeyInsertParams struct {
 	RPMLimit      *int
 	AllowedModels []string
 	UserID        *int64
+	BillingMode   apikey.BillingMode // "" defaults to payg at the DB layer
 }
 
 // Insert creates a new api_keys row.
@@ -141,15 +144,15 @@ func (r *ApiKeyRepo) Insert(ctx context.Context, p ApiKeyInsertParams) (int64, e
 	const q = `
         INSERT INTO api_keys (
             name, key_hash, label, enabled,
-            daily_usd_limit, rpm_limit, allowed_models, user_id
+            daily_usd_limit, rpm_limit, allowed_models, user_id, billing_mode
         )
-        VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8)
+        VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8, COALESCE(NULLIF($9, ''), 'payg'))
         RETURNING id`
 
 	var id int64
 	err := r.pool.QueryRow(ctx, q,
 		p.Name, p.Hash, p.Label, p.Enabled,
-		p.DailyUSDLimit, p.RPMLimit, allowedJSON, p.UserID,
+		p.DailyUSDLimit, p.RPMLimit, allowedJSON, p.UserID, string(p.BillingMode),
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -167,7 +170,7 @@ func (r *ApiKeyRepo) Insert(ctx context.Context, p ApiKeyInsertParams) (int64, e
 func (r *ApiKeyRepo) ListByUser(ctx context.Context, userID int64) ([]*apikey.Key, error) {
 	const q = `
         SELECT id, name, key_hash, COALESCE(label, ''), enabled,
-               daily_usd_limit, rpm_limit, allowed_models
+               daily_usd_limit, rpm_limit, allowed_models, billing_mode
           FROM api_keys
          WHERE user_id = $1
          ORDER BY id DESC`
@@ -184,12 +187,14 @@ func (r *ApiKeyRepo) ListByUser(ctx context.Context, userID int64) ([]*apikey.Ke
 			allowedJSON []byte
 			dailyLimit  *float64
 			rpmLimit    *int
+			billingMode string
 		)
 		if err := rows.Scan(&k.ID, &k.Name, &k.Hash, &k.Label, &enabled,
-			&dailyLimit, &rpmLimit, &allowedJSON); err != nil {
+			&dailyLimit, &rpmLimit, &allowedJSON, &billingMode); err != nil {
 			return nil, fmt.Errorf("scan api_key: %w", err)
 		}
 		k.Enabled, k.DailyUSDLimit, k.RPMLimit = enabled, dailyLimit, rpmLimit
+		k.BillingMode = apikey.BillingMode(billingMode)
 		if err := decodeAllowedModels(&k, allowedJSON); err != nil {
 			return nil, err
 		}
@@ -218,7 +223,7 @@ func (r *ApiKeyRepo) DeleteByIDOwnedBy(ctx context.Context, id, userID int64) er
 func (r *ApiKeyRepo) GetByID(ctx context.Context, id int64) (*apikey.Key, error) {
 	const q = `
         SELECT id, name, key_hash, COALESCE(label, ''), enabled,
-               daily_usd_limit, rpm_limit, allowed_models
+               daily_usd_limit, rpm_limit, allowed_models, billing_mode
           FROM api_keys
          WHERE id = $1`
 	var (
@@ -227,10 +232,11 @@ func (r *ApiKeyRepo) GetByID(ctx context.Context, id int64) (*apikey.Key, error)
 		allowedJSON []byte
 		dailyLimit  *float64
 		rpmLimit    *int
+		billingMode string
 	)
 	err := r.pool.QueryRow(ctx, q, id).Scan(
 		&k.ID, &k.Name, &k.Hash, &k.Label, &enabled,
-		&dailyLimit, &rpmLimit, &allowedJSON,
+		&dailyLimit, &rpmLimit, &allowedJSON, &billingMode,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -241,6 +247,7 @@ func (r *ApiKeyRepo) GetByID(ctx context.Context, id int64) (*apikey.Key, error)
 	k.Enabled = enabled
 	k.DailyUSDLimit = dailyLimit
 	k.RPMLimit = rpmLimit
+	k.BillingMode = apikey.BillingMode(billingMode)
 	if err := decodeAllowedModels(&k, allowedJSON); err != nil {
 		return nil, err
 	}
@@ -259,6 +266,7 @@ type ApiKeyUpdateParams struct {
 	DailyUSDLimit *float64
 	RPMLimit      *int
 	AllowedModels []string
+	BillingMode   apikey.BillingMode // "" defaults to payg at the DB layer
 }
 
 // UpdateMeta replaces the mutable columns of the key identified by id.
@@ -278,13 +286,14 @@ func (r *ApiKeyRepo) UpdateMeta(ctx context.Context, id int64, p ApiKeyUpdatePar
         UPDATE api_keys SET
             name = $1, label = NULLIF($2, ''), enabled = $3,
             daily_usd_limit = $4, rpm_limit = $5, allowed_models = $6,
+            billing_mode = COALESCE(NULLIF($7, ''), 'payg'),
             updated_at = NOW()
-         WHERE id = $7`
+         WHERE id = $8`
 
 	tag, err := r.pool.Exec(ctx, q,
 		p.Name, p.Label, p.Enabled,
 		p.DailyUSDLimit, p.RPMLimit, allowedJSON,
-		id,
+		string(p.BillingMode), id,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -347,10 +356,11 @@ func scanApiKey(rows interface{ Scan(...any) error }) (*apikey.Key, error) {
 		rpmLimit    *int
 		userID      *int64
 		priceRatio  float64
+		billingMode string
 	)
 	if err := rows.Scan(
 		&k.ID, &k.Name, &k.Hash, &k.Label,
-		&dailyLimit, &rpmLimit, &allowedJSON, &userID, &priceRatio,
+		&dailyLimit, &rpmLimit, &allowedJSON, &userID, &priceRatio, &billingMode,
 	); err != nil {
 		return nil, fmt.Errorf("scan api_key: %w", err)
 	}
@@ -358,6 +368,7 @@ func scanApiKey(rows interface{ Scan(...any) error }) (*apikey.Key, error) {
 	k.RPMLimit = rpmLimit
 	k.UserID = userID
 	k.PriceRatio = priceRatio
+	k.BillingMode = apikey.BillingMode(billingMode)
 	if err := decodeAllowedModels(&k, allowedJSON); err != nil {
 		return nil, err
 	}

@@ -99,7 +99,7 @@ func (l *Limiter) Check(ctx context.Context, k *apikey.Key, model string) *Rejec
 	// with a portal owner, independent of any daily cap. Fail-open on a
 	// source/DB error, same rationale as the daily cap below.
 	if l.balance != nil && k.UserID != nil {
-		bal, err := l.balance.Balance(ctx, *k.UserID)
+		bal, err := l.balance.Balance(ctx, *k.UserID, modeOf(k))
 		if err != nil {
 			slog.Warn("balance check failed; request allowed",
 				"key", k.Name, "err", err.Error())
@@ -138,9 +138,9 @@ func (l *Limiter) Check(ctx context.Context, k *apikey.Key, model string) *Rejec
 
 // RecordSpend folds the upstream cost of a just-completed request into
 // the per-key daily spend cache so the next request sees up-to-date data
-// without waiting for the WriteBuffer flush or a TTL refresh. Wallet
-// balance is debited separately via RecordWalletSpend because plan credits
-// may cover part or all of the billed amount.
+// without waiting for the WriteBuffer flush or a TTL refresh. Prepaid
+// balance is debited separately via RecordBillingSpend because plan credit
+// and wallet credit are tracked in distinct per-mode caches.
 func (l *Limiter) RecordSpend(k *apikey.Key, usd float64) {
 	if l == nil || k == nil || usd <= 0 {
 		return
@@ -150,15 +150,28 @@ func (l *Limiter) RecordSpend(k *apikey.Key, usd float64) {
 	}
 }
 
-// RecordWalletSpend debits only the pay-as-you-go wallet portion of a
-// completed request. Plan-covered usage must not reduce wallet balance.
-func (l *Limiter) RecordWalletSpend(k *apikey.Key, usd float64) {
-	if l == nil || k == nil || usd <= 0 {
+// RecordBillingSpend folds the plan and wallet portions of a completed
+// request into the per-(user,mode) balance caches. The wallet portion lowers
+// both modes (shared wallet); the plan portion lowers only the plan mode.
+// Either may be zero.
+func (l *Limiter) RecordBillingSpend(k *apikey.Key, planUSD, walletUSD float64) {
+	if l == nil || k == nil || l.balance == nil || k.UserID == nil {
 		return
 	}
-	if l.balance != nil && k.UserID != nil {
-		l.balance.Charge(*k.UserID, usd)
+	if planUSD > 0 {
+		l.balance.ChargePlan(*k.UserID, planUSD)
 	}
+	if walletUSD > 0 {
+		l.balance.ChargeWallet(*k.UserID, walletUSD)
+	}
+}
+
+// modeOf resolves a key's billing mode, defaulting to payg for an unset value.
+func modeOf(k *apikey.Key) apikey.BillingMode {
+	if k != nil && k.BillingMode == apikey.ModePlan {
+		return apikey.ModePlan
+	}
+	return apikey.ModePayg
 }
 
 // modelAllowed returns true when allow is empty (no restriction) or

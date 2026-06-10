@@ -14,6 +14,22 @@ import (
 	"fmt"
 )
 
+// BillingMode selects how a key's requests are billed. It is a per-key
+// dimension (not per-user) so one user can hold both a wallet key and a
+// plan key. The zero value is unusable; load/validation always resolves to
+// ModePayg or ModePlan.
+type BillingMode string
+
+const (
+	// ModePayg bills the owner's wallet only, at users.price_ratio. Plan
+	// credit is never consulted.
+	ModePayg BillingMode = "payg"
+	// ModePlan bills the owner's active plan grant first (at the grant's
+	// price_ratio_snapshot), then wallet overage if the grant allows it;
+	// with no active grant the request is rejected.
+	ModePlan BillingMode = "plan"
+)
+
 // Key is the in-memory shape of one virtual API key row. The
 // cleartext value is intentionally absent: the pool only ever sees
 // the hash and metadata.
@@ -25,9 +41,24 @@ type Key struct {
 	Enabled       bool
 	DailyUSDLimit *float64
 	RPMLimit      *int
-	AllowedModels []string // nil / empty = all models
-	UserID        *int64   // owning portal user; nil for admin/system keys
-	PriceRatio    float64  // owner's billing markup; 1.0 (or no owner) = bill at cost
+	AllowedModels []string    // nil / empty = all models
+	UserID        *int64      // owning portal user; nil for admin/system keys
+	PriceRatio    float64     // owner's billing markup; 1.0 (or no owner) = bill at cost
+	BillingMode   BillingMode // payg (wallet) or plan (plan credit first)
+}
+
+// NormalizeMode validates a billing-mode string from an API request,
+// defaulting an empty value to payg. It returns (mode, true) for "",
+// "payg", or "plan", and (_, false) for anything else.
+func NormalizeMode(s string) (BillingMode, bool) {
+	switch s {
+	case "", string(ModePayg):
+		return ModePayg, true
+	case string(ModePlan):
+		return ModePlan, true
+	default:
+		return "", false
+	}
 }
 
 // HashOf computes the canonical key hash. Both the CLI's "key add"
