@@ -3,13 +3,14 @@ import { Layout } from '../components/Layout'
 import { Modal } from '../components/Modal'
 import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
 import { StatusBadge, Td, Th } from '../components/Table'
-import { AccountForm } from '../components/AccountForm'
+import { AccountForm, type ImportRequest } from '../components/AccountForm'
 import { ApiError } from '../lib/api'
 import { useI18n } from '../lib/i18n'
 import {
   useAccounts,
   useCreateAccount,
   useDeleteAccount,
+  useImportCredentials,
   useTestAccountById,
   useUpdateAccount,
   type Account,
@@ -26,6 +27,7 @@ export function AccountsPage() {
   const create = useCreateAccount()
   const update = useUpdateAccount()
   const del = useDeleteAccount()
+  const importCreds = useImportCredentials()
   const [editing, setEditing] = useState<Editing>(null)
   const [formErr, setFormErr] = useState<string | null>(null)
   const accountCount = accounts?.length ?? 0
@@ -46,14 +48,47 @@ export function AccountsPage() {
     setFormErr(null)
   }
 
-  function handleSubmit(input: AccountInput) {
+  function handleSubmit(input: AccountInput, importReq?: ImportRequest) {
     setFormErr(null)
     const onError = (err: unknown) =>
       setFormErr(err instanceof ApiError ? err.message : t('accounts.requestFailed'))
+    // OAuth accounts save in two steps: persist the row, then run the
+    // pasted credential file through the auth plugin. A failed import
+    // keeps the dialog open — the row exists but cannot route until
+    // credentials are imported (re-submit imports again, it won't
+    // duplicate the account on edit).
+    const runImport = (id: number) => {
+      if (!importReq) {
+        close()
+        return
+      }
+      importCreds.mutate(
+        { id, ...importReq },
+        {
+          onSuccess: close,
+          onError: (err: unknown) =>
+            setFormErr(
+              t('accounts.importFailed', {
+                msg: err instanceof ApiError ? err.message : t('accounts.requestFailed'),
+              }),
+            ),
+        },
+      )
+    }
     if (editing === 'new') {
-      create.mutate(input, { onSuccess: close, onError })
+      create.mutate(input, {
+        onSuccess: (a) => {
+          // Switch the dialog to edit mode immediately: if the import
+          // below fails, re-submitting must UPDATE the just-created row
+          // instead of trying to create it again (409 name_taken).
+          if (importReq) setEditing(a)
+          runImport(a.id)
+        },
+        onError,
+      })
     } else if (editing) {
-      update.mutate({ id: editing.id, input }, { onSuccess: close, onError })
+      const id = editing.id
+      update.mutate({ id, input }, { onSuccess: () => runImport(id), onError })
     }
   }
 
@@ -166,7 +201,7 @@ export function AccountsPage() {
         <Modal title={editing === 'new' ? t('accounts.newAccount') : t('accounts.editTitle', { name: editing.name })} onClose={close}>
           <AccountForm
             account={editing === 'new' ? undefined : editing}
-            submitting={create.isPending || update.isPending}
+            submitting={create.isPending || update.isPending || importCreds.isPending}
             error={formErr}
             onCancel={close}
             onSubmit={handleSubmit}

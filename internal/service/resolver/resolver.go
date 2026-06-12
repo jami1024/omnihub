@@ -194,6 +194,9 @@ func (r *WeightedResolver) resolveSticky(
 		if !a.IsActiveAt(time.Now()) {
 			return nil
 		}
+		if !a.AuthRoutable() {
+			return nil
+		}
 		if len(allowed) == 0 {
 			return a
 		}
@@ -239,6 +242,12 @@ func (r *WeightedResolver) gather(allowed []string, excluded []int64) []*provide
 			continue
 		}
 		if !a.IsActiveAt(now) {
+			continue
+		}
+		// Auth lifecycle gate: refresh_failed / login_required /
+		// quota_exhausted / ... accounts are parked until the
+		// TokenManager or an admin recovers them.
+		if !a.AuthRoutable() {
 			continue
 		}
 		out = append(out, a)

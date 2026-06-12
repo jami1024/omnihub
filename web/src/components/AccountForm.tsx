@@ -3,6 +3,7 @@ import { ApiError } from '../lib/api'
 import { useI18n } from '../lib/i18n'
 import { useGroups } from '../lib/groups'
 import {
+  useAuthPlugins,
   useTestAccount,
   useTestAccountById,
   type Account,
@@ -24,12 +25,19 @@ interface CredRow {
   value: string
 }
 
+// ImportRequest carries the pasted CLI credential file that should be
+// run through the auth plugin right after the account row is saved.
+export interface ImportRequest {
+  plugin: string
+  payload: string
+}
+
 export interface AccountFormProps {
   account?: Account
   submitting: boolean
   error?: string | null
   onCancel: () => void
-  onSubmit: (input: AccountInput) => void
+  onSubmit: (input: AccountInput, importReq?: ImportRequest) => void
 }
 
 const FIELD =
@@ -93,6 +101,12 @@ export function AccountForm({
   const [ovThinking, setOvThinking] = useState(numToStr(po?.thinking_budget_tokens))
   const [windows, setWindows] = useState<ActiveWindow[]>(account?.active_windows ?? [])
   const [timezone, setTimezone] = useState(account?.active_timezone ?? '')
+  // Upstream auth method. Only api_key and imported_oauth are offered
+  // here; browser OAuth / service accounts arrive with later plugins.
+  const [authType, setAuthType] = useState(account?.auth_type ?? 'api_key')
+  const { data: authPlugins } = useAuthPlugins()
+  const [authPlugin, setAuthPlugin] = useState(account?.auth_plugin ?? '')
+  const [authJSON, setAuthJSON] = useState('')
 
   function updateWindow(i: number, patch: Partial<ActiveWindow>) {
     setWindows((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
@@ -212,9 +226,21 @@ export function AccountForm({
       credentials[k] = row.value
     }
     const hasCreds = Object.keys(credentials).length > 0
+    const isImportedOAuth = authType === 'imported_oauth'
 
-    if (!isEdit && !hasCreds) {
+    if (!isEdit && !hasCreds && !isImportedOAuth) {
       setLocalErr(t('accountForm.errCredentialRequired'))
+      return
+    }
+    // OAuth accounts get their secrets from the pasted credential file;
+    // require it on create (an empty oauth account can never route).
+    // On edit a blank textarea simply keeps the stored tokens.
+    if (isImportedOAuth && !isEdit && authJSON.trim() === '') {
+      setLocalErr(t('accountForm.errAuthJsonRequired'))
+      return
+    }
+    if (isImportedOAuth && authPlugin.trim() === '') {
+      setLocalErr(t('accountForm.errAuthPluginRequired'))
       return
     }
 
@@ -274,15 +300,18 @@ export function AccountForm({
         end: w.end.trim(),
       })),
       active_timezone: timezone.trim(),
-      // Auth model has no form controls yet (phase 1): echo the stored
-      // values on edit so the PUT-style update doesn't reset an oauth
-      // account back to api_key; default new accounts to api_key.
-      auth_type: account?.auth_type ?? 'api_key',
-      auth_plugin: account?.auth_plugin ?? '',
+      auth_type: authType,
+      auth_plugin: isImportedOAuth ? authPlugin.trim() : '',
+      // client_profile has no form controls yet: echo the stored values
+      // so the PUT-style update keeps them.
       client_profile: account?.client_profile ?? '',
       client_profile_config: account?.client_profile_config ?? {},
     }
-    onSubmit(input)
+    const importReq =
+      isImportedOAuth && authJSON.trim() !== ''
+        ? { plugin: authPlugin.trim(), payload: authJSON.trim() }
+        : undefined
+    onSubmit(input, importReq)
   }
 
   return (
@@ -313,6 +342,52 @@ export function AccountForm({
           />
         </Field>
       </div>
+
+      <Field label={t('accountForm.authMethod')} help={t('accountForm.authMethodHelp')}>
+        <select
+          className={FIELD}
+          value={authType}
+          onChange={(e) => {
+            const next = e.target.value
+            setAuthType(next)
+            if (next === 'imported_oauth' && authPlugin === '') {
+              setAuthPlugin(authPlugins?.[0]?.name ?? 'codex-oauth')
+            }
+          }}
+        >
+          <option value="api_key">{t('accountForm.authApiKey')}</option>
+          <option value="imported_oauth">{t('accountForm.authImportedOAuth')}</option>
+        </select>
+      </Field>
+
+      {authType === 'imported_oauth' && (
+        <fieldset className="space-y-2 rounded-lg border border-line p-3">
+          <legend className="text-sm font-medium">{t('accountForm.authImportLegend')}</legend>
+          <Field label={t('accountForm.authPlugin')}>
+            <select className={FIELD} value={authPlugin} onChange={(e) => setAuthPlugin(e.target.value)}>
+              {(authPlugins ?? []).map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.display_name || p.name}
+                  {p.experimental ? ` (${t('accountForm.experimental')})` : ''}
+                </option>
+              ))}
+              {authPlugins == null && <option value="codex-oauth">OpenAI Codex OAuth</option>}
+            </select>
+          </Field>
+          <Field label={t('accountForm.authJsonLabel')} help={t('accountForm.authJsonHelp')}>
+            <textarea
+              className={FIELD + ' h-28 font-mono text-xs'}
+              value={authJSON}
+              onChange={(e) => setAuthJSON(e.target.value)}
+              placeholder='{"tokens":{"id_token":"...","access_token":"...","refresh_token":"..."},...}'
+              spellCheck={false}
+            />
+          </Field>
+          {isEdit && (
+            <p className="text-xs text-muted">{t('accountForm.authJsonKeepHint')}</p>
+          )}
+        </fieldset>
+      )}
 
       <Field label={t('accountForm.baseUrlOptional')} help={t('accountForm.baseUrlHelp')}>
         <input
@@ -413,6 +488,7 @@ export function AccountForm({
         {t('accountForm.enabledRoutable')}
       </label>
 
+      {authType === 'api_key' && (
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium">{t('accountForm.credentials')}</legend>
         <p className="text-xs text-muted">{t('accountForm.credentialsHelp')}</p>
@@ -453,6 +529,7 @@ export function AccountForm({
           {t('accountForm.addCredential')}
         </button>
       </fieldset>
+      )}
 
       <details className="rounded-lg border border-line p-3" open={redirects.length > 0}>
         <summary className="cursor-pointer text-sm text-muted">

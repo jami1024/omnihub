@@ -324,6 +324,66 @@ func marshalProfileConfig(c map[string]any) ([]byte, error) {
 	return json.Marshal(c)
 }
 
+// AuthRuntimeUpdate carries the runtime-maintained auth columns the
+// TokenManager / auth plugins write. It deliberately cannot touch the
+// admin-configured columns (auth_type, client_profile, weight, ...) so
+// a token refresh can never clobber an admin edit, and vice versa.
+// Zero values mean "keep the stored value" except Status (always
+// written) and RefreshError ("" clears the stored error).
+type AuthRuntimeUpdate struct {
+	Credentials   map[string]string // nil = keep stored secrets
+	Plugin        string            // "" = keep (set on first import)
+	Status        string
+	RefreshError  string
+	ExpiresAt     *time.Time
+	LastRefreshAt *time.Time
+	Subject       string
+	Email         string
+	Plan          string
+}
+
+// UpdateAuthRuntime applies a TokenManager / auth-plugin state write to
+// one account. Credentials, when present, replace the whole stored set
+// (token refresh rotates several fields at once) and are encrypted the
+// same way Insert/Update encrypt them.
+func (r *AccountRepo) UpdateAuthRuntime(ctx context.Context, id int64, u AuthRuntimeUpdate) error {
+	var credentialsJSON []byte // nil → SQL NULL → COALESCE keeps stored value
+	if u.Credentials != nil {
+		enc, err := r.cipher.EncryptMapValues(u.Credentials)
+		if err != nil {
+			return fmt.Errorf("encrypt credentials: %w", err)
+		}
+		credentialsJSON, err = json.Marshal(enc)
+		if err != nil {
+			return fmt.Errorf("encode credentials: %w", err)
+		}
+	}
+
+	const q = `
+        UPDATE accounts SET
+            credentials = COALESCE($2, credentials),
+            auth_plugin = COALESCE(NULLIF($3, ''), auth_plugin),
+            auth_status = $4,
+            refresh_error = NULLIF($5, ''),
+            auth_expires_at = COALESCE($6, auth_expires_at),
+            last_refresh_at = COALESCE($7, last_refresh_at),
+            auth_subject = COALESCE(NULLIF($8, ''), auth_subject),
+            auth_email = COALESCE(NULLIF($9, ''), auth_email),
+            auth_plan = COALESCE(NULLIF($10, ''), auth_plan),
+            updated_at = NOW()
+         WHERE id = $1`
+
+	tag, err := r.pool.Exec(ctx, q, id, credentialsJSON, u.Plugin, u.Status, u.RefreshError,
+		u.ExpiresAt, u.LastRefreshAt, u.Subject, u.Email, u.Plan)
+	if err != nil {
+		return fmt.Errorf("update auth runtime: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrAccountNotFound
+	}
+	return nil
+}
+
 // CountAll returns the total number of rows regardless of enabled
 // flag. Used by the bootstrap path to decide whether to seed from
 // environment variables on first boot.

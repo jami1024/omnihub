@@ -47,6 +47,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/openai"
 	"github.com/jami1024/omnihub/internal/service/resolver"
 	"github.com/jami1024/omnihub/internal/service/session"
+	"github.com/jami1024/omnihub/internal/service/upstreamauth"
 	"github.com/jami1024/omnihub/internal/web"
 )
 
@@ -262,13 +263,19 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 	// scrapers get a stable target even before any gateway traffic.
 	r.GET("/metrics", gin.WrapH(metrics.Handler(os.Getenv("OMNIHUB_METRICS_TOKEN"))))
 
+	// Upstream auth plugins (cold path: login / import / refresh).
+	// Registered once and shared by the gateway's TokenManager and the
+	// admin credential-import endpoints.
+	authPlugins := upstreamauth.NewRegistry()
+	authPlugins.Register("codex-oauth", upstreamauth.NewCodexOAuth())
+
 	// mountGatewayRoutes builds the in-memory circuit-breaker Tracker;
 	// hand it to the admin routes so the dashboard can read live breaker
 	// state and reset it. It is nil when the gateway is disabled (no
 	// accounts / no DB), and the admin circuit handlers treat nil as
 	// "circuit data unavailable".
-	tracker := mountGatewayRoutes(r, registry)
-	mountAdminRoutes(r, tracker, registry)
+	tracker := mountGatewayRoutes(r, registry, authPlugins)
+	mountAdminRoutes(r, tracker, registry, authPlugins)
 
 	return r
 }
@@ -290,7 +297,7 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 // The SPA is served via gin's NoRoute fallback rather than a wildcard
 // route because /admin/api/* already lives under /admin/ and gin
 // disallows a catch-all sharing a prefix with concrete routes.
-func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider.Registry) {
+func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider.Registry, authPlugins *upstreamauth.Registry) {
 	secret := os.Getenv("OMNIHUB_ADMIN_JWT_SECRET")
 	if secret == "" {
 		slog.Warn("/admin disabled: OMNIHUB_ADMIN_JWT_SECRET not set; the web UI will not authenticate")
@@ -343,6 +350,10 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	// an existing account by id using its stored credentials.
 	authed.POST("/accounts/test", adminhandler.TestAccountHandler(registry))
 	authed.POST("/accounts/:id/test", adminhandler.TestAccountByIDHandler(accountRepo, registry))
+	// Upstream-OAuth phase 2 — credential import (paste ~/.codex/auth.json)
+	// plus the plugin metadata list the account form's auth picker reads.
+	authed.GET("/auth-plugins", adminhandler.ListAuthPluginsHandler(authPlugins))
+	authed.POST("/accounts/:id/import-credentials", adminhandler.ImportAccountCredentialsHandler(accountRepo, authPlugins))
 
 	// M8b-3 — provider groups: organisational buckets with a shared cost
 	// multiplier. The provider_groups NOTIFY trigger (migration 0018)
@@ -507,7 +518,7 @@ func adminCredentialsFromEnv() (adminhandler.EnvAdminCredentials, bool) {
 // The operator is expected to add at least one row to the accounts
 // table before the gateway can serve traffic. See the README for the
 // SQL snippets; a CLI / admin API will follow.
-func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Tracker {
+func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry, authPlugins *upstreamauth.Registry) *health.Tracker {
 	if accountPool == nil {
 		slog.Error("/v1/messages disabled: no database configured; set OMNIHUB_DATABASE_URL and add accounts to the accounts table")
 		return nil
@@ -623,6 +634,17 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 		"interval", probeCfg.Interval,
 		"concurrency", probeCfg.Concurrency)
 
+	// TokenManager: keeps oauth / imported_oauth account tokens fresh.
+	// On-demand at dispatch time (EnsureFresh / 401 ForceRefresh) plus a
+	// background sweep so idle accounts stay fresh and the admin UI's
+	// auth_status stays truthful.
+	tokenManager := upstreamauth.NewTokenManager(
+		repository.NewAccountRepo(pool, accountCipher),
+		authPlugins,
+		upstreamauth.RefreshWindowFromEnv(),
+	)
+	tokenManager.Start(context.Background(), accountPool.All, time.Minute)
+
 	forwarder := forward.New(nil)
 	// Hot-reloadable, DB-backed price source (built by setupPricePool).
 	// Falls back to the static defaults if the pool wasn't built.
@@ -654,7 +676,7 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 		auth.Middleware(),
 		guard.RequestLog(),
 	)
-	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, gatewaySettings))
+	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, gatewaySettings))
 
 	// OpenAI Chat Completions endpoint. OpenAI SDK clients are not Claude
 	// CLI, so the Claude-CLI client gate is intentionally omitted here;
@@ -666,7 +688,7 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry) *health.Trac
 		auth.Middleware(),
 		guard.RequestLog(),
 	)
-	gwOpenAI.POST("/v1/chat/completions", gateway.OpenAIChatCompletionsHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, gatewaySettings))
+	gwOpenAI.POST("/v1/chat/completions", gateway.OpenAIChatCompletionsHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, gatewaySettings))
 
 	stickyDesc := "off"
 	if sessions != nil {

@@ -175,3 +175,44 @@ export function useDeleteAccount() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
   })
 }
+
+// AuthPlugin mirrors the server's upstreamauth.Metadata — the available
+// cold-path auth plugins (OAuth login / credential import).
+export interface AuthPlugin {
+  name: string
+  display_name: string
+  supported_providers: string[]
+  auth_methods: string[]
+  experimental: boolean
+}
+
+export function useAuthPlugins() {
+  return useQuery({
+    queryKey: ['auth-plugins'],
+    queryFn: () => api<{ plugins: AuthPlugin[] }>('/auth-plugins').then((r) => r.plugins),
+    staleTime: 5 * 60 * 1000, // plugin set only changes on deploy
+  })
+}
+
+// ImportCredentialsResult is the import endpoint's reply: the parsed
+// identity plus the new token expiry.
+export interface ImportCredentialsResult {
+  auth_status: string
+  plugin: string
+  auth_expires_at?: string
+  profile?: { subject: string; email: string; plan: string }
+}
+
+// useImportCredentials pushes pasted CLI credentials (e.g. the content
+// of ~/.codex/auth.json) onto an existing account via its auth plugin.
+export function useImportCredentials() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, plugin, payload }: { id: number; plugin: string; payload: string }) =>
+      api<ImportCredentialsResult>(`/accounts/${id}/import-credentials`, {
+        method: 'POST',
+        body: JSON.stringify({ plugin, payload }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
+  })
+}

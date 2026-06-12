@@ -11,6 +11,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,6 +77,26 @@ type RuntimeSettings interface {
 	FailoverMaxAttempts() int
 }
 
+// TokenFreshener keeps OAuth-backed accounts' upstream tokens fresh.
+// *upstreamauth.TokenManager implements it; nil disables refresh (all
+// accounts are treated as static-credential).
+type TokenFreshener interface {
+	// EnsureFresh returns an account whose token has enough life left
+	// for this request, refreshing it first when needed.
+	EnsureFresh(ctx context.Context, a *provider.Account) (*provider.Account, error)
+	// ForceRefresh renews the token after an upstream 401.
+	ForceRefresh(ctx context.Context, accountID int64) (*provider.Account, error)
+}
+
+// ensureFreshAccount runs the TokenManager gate for one resolved
+// account. Non-OAuth accounts and a nil freshener pass through.
+func ensureFreshAccount(ctx context.Context, tokens TokenFreshener, account *provider.Account) (*provider.Account, error) {
+	if tokens == nil || !account.UsesUpstreamOAuth() {
+		return account, nil
+	}
+	return tokens.EnsureFresh(ctx, account)
+}
+
 func configuredFailoverAttempts(settings []RuntimeSettings) int {
 	if len(settings) == 0 || settings[0] == nil {
 		return maxFailoverAttempts
@@ -115,6 +136,7 @@ func AnthropicMessagesHandler(
 	limiter *limits.Limiter,
 	blockedIPs *blockedip.Pool,
 	charger BillingCharger,
+	tokens TokenFreshener,
 	settings ...RuntimeSettings,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -174,6 +196,7 @@ func AnthropicMessagesHandler(
 			lastBadStatus      int
 			lastBody           []byte
 			signatureRectified bool
+			authRefreshed      bool
 		)
 
 		for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -195,6 +218,21 @@ func AnthropicMessagesHandler(
 				slog.Error("resolver failed", "err", rerr.Error())
 				errorJSON(c, http.StatusInternalServerError, "internal_error", "resolver failed")
 				return
+			}
+
+			// OAuth-backed accounts: make sure the access token has
+			// enough life left before spending an attempt on it. A
+			// failed refresh parks the account (the resolver will skip
+			// it) and we fail over without touching the upstream.
+			if fresh, ferr := ensureFreshAccount(c.Request.Context(), tokens, account); ferr != nil {
+				slog.Warn("token refresh failed; trying next account",
+					"account", account.Name, "attempt", attempt+1, "err", ferr.Error())
+				attempted = append(attempted, account.ID)
+				metrics.IncFailover(driver.Name())
+				lastDriver, lastAccount, lastErr, lastBadStatus = driver, account, ferr, 0
+				continue
+			} else {
+				account = fresh
 			}
 
 			resp, sentAt, derr := forwarder.Dispatch(c.Request.Context(), &req, driver, account)
@@ -228,6 +266,54 @@ func AnthropicMessagesHandler(
 				lastDriver, lastAccount, lastBadStatus = driver, account, resp.StatusCode
 				lastErr = fmt.Errorf("upstream HTTP %d", resp.StatusCode)
 				continue
+			}
+
+			// 401 from an OAuth-backed upstream usually means the access
+			// token expired mid-flight or was rotated by another gateway
+			// instance. Force one refresh and retry the SAME account
+			// before failing over; api_key accounts keep the historical
+			// behaviour (401 commits to the client).
+			if resp.StatusCode == http.StatusUnauthorized && tokens != nil && account.UsesUpstreamOAuth() && !authRefreshed {
+				authRefreshed = true
+				_ = resp.Body.Close()
+				refreshed, rerr := tokens.ForceRefresh(c.Request.Context(), account.ID)
+				if rerr != nil {
+					slog.Warn("401 force-refresh failed; trying next account",
+						"account", account.Name, "attempt", attempt+1, "err", rerr.Error())
+					attempted = append(attempted, account.ID)
+					metrics.IncFailover(driver.Name())
+					lastDriver, lastAccount, lastBadStatus = driver, account, resp.StatusCode
+					lastErr = fmt.Errorf("upstream HTTP 401 and token refresh failed: %w", rerr)
+					continue
+				}
+				account = refreshed
+				slog.Info("401 recovered by token refresh; retrying same account", "account", account.Name)
+				retryResp, retrySentAt, retryErr := forwarder.Dispatch(c.Request.Context(), &req, driver, account)
+				if retryErr != nil {
+					if tracker != nil {
+						tracker.RecordFailure(account.ID, retryErr)
+					}
+					attempted = append(attempted, account.ID)
+					metrics.IncFailover(driver.Name())
+					lastDriver, lastAccount, lastErr, lastBadStatus = driver, account, retryErr, 0
+					continue
+				}
+				if forward.IsRetriable(retryResp.StatusCode) {
+					// The refreshed retry hit a 5xx/429 — hand it to the
+					// normal failover path instead of committing it.
+					lastBody, _ = io.ReadAll(io.LimitReader(retryResp.Body, 8<<10))
+					_ = retryResp.Body.Close()
+					if tracker != nil {
+						tracker.RecordFailure(account.ID, fmt.Errorf("upstream HTTP %d", retryResp.StatusCode))
+					}
+					attempted = append(attempted, account.ID)
+					metrics.IncFailover(driver.Name())
+					lastDriver, lastAccount, lastBadStatus = driver, account, retryResp.StatusCode
+					lastErr = fmt.Errorf("upstream HTTP %d", retryResp.StatusCode)
+					continue
+				}
+				resp = retryResp
+				sentAt = retrySentAt
 			}
 
 			// Thinking-signature rectifier: when the upstream rejects

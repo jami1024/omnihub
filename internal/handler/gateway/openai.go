@@ -53,6 +53,7 @@ func OpenAIChatCompletionsHandler(
 	limiter *limits.Limiter,
 	blockedIPs *blockedip.Pool,
 	charger BillingCharger,
+	tokens TokenFreshener,
 	settings ...RuntimeSettings,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -99,6 +100,7 @@ func OpenAIChatCompletionsHandler(
 			lastErr       error
 			lastBadStatus int
 			lastBody      []byte
+			authRefreshed bool
 		)
 
 		for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -118,6 +120,20 @@ func OpenAIChatCompletionsHandler(
 				slog.Error("resolver failed", "err", rerr.Error())
 				openaiErrorJSON(c, http.StatusInternalServerError, "internal_error", "resolver failed")
 				return
+			}
+
+			// OAuth-backed accounts: refresh the access token first when
+			// it is inside the expiry window (mirrors the Anthropic
+			// handler; see ensureFreshAccount).
+			if fresh, ferr := ensureFreshAccount(c.Request.Context(), tokens, account); ferr != nil {
+				slog.Warn("token refresh failed; trying next account",
+					"account", account.Name, "attempt", attempt+1, "err", ferr.Error())
+				attempted = append(attempted, account.ID)
+				metrics.IncFailover(driver.Name())
+				lastDriver, lastAccount, lastErr, lastBadStatus = driver, account, ferr, 0
+				continue
+			} else {
+				account = fresh
 			}
 
 			resp, sentAt, derr := forwarder.Dispatch(c.Request.Context(), req, driver, account)
@@ -146,6 +162,50 @@ func OpenAIChatCompletionsHandler(
 				lastDriver, lastAccount, lastBadStatus = driver, account, resp.StatusCode
 				lastErr = fmt.Errorf("upstream HTTP %d", resp.StatusCode)
 				continue
+			}
+
+			// 401 from an OAuth-backed upstream: force one token refresh
+			// and retry the SAME account before failing over (mirrors the
+			// Anthropic handler). api_key accounts commit the 401 as-is.
+			if resp.StatusCode == http.StatusUnauthorized && tokens != nil && account.UsesUpstreamOAuth() && !authRefreshed {
+				authRefreshed = true
+				_ = resp.Body.Close()
+				refreshed, rerr := tokens.ForceRefresh(c.Request.Context(), account.ID)
+				if rerr != nil {
+					slog.Warn("401 force-refresh failed; trying next account",
+						"account", account.Name, "attempt", attempt+1, "err", rerr.Error())
+					attempted = append(attempted, account.ID)
+					metrics.IncFailover(driver.Name())
+					lastDriver, lastAccount, lastBadStatus = driver, account, resp.StatusCode
+					lastErr = fmt.Errorf("upstream HTTP 401 and token refresh failed: %w", rerr)
+					continue
+				}
+				account = refreshed
+				slog.Info("401 recovered by token refresh; retrying same account", "account", account.Name)
+				retryResp, retrySentAt, retryErr := forwarder.Dispatch(c.Request.Context(), req, driver, account)
+				if retryErr != nil {
+					if tracker != nil {
+						tracker.RecordFailure(account.ID, retryErr)
+					}
+					attempted = append(attempted, account.ID)
+					metrics.IncFailover(driver.Name())
+					lastDriver, lastAccount, lastErr, lastBadStatus = driver, account, retryErr, 0
+					continue
+				}
+				if forward.IsRetriable(retryResp.StatusCode) {
+					lastBody, _ = io.ReadAll(io.LimitReader(retryResp.Body, 8<<10))
+					_ = retryResp.Body.Close()
+					if tracker != nil {
+						tracker.RecordFailure(account.ID, fmt.Errorf("upstream HTTP %d", retryResp.StatusCode))
+					}
+					attempted = append(attempted, account.ID)
+					metrics.IncFailover(driver.Name())
+					lastDriver, lastAccount, lastBadStatus = driver, account, retryResp.StatusCode
+					lastErr = fmt.Errorf("upstream HTTP %d", retryResp.StatusCode)
+					continue
+				}
+				resp = retryResp
+				sentAt = retrySentAt
 			}
 
 			// Commit: this response is what the client gets. Matched-pair

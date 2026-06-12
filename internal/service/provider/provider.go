@@ -219,3 +219,31 @@ func (a *Account) Credential(key string) string {
 	}
 	return a.Credentials[key]
 }
+
+// UsesUpstreamOAuth reports whether this account authenticates upstream
+// with a refreshable OAuth token (browser login or imported CLI
+// credentials) rather than a static secret. The TokenManager only
+// touches accounts for which this is true.
+func (a *Account) UsesUpstreamOAuth() bool {
+	if a == nil {
+		return false
+	}
+	return a.AuthType == "oauth" || a.AuthType == "imported_oauth"
+}
+
+// AuthRoutable reports whether the account's auth lifecycle state
+// allows routing requests to it. "" (legacy rows), "ok", "expiring"
+// and "refreshing" are routable — an in-flight or imminent refresh is
+// not a reason to drop traffic. Every other status (refresh_failed,
+// login_required, revoked, quota_exhausted, ...) parks the account
+// until the runtime or an admin recovers it.
+func (a *Account) AuthRoutable() bool {
+	if a == nil {
+		return false
+	}
+	switch a.AuthStatus {
+	case "", "ok", "expiring", "refreshing":
+		return true
+	}
+	return false
+}
