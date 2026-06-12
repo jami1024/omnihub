@@ -18,6 +18,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -110,6 +111,42 @@ func sessionKeyFor(c *gin.Context, virtualKey string, req *ir.UnifiedRequest) st
 	return session.KeyFor(virtualKey, req)
 }
 
+// rate-limit cooldown bounds: a 429 with no usable Retry-After parks
+// the account for the default; an absurdly long upstream value is
+// capped so a clock-skewed header cannot bench an account for hours.
+const (
+	defaultRateLimitCooldown = time.Minute
+	maxRateLimitCooldown     = 30 * time.Minute
+)
+
+// applyRateLimitCooldown parks a 429'd account for as long as the
+// upstream asked: Retry-After (seconds or HTTP-date), falling back to
+// the codex backend's x-codex-primary-reset-after-seconds, falling
+// back to the default. No-op for non-429 statuses.
+func applyRateLimitCooldown(tracker *health.Tracker, accountID int64, resp *http.Response) {
+	if tracker == nil || resp == nil || resp.StatusCode != http.StatusTooManyRequests {
+		return
+	}
+	d := defaultRateLimitCooldown
+	if ra := strings.TrimSpace(resp.Header.Get("Retry-After")); ra != "" {
+		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+			d = time.Duration(secs) * time.Second
+		} else if at, err := http.ParseTime(ra); err == nil {
+			if until := time.Until(at); until > 0 {
+				d = until
+			}
+		}
+	} else if ra := strings.TrimSpace(resp.Header.Get("x-codex-primary-reset-after-seconds")); ra != "" {
+		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+			d = time.Duration(secs) * time.Second
+		}
+	}
+	if d > maxRateLimitCooldown {
+		d = maxRateLimitCooldown
+	}
+	tracker.SetCooldown(accountID, time.Now().Add(d))
+}
+
 // ensureFreshAccount runs the TokenManager gate for one resolved
 // account. Non-OAuth accounts and a nil freshener pass through.
 func ensureFreshAccount(ctx context.Context, tokens TokenFreshener, account *provider.Account) (*provider.Account, error) {
@@ -159,6 +196,7 @@ func AnthropicMessagesHandler(
 	blockedIPs *blockedip.Pool,
 	charger BillingCharger,
 	tokens TokenFreshener,
+	conc *limits.ConcurrencyGuard,
 	settings ...RuntimeSettings,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -257,6 +295,20 @@ func AnthropicMessagesHandler(
 				account = fresh
 			}
 
+			// Per-account concurrency cap: reserve an in-flight slot
+			// before dispatching. The deferred release fires when the
+			// handler returns — on failover a slot is held marginally
+			// longer than its dispatch, but it can never leak.
+			if conc != nil {
+				if !conc.TryAcquire(account.ID, account.MaxConcurrency) {
+					slog.Warn("account at concurrency cap; trying next account",
+						"account", account.Name, "attempt", attempt+1)
+					attempted = append(attempted, account.ID)
+					continue
+				}
+				defer conc.Release(account.ID)
+			}
+
 			resp, sentAt, derr := forwarder.Dispatch(c.Request.Context(), &req, driver, account)
 			if derr != nil {
 				// Transport-level failure: always retriable.
@@ -272,6 +324,7 @@ func AnthropicMessagesHandler(
 			}
 
 			if forward.IsRetriable(resp.StatusCode) {
+				applyRateLimitCooldown(tracker, account.ID, resp)
 				// Capture (cap at 8 KiB) before closing so the retry-
 				// exhaustion record carries the upstream's actual
 				// reply — for 429 that's the precise rate-limit message
@@ -323,6 +376,7 @@ func AnthropicMessagesHandler(
 				if forward.IsRetriable(retryResp.StatusCode) {
 					// The refreshed retry hit a 5xx/429 — hand it to the
 					// normal failover path instead of committing it.
+					applyRateLimitCooldown(tracker, account.ID, retryResp)
 					lastBody, _ = io.ReadAll(io.LimitReader(retryResp.Body, 8<<10))
 					_ = retryResp.Body.Close()
 					if tracker != nil {

@@ -174,6 +174,15 @@ type Account struct {
 	// knobs as opaque JSON.
 	ClientProfile       string
 	ClientProfileConfig map[string]any
+
+	// MaxConcurrency caps simultaneous in-flight requests through this
+	// account. 0 = unlimited. Enforced in-process by the gateway.
+	MaxConcurrency int
+
+	// GroupRoutingPolicy is the owning group's selection policy
+	// ("weighted_random" or "round_robin"); empty for ungrouped
+	// accounts (treated as weighted_random).
+	GroupRoutingPolicy string
 }
 
 // EndpointURLs returns the ordered list of base URLs to try for this

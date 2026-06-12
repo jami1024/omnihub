@@ -28,6 +28,7 @@ type groupDTO struct {
 	Name           string  `json:"name"`
 	CostMultiplier float64 `json:"cost_multiplier"`
 	Description    string  `json:"description"`
+	RoutingPolicy  string  `json:"routing_policy"`
 	AccountCount   int     `json:"account_count"`
 }
 
@@ -37,6 +38,7 @@ func groupToDTO(g repository.ProviderGroup) groupDTO {
 		Name:           g.Name,
 		CostMultiplier: g.CostMultiplier,
 		Description:    g.Description,
+		RoutingPolicy:  g.RoutingPolicy,
 		AccountCount:   g.AccountCount,
 	}
 }
@@ -47,6 +49,21 @@ type groupInput struct {
 	Name           string   `json:"name"`
 	CostMultiplier *float64 `json:"cost_multiplier"`
 	Description    string   `json:"description"`
+	RoutingPolicy  string   `json:"routing_policy"`
+}
+
+// normalizeRoutingPolicy validates the requested routing policy,
+// defaulting empty to weighted_random (mirrors the CHECK constraint in
+// migration 0037). Returns the cleaned value or an error message.
+func normalizeRoutingPolicy(raw string) (string, string) {
+	p := strings.TrimSpace(raw)
+	switch p {
+	case "":
+		return "weighted_random", ""
+	case "weighted_random", "round_robin":
+		return p, ""
+	}
+	return "", "routing_policy must be weighted_random or round_robin"
 }
 
 // ListGroupsHandler returns GET /admin/api/groups → {"groups":[…]}.
@@ -84,10 +101,16 @@ func CreateGroupHandler(store groupStore) gin.HandlerFunc {
 			writeBadRequest(c, "cost_multiplier cannot be negative")
 			return
 		}
+		policy, perr := normalizeRoutingPolicy(in.RoutingPolicy)
+		if perr != "" {
+			writeBadRequest(c, perr)
+			return
+		}
 		id, err := store.Insert(c.Request.Context(), repository.GroupInsertParams{
 			Name:           in.Name,
 			CostMultiplier: mult,
 			Description:    strings.TrimSpace(in.Description),
+			RoutingPolicy:  policy,
 		})
 		if err != nil {
 			if errors.Is(err, repository.ErrGroupNameTaken) {
@@ -131,10 +154,16 @@ func UpdateGroupHandler(store groupStore) gin.HandlerFunc {
 			writeBadRequest(c, "cost_multiplier cannot be negative")
 			return
 		}
+		policy, perr := normalizeRoutingPolicy(in.RoutingPolicy)
+		if perr != "" {
+			writeBadRequest(c, perr)
+			return
+		}
 		err := store.Update(c.Request.Context(), id, repository.GroupUpdateParams{
 			Name:           in.Name,
 			CostMultiplier: mult,
 			Description:    strings.TrimSpace(in.Description),
+			RoutingPolicy:  policy,
 		})
 		if err != nil {
 			switch {

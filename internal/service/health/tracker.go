@@ -113,6 +113,10 @@ type Tracker struct {
 	mu                sync.Mutex
 	states            map[int64]*accountState
 	transitionHandler TransitionHandler
+	// cooldowns holds rate-limit parks (upstream 429 + Retry-After),
+	// separate from circuit state: a cooldown expires exactly when the
+	// upstream said capacity returns, with no half-open trial phase.
+	cooldowns map[int64]time.Time
 }
 
 // accountState is the per-account mutable record. Access is guarded
@@ -139,7 +143,34 @@ func New(cfg Config) *Tracker {
 		defaultConfig: cfg,
 		now:           time.Now,
 		states:        make(map[int64]*accountState),
+		cooldowns:     make(map[int64]time.Time),
 	}
+}
+
+// SetCooldown parks an account until the given time — the 429 path.
+// Unlike a circuit-open, the park lifts exactly at `until` (the
+// upstream told us when capacity returns). A zero/past time clears any
+// existing cooldown.
+func (t *Tracker) SetCooldown(accountID int64, until time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if until.IsZero() || !until.After(t.now()) {
+		delete(t.cooldowns, accountID)
+		return
+	}
+	t.cooldowns[accountID] = until
+}
+
+// CooldownUntil returns the active cooldown deadline for an account,
+// or the zero time when none is in effect.
+func (t *Tracker) CooldownUntil(accountID int64) time.Time {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	until, ok := t.cooldowns[accountID]
+	if !ok || !until.After(t.now()) {
+		return time.Time{}
+	}
+	return until
 }
 
 // SetConfigLookup installs a per-account config resolver. Pass nil to
@@ -195,6 +226,15 @@ func (t *Tracker) configFor(accountID int64) Config {
 // half-open and the call returns true (allowing a trial request).
 func (t *Tracker) IsAvailable(accountID int64) bool {
 	t.mu.Lock()
+
+	// Rate-limit cooldown gates regardless of circuit configuration.
+	if until, ok := t.cooldowns[accountID]; ok {
+		if t.now().Before(until) {
+			t.mu.Unlock()
+			return false
+		}
+		delete(t.cooldowns, accountID)
+	}
 
 	cfg := t.configFor(accountID)
 	if cfg.Disabled() {

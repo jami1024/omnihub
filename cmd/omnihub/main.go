@@ -357,6 +357,9 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	// plus the plugin metadata list the account form's auth picker reads.
 	authed.GET("/auth-plugins", adminhandler.ListAuthPluginsHandler(authPlugins))
 	authed.POST("/accounts/:id/import-credentials", adminhandler.ImportAccountCredentialsHandler(accountRepo, authPlugins))
+	// Phase 6 — subscription quota windows (codex wham/usage, claude
+	// /api/oauth/usage) surfaced per account.
+	authed.GET("/accounts/:id/quota", adminhandler.QuotaAccountByIDHandler(accountRepo, registry))
 
 	// M8b-3 — provider groups: organisational buckets with a shared cost
 	// multiplier. The provider_groups NOTIFY trigger (migration 0018)
@@ -618,6 +621,12 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry, authPlugins 
 		slog.Info("per-account spend caps enabled", "refresh_interval", accountSpendRefreshInterval)
 	}
 
+	// Per-account concurrency caps (max_concurrency, migration 0037):
+	// the guard counts in-flight requests; handlers reserve slots and
+	// the resolver skips saturated accounts.
+	concurrencyGuard := limits.NewConcurrencyGuard()
+	res.SetConcurrencyFilter(concurrencyGuard)
+
 	// Per-account observability gauges: circuit state + measured spend,
 	// read live from the tracker/guard at each /metrics scrape.
 	registerAccountGauges(tracker, accountPool, accountGuard)
@@ -679,7 +688,7 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry, authPlugins 
 		auth.Middleware(),
 		guard.RequestLog(),
 	)
-	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, gatewaySettings))
+	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, concurrencyGuard, gatewaySettings))
 
 	// OpenAI Chat Completions endpoint. OpenAI SDK clients are not Claude
 	// CLI, so the Claude-CLI client gate is intentionally omitted here;
@@ -691,14 +700,14 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry, authPlugins 
 		auth.Middleware(),
 		guard.RequestLog(),
 	)
-	gwOpenAI.POST("/v1/chat/completions", gateway.OpenAIChatCompletionsHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, gatewaySettings))
+	gwOpenAI.POST("/v1/chat/completions", gateway.OpenAIChatCompletionsHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, concurrencyGuard, gatewaySettings))
 
 	// OpenAI Responses endpoint (EXPERIMENTAL): pass-through to Codex
 	// subscription accounts via the openai-codex driver. Same middleware
 	// stack as /v1/chat/completions (Codex CLI is not Claude CLI, so the
 	// Claude UA gate is omitted). /v1/models serves the static codex
 	// model list for Responses-speaking clients.
-	gwOpenAI.POST("/v1/responses", gateway.ResponsesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, gatewaySettings))
+	gwOpenAI.POST("/v1/responses", gateway.ResponsesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, concurrencyGuard, gatewaySettings))
 	gwOpenAI.GET("/v1/models", gateway.ModelsHandler(codex.KnownModels))
 
 	stickyDesc := "off"

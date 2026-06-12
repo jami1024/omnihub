@@ -34,7 +34,7 @@ func newResponsesHandler(t *testing.T, upstreamURL string) gin.HandlerFunc {
 		driver: codex.New(),
 	}
 	return gateway.ResponsesHandler(
-		forward.New(nil), res, nil, nil, pricing.Default(), nil, nil, nil, nil,
+		forward.New(nil), res, nil, nil, pricing.Default(), nil, nil, nil, nil, nil,
 	)
 }
 

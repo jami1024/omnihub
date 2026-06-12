@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"sort"
 	"sync"
 	"time"
 
@@ -57,6 +58,13 @@ type SpendFilter interface {
 	OverLimit(a *provider.Account) bool
 }
 
+// ConcurrencyFilter reports whether an account has no free in-flight
+// slot (max_concurrency reached) and should be skipped during
+// selection. Implemented by limits.ConcurrencyGuard.
+type ConcurrencyFilter interface {
+	AtCap(a *provider.Account) bool
+}
+
 // WeightedResolver implements Resolver with priority + weighted-random
 // selection, health-aware filtering, and session stickiness.
 type WeightedResolver struct {
@@ -65,9 +73,13 @@ type WeightedResolver struct {
 	tracker  *health.Tracker
 	sessions *session.Store
 	spend    SpendFilter
+	conc     ConcurrencyFilter
 
 	mu  sync.Mutex
 	rng *rand.Rand
+	// rrCounters drives round_robin groups: a monotonically increasing
+	// cursor per group id, indexing into the (ID-sorted) top bucket.
+	rrCounters map[int64]uint64
 }
 
 // SetSpendFilter installs an optional per-account spend-cap filter. Nil
@@ -75,6 +87,14 @@ type WeightedResolver struct {
 // chaining.
 func (r *WeightedResolver) SetSpendFilter(f SpendFilter) *WeightedResolver {
 	r.spend = f
+	return r
+}
+
+// SetConcurrencyFilter installs an optional per-account concurrency
+// filter. Nil (the default) disables it. Returns the resolver for
+// chaining.
+func (r *WeightedResolver) SetConcurrencyFilter(f ConcurrencyFilter) *WeightedResolver {
+	r.conc = f
 	return r
 }
 
@@ -88,11 +108,12 @@ func New(
 ) *WeightedResolver {
 	src := rand.NewPCG(rand.Uint64(), rand.Uint64())
 	return &WeightedResolver{
-		pool:     pool,
-		registry: registry,
-		tracker:  tracker,
-		sessions: sessions,
-		rng:      rand.New(src),
+		pool:       pool,
+		registry:   registry,
+		tracker:    tracker,
+		sessions:   sessions,
+		rng:        rand.New(src),
+		rrCounters: make(map[int64]uint64),
 	}
 }
 
@@ -139,7 +160,7 @@ func (r *WeightedResolver) ResolveForProviders(
 	}
 
 	// 3) Weighted random inside the top bucket.
-	chosen := r.weightedPick(top)
+	chosen := r.pick(top)
 	driver, ok := r.registry.Get(chosen.Provider)
 	if !ok {
 		return nil, nil, fmt.Errorf("resolver: account %q references unregistered driver %q",
@@ -197,6 +218,9 @@ func (r *WeightedResolver) resolveSticky(
 		if !a.AuthRoutable() {
 			return nil
 		}
+		if r.conc != nil && r.conc.AtCap(a) {
+			return nil
+		}
 		if len(allowed) == 0 {
 			return a
 		}
@@ -250,9 +274,62 @@ func (r *WeightedResolver) gather(allowed []string, excluded []int64) []*provide
 		if !a.AuthRoutable() {
 			continue
 		}
+		// Saturated accounts (max_concurrency reached) are skipped so
+		// failover attempts are not wasted on them.
+		if r.conc != nil && r.conc.AtCap(a) {
+			continue
+		}
 		out = append(out, a)
 	}
 	return out
+}
+
+// pick selects one account from the top priority bucket according to
+// the bucket's routing policy. round_robin applies only when EVERY
+// candidate belongs to the same group and that group asks for it;
+// any mixed or ungrouped bucket falls back to the historical
+// weighted-random behaviour (predictable and safe under composition).
+func (r *WeightedResolver) pick(accounts []*provider.Account) *provider.Account {
+	if gid, ok := roundRobinGroup(accounts); ok {
+		return r.roundRobinPick(gid, accounts)
+	}
+	return r.weightedPick(accounts)
+}
+
+// roundRobinGroup reports the single group id shared by every account
+// when that group's routing policy is round_robin.
+func roundRobinGroup(accounts []*provider.Account) (int64, bool) {
+	if len(accounts) == 0 {
+		return 0, false
+	}
+	first := accounts[0]
+	if first.GroupID == nil || first.GroupRoutingPolicy != "round_robin" {
+		return 0, false
+	}
+	gid := *first.GroupID
+	for _, a := range accounts[1:] {
+		if a.GroupID == nil || *a.GroupID != gid {
+			return 0, false
+		}
+	}
+	return gid, true
+}
+
+// roundRobinPick cycles through the bucket in stable (account-ID)
+// order using a per-group cursor. The candidate set may shrink and
+// grow between calls (health/cooldown filtering); indexing the sorted
+// remainder keeps the rotation fair regardless.
+func (r *WeightedResolver) roundRobinPick(groupID int64, accounts []*provider.Account) *provider.Account {
+	sorted := make([]*provider.Account, len(accounts))
+	copy(sorted, accounts)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
+
+	r.mu.Lock()
+	cursor := r.rrCounters[groupID]
+	r.rrCounters[groupID] = cursor + 1
+	r.mu.Unlock()
+
+	return sorted[cursor%uint64(len(sorted))]
 }
 
 // weightedPick chooses one account proportional to Weight. A weight

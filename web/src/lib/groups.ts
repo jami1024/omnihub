@@ -8,6 +8,7 @@ export interface ProviderGroup {
   name: string
   cost_multiplier: number
   description: string
+  routing_policy: string
   account_count: number
 }
 
@@ -15,6 +16,7 @@ export interface GroupInput {
   name: string
   cost_multiplier: number
   description: string
+  routing_policy: string
 }
 
 const GROUPS_KEY = ['groups'] as const

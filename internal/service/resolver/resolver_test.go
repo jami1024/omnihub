@@ -300,3 +300,76 @@ func TestStickyNotBoundWhenExcludedIsNonEmpty(t *testing.T) {
 		t.Error("retry-fallback path should not establish a sticky binding")
 	}
 }
+
+func TestRoundRobinGroupPolicy(t *testing.T) {
+	gid := int64(5)
+	mk := func(id int64) *provider.Account {
+		return &provider.Account{
+			ID: id, Name: "rr", Provider: "anthropic", Weight: 100,
+			GroupID: &gid, GroupRoutingPolicy: "round_robin",
+		}
+	}
+	pool := newTestPool(t, mk(1), mk(2), mk(3))
+	res := resolver.New(pool, newTestRegistry(t, "anthropic"), nil, nil)
+
+	var order []int64
+	for i := 0; i < 6; i++ {
+		a, _, err := res.ResolveForProviders("", nil, nil)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		order = append(order, a.ID)
+	}
+	want := []int64{1, 2, 3, 1, 2, 3}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("round robin order: got %v want %v", order, want)
+		}
+	}
+}
+
+func TestRoundRobinSkipsFilteredAccounts(t *testing.T) {
+	gid := int64(5)
+	mk := func(id int64) *provider.Account {
+		return &provider.Account{
+			ID: id, Name: "rr", Provider: "anthropic", Weight: 100,
+			GroupID: &gid, GroupRoutingPolicy: "round_robin",
+		}
+	}
+	pool := newTestPool(t, mk(1), mk(2))
+	res := resolver.New(pool, newTestRegistry(t, "anthropic"), nil, nil)
+
+	// Exclude account 1 (already attempted): the rotation indexes the
+	// remaining candidate set, so every pick lands on 2.
+	for i := 0; i < 3; i++ {
+		a, _, err := res.ResolveForProviders("", nil, []int64{1})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if a.ID != 2 {
+			t.Fatalf("pick %d: got %d want 2", i, a.ID)
+		}
+	}
+}
+
+type capAllFilter struct{ capped map[int64]bool }
+
+func (f *capAllFilter) AtCap(a *provider.Account) bool { return f.capped[a.ID] }
+
+func TestConcurrencyFilterSkipsSaturated(t *testing.T) {
+	a1 := &provider.Account{ID: 1, Name: "a1", Provider: "anthropic", Weight: 100}
+	a2 := &provider.Account{ID: 2, Name: "a2", Provider: "anthropic", Weight: 100}
+	pool := newTestPool(t, a1, a2)
+	res := resolver.New(pool, newTestRegistry(t, "anthropic"), nil, nil)
+	res.SetConcurrencyFilter(&capAllFilter{capped: map[int64]bool{1: true}})
+
+	for i := 0; i < 5; i++ {
+		a, _, err := res.ResolveForProviders("", nil, nil)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if a.ID != 2 {
+			t.Fatalf("saturated account selected: %d", a.ID)
+		}
+	}
+}

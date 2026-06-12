@@ -68,6 +68,7 @@ export function AccountForm({
   const [provider, setProvider] = useState(account?.provider ?? '')
   const [enabled, setEnabled] = useState(account?.enabled ?? true)
   const [weight, setWeight] = useState(String(account?.weight ?? 100))
+  const [maxConcurrency, setMaxConcurrency] = useState(String(account?.max_concurrency ?? 0))
   const [priority, setPriority] = useState(String(account?.priority ?? 0))
   const [costMultiplier, setCostMultiplier] = useState(
     String(account?.cost_multiplier ?? 1),
@@ -302,6 +303,7 @@ export function AccountForm({
       active_timezone: timezone.trim(),
       auth_type: authType,
       auth_plugin: isImportedOAuth ? authPlugin.trim() : '',
+      max_concurrency: Math.max(0, parseIntOr(maxConcurrency, 0)),
       // client_profile has no form controls yet: echo the stored values
       // so the PUT-style update keeps them.
       client_profile: account?.client_profile ?? '',
@@ -462,6 +464,16 @@ export function AccountForm({
           />
         </Field>
       </div>
+
+      <Field label={t('accountForm.maxConcurrency')} help={t('accountForm.maxConcurrencyHelp')}>
+        <input
+          className={FIELD}
+          type="number"
+          min="0"
+          value={maxConcurrency}
+          onChange={(e) => setMaxConcurrency(e.target.value)}
+        />
+      </Field>
 
       <div className="grid grid-cols-2 gap-4">
         <Field label={t('accountForm.groupOptional')} help={t('accountForm.groupHelp')}>

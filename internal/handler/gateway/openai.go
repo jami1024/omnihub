@@ -53,6 +53,7 @@ func OpenAIChatCompletionsHandler(
 	blockedIPs *blockedip.Pool,
 	charger BillingCharger,
 	tokens TokenFreshener,
+	conc *limits.ConcurrencyGuard,
 	settings ...RuntimeSettings,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -135,6 +136,17 @@ func OpenAIChatCompletionsHandler(
 				account = fresh
 			}
 
+			// Per-account concurrency cap (see AnthropicMessagesHandler).
+			if conc != nil {
+				if !conc.TryAcquire(account.ID, account.MaxConcurrency) {
+					slog.Warn("account at concurrency cap; trying next account",
+						"account", account.Name, "attempt", attempt+1)
+					attempted = append(attempted, account.ID)
+					continue
+				}
+				defer conc.Release(account.ID)
+			}
+
 			resp, sentAt, derr := forwarder.Dispatch(c.Request.Context(), req, driver, account)
 			if derr != nil {
 				if tracker != nil {
@@ -149,6 +161,7 @@ func OpenAIChatCompletionsHandler(
 			}
 
 			if forward.IsRetriable(resp.StatusCode) {
+				applyRateLimitCooldown(tracker, account.ID, resp)
 				lastBody, _ = io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 				_ = resp.Body.Close()
 				if tracker != nil {
@@ -192,6 +205,7 @@ func OpenAIChatCompletionsHandler(
 					continue
 				}
 				if forward.IsRetriable(retryResp.StatusCode) {
+					applyRateLimitCooldown(tracker, account.ID, retryResp)
 					lastBody, _ = io.ReadAll(io.LimitReader(retryResp.Body, 8<<10))
 					_ = retryResp.Body.Close()
 					if tracker != nil {

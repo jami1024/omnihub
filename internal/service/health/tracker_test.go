@@ -278,3 +278,39 @@ func TestConcurrentRecording(t *testing.T) {
 	// No deadlock or race — that's the test. If `-race` is on, the
 	// detector will surface any unguarded access.
 }
+
+func TestRateLimitCooldown(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(1_700_000_000, 0)}
+	tr := New(DefaultConfig())
+	tr.now = clock.Now
+
+	tr.SetCooldown(7, clock.Now().Add(90*time.Second))
+	if tr.IsAvailable(7) {
+		t.Fatal("cooled-down account must be unavailable")
+	}
+	if until := tr.CooldownUntil(7); until.IsZero() {
+		t.Fatal("CooldownUntil should report the active deadline")
+	}
+
+	clock.Advance(91 * time.Second)
+	if !tr.IsAvailable(7) {
+		t.Fatal("cooldown must lift exactly after the deadline")
+	}
+	if until := tr.CooldownUntil(7); !until.IsZero() {
+		t.Fatalf("expired cooldown should read as zero, got %v", until)
+	}
+
+	// Cooldown is independent of circuit state: a healthy account with
+	// no failures still parks.
+	tr.SetCooldown(8, clock.Now().Add(time.Minute))
+	tr.RecordSuccess(8)
+	if tr.IsAvailable(8) {
+		t.Fatal("success recording must not lift a rate-limit cooldown")
+	}
+
+	// Clearing via zero time.
+	tr.SetCooldown(8, time.Time{})
+	if !tr.IsAvailable(8) {
+		t.Fatal("zero-time SetCooldown should clear the park")
+	}
+}

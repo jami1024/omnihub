@@ -17,6 +17,7 @@ type ProviderGroup struct {
 	Name           string
 	CostMultiplier float64
 	Description    string
+	RoutingPolicy  string // weighted_random (default) | round_robin
 	AccountCount   int
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -43,7 +44,7 @@ func NewProviderGroupRepo(pool *pgxpool.Pool) *ProviderGroupRepo {
 func (r *ProviderGroupRepo) List(ctx context.Context) ([]ProviderGroup, error) {
 	const q = `
         SELECT g.id, g.name, g.cost_multiplier, g.description,
-               COUNT(a.id), g.created_at, g.updated_at
+               g.routing_policy, COUNT(a.id), g.created_at, g.updated_at
           FROM provider_groups g
           LEFT JOIN accounts a ON a.group_id = g.id
          GROUP BY g.id
@@ -58,7 +59,7 @@ func (r *ProviderGroupRepo) List(ctx context.Context) ([]ProviderGroup, error) {
 	for rows.Next() {
 		var g ProviderGroup
 		if err := rows.Scan(&g.ID, &g.Name, &g.CostMultiplier, &g.Description,
-			&g.AccountCount, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			&g.RoutingPolicy, &g.AccountCount, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan provider group: %w", err)
 		}
 		out = append(out, g)
@@ -70,14 +71,14 @@ func (r *ProviderGroupRepo) List(ctx context.Context) ([]ProviderGroup, error) {
 func (r *ProviderGroupRepo) GetByID(ctx context.Context, id int64) (*ProviderGroup, error) {
 	const q = `
         SELECT g.id, g.name, g.cost_multiplier, g.description,
-               COUNT(a.id), g.created_at, g.updated_at
+               g.routing_policy, COUNT(a.id), g.created_at, g.updated_at
           FROM provider_groups g
           LEFT JOIN accounts a ON a.group_id = g.id
          WHERE g.id = $1
          GROUP BY g.id`
 	var g ProviderGroup
 	err := r.pool.QueryRow(ctx, q, id).Scan(&g.ID, &g.Name, &g.CostMultiplier,
-		&g.Description, &g.AccountCount, &g.CreatedAt, &g.UpdatedAt)
+		&g.Description, &g.RoutingPolicy, &g.AccountCount, &g.CreatedAt, &g.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrGroupNotFound
@@ -92,17 +93,18 @@ type GroupInsertParams struct {
 	Name           string
 	CostMultiplier float64
 	Description    string
+	RoutingPolicy  string // "" defaults to weighted_random in SQL
 }
 
 // Insert creates a group and returns its id. Duplicate names are
 // mapped to ErrGroupNameTaken.
 func (r *ProviderGroupRepo) Insert(ctx context.Context, p GroupInsertParams) (int64, error) {
 	const q = `
-        INSERT INTO provider_groups (name, cost_multiplier, description)
-        VALUES ($1, $2, $3)
+        INSERT INTO provider_groups (name, cost_multiplier, description, routing_policy)
+        VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'weighted_random'))
         RETURNING id`
 	var id int64
-	err := r.pool.QueryRow(ctx, q, p.Name, p.CostMultiplier, p.Description).Scan(&id)
+	err := r.pool.QueryRow(ctx, q, p.Name, p.CostMultiplier, p.Description, p.RoutingPolicy).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return 0, ErrGroupNameTaken
@@ -117,15 +119,17 @@ type GroupUpdateParams struct {
 	Name           string
 	CostMultiplier float64
 	Description    string
+	RoutingPolicy  string // "" defaults to weighted_random in SQL
 }
 
 // Update replaces the mutable columns of the group identified by id.
 func (r *ProviderGroupRepo) Update(ctx context.Context, id int64, p GroupUpdateParams) error {
 	const q = `
         UPDATE provider_groups
-           SET name = $1, cost_multiplier = $2, description = $3, updated_at = NOW()
-         WHERE id = $4`
-	tag, err := r.pool.Exec(ctx, q, p.Name, p.CostMultiplier, p.Description, id)
+           SET name = $1, cost_multiplier = $2, description = $3,
+               routing_policy = COALESCE(NULLIF($4, ''), 'weighted_random'), updated_at = NOW()
+         WHERE id = $5`
+	tag, err := r.pool.Exec(ctx, q, p.Name, p.CostMultiplier, p.Description, p.RoutingPolicy, id)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return ErrGroupNameTaken

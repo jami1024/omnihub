@@ -7,6 +7,7 @@ import { AccountForm, type ImportRequest } from '../components/AccountForm'
 import { ApiError } from '../lib/api'
 import { useI18n } from '../lib/i18n'
 import {
+  useAccountQuota,
   useAccounts,
   useCreateAccount,
   useDeleteAccount,
@@ -167,6 +168,7 @@ export function AccountsPage() {
                     </Td>
                     <Td className="text-right">
                       <RowTest id={a.id} />
+                      {a.auth_type !== 'api_key' && <RowQuota id={a.id} />}
                       <button
                         onClick={() => openEdit(a)}
                         className="mr-1 inline-flex min-h-10 items-center rounded-md px-2 text-muted underline-offset-4 hover:bg-surface-2 hover:text-ink hover:underline sm:mr-3 sm:px-1"
@@ -280,6 +282,40 @@ function AuthCell({ account: a }: { account: Account }) {
       <span className="font-mono text-xs text-muted">{a.auth_type}</span>
       {degraded && <span className="font-mono text-xs text-danger">{a.auth_status}</span>}
     </span>
+  )
+}
+
+// RowQuota queries a subscription account's remaining quota windows
+// on demand and shows them inline ("5h 32% · 7d 61%"); the raw upstream
+// payload lands in the hover title for shapes the server couldn't
+// normalise.
+function RowQuota({ id }: { id: number }) {
+  const { t } = useI18n()
+  const quota = useAccountQuota()
+  const windows = quota.data?.windows ?? []
+  let label = t('accounts.quota')
+  if (quota.isPending) label = t('accounts.quotaLoading')
+  else if (windows.length > 0) {
+    label = windows.map((w) => `${w.label} ${Math.round(w.used_percent)}%`).join(' · ')
+  } else if (quota.data) {
+    label = t('accounts.quotaRawOnly')
+  }
+  const title = quota.error
+    ? quota.error instanceof ApiError
+      ? quota.error.message
+      : t('accounts.quotaFailed')
+    : quota.data?.raw
+      ? JSON.stringify(quota.data.raw).slice(0, 500)
+      : t('accounts.quotaHint')
+  return (
+    <button
+      onClick={() => quota.mutate(id)}
+      disabled={quota.isPending}
+      title={title}
+      className={`mr-3 inline-flex items-center underline-offset-4 hover:underline disabled:opacity-50 ${quota.error ? 'text-danger' : 'text-muted hover:text-ink'}`}
+    >
+      {label}
+    </button>
   )
 }
 

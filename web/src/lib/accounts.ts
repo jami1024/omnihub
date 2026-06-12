@@ -78,6 +78,8 @@ export interface Account {
   refresh_error: string
   client_profile: string
   client_profile_config: Record<string, unknown>
+  // In-flight request cap (0 = unlimited; enforced in-process).
+  max_concurrency: number
 }
 
 // AccountInput is the create/update body. On create, credentials is
@@ -114,6 +116,7 @@ export interface AccountInput {
   auth_plugin: string
   client_profile: string
   client_profile_config: Record<string, unknown>
+  max_concurrency: number
 }
 
 const ACCOUNTS_KEY = ['accounts'] as const
@@ -173,6 +176,28 @@ export function useDeleteAccount() {
   return useMutation({
     mutationFn: (id: number) => api<void>(`/accounts/${id}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
+  })
+}
+
+// QuotaWindow / QuotaInfo mirror the server's provider.QuotaInfo: the
+// subscription account's rolling usage windows plus the raw upstream
+// payload for providers without a stable schema.
+export interface QuotaWindow {
+  label: string
+  used_percent: number
+  resets_at?: string
+}
+
+export interface QuotaInfo {
+  windows: QuotaWindow[] | null
+  raw?: unknown
+}
+
+// useAccountQuota queries an account's remaining subscription quota
+// through its driver (codex / claude subscription accounts).
+export function useAccountQuota() {
+  return useMutation({
+    mutationFn: (id: number) => api<QuotaInfo>(`/accounts/${id}/quota`),
   })
 }
 

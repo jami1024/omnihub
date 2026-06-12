@@ -71,7 +71,8 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
                a.auth_type, COALESCE(a.auth_plugin, ''), a.auth_status,
                COALESCE(a.auth_subject, ''), COALESCE(a.auth_email, ''), COALESCE(a.auth_plan, ''),
                a.auth_expires_at, a.last_refresh_at, COALESCE(a.refresh_error, ''),
-               COALESCE(a.client_profile, ''), a.client_profile_config
+               COALESCE(a.client_profile, ''), a.client_profile_config,
+               a.max_concurrency, COALESCE(g.routing_policy, '')
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.enabled = TRUE
@@ -109,7 +110,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			&a.GroupID, &a.GroupName, &groupMultiplier,
 			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone, &a.ForwardClientIP,
 			&a.AuthType, &a.AuthPlugin, &a.AuthStatus, &a.AuthSubject, &a.AuthEmail, &a.AuthPlan,
-			&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw,
+			&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw, &a.MaxConcurrency, &a.GroupRoutingPolicy,
 		); err != nil {
 			return nil, fmt.Errorf("scan account row: %w", err)
 		}
@@ -439,6 +440,10 @@ type InsertParams struct {
 	AuthPlugin          string
 	ClientProfile       string
 	ClientProfileConfig map[string]any
+
+	// MaxConcurrency caps in-flight requests through the account
+	// (migration 0037). 0 = unlimited.
+	MaxConcurrency int
 }
 
 // marshalRedirects encodes a redirect rule set for the model_redirects
@@ -466,7 +471,8 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
                a.auth_type, COALESCE(a.auth_plugin, ''), a.auth_status,
                COALESCE(a.auth_subject, ''), COALESCE(a.auth_email, ''), COALESCE(a.auth_plan, ''),
                a.auth_expires_at, a.last_refresh_at, COALESCE(a.refresh_error, ''),
-               COALESCE(a.client_profile, ''), a.client_profile_config
+               COALESCE(a.client_profile, ''), a.client_profile_config,
+               a.max_concurrency, COALESCE(g.routing_policy, '')
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          ORDER BY a.id ASC`
@@ -507,7 +513,7 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			&a.GroupID, &a.GroupName, &groupMultiplier,
 			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone, &a.ForwardClientIP,
 			&a.AuthType, &a.AuthPlugin, &a.AuthStatus, &a.AuthSubject, &a.AuthEmail, &a.AuthPlan,
-			&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw,
+			&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw, &a.MaxConcurrency, &a.GroupRoutingPolicy,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan account row: %w", err)
 		}
@@ -743,10 +749,12 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
             model_redirects, daily_usd_limit, total_usd_limit, group_id, custom_headers, endpoints,
             health_probe_enabled, proxy_url, param_overrides, active_windows, active_timezone,
             forward_client_ip,
-            auth_type, auth_plugin, client_profile, client_profile_config
+            auth_type, auth_plugin, client_profile, client_profile_config,
+            max_concurrency
         )
         VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NULLIF($19, ''), $20, $21, NULLIF($22, ''), $23,
-                COALESCE(NULLIF($24, ''), 'api_key'), NULLIF($25, ''), NULLIF($26, ''), $27)
+                COALESCE(NULLIF($24, ''), 'api_key'), NULLIF($25, ''), NULLIF($26, ''), $27,
+                $28)
         RETURNING id`
 
 	var id int64
@@ -757,6 +765,7 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
 		p.HealthProbeEnabled, proxyEnc, paramsJSON, windowsJSON, p.ActiveTimezone, p.ForwardClientIP,
 		p.AuthType, p.AuthPlugin, p.ClientProfile, profileConfigJSON,
+		p.MaxConcurrency,
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -785,7 +794,8 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
                a.auth_type, COALESCE(a.auth_plugin, ''), a.auth_status,
                COALESCE(a.auth_subject, ''), COALESCE(a.auth_email, ''), COALESCE(a.auth_plan, ''),
                a.auth_expires_at, a.last_refresh_at, COALESCE(a.refresh_error, ''),
-               COALESCE(a.client_profile, ''), a.client_profile_config
+               COALESCE(a.client_profile, ''), a.client_profile_config,
+               a.max_concurrency, COALESCE(g.routing_policy, '')
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.id = $1`
@@ -815,7 +825,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		&a.GroupID, &a.GroupName, &groupMultiplier,
 		&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone, &a.ForwardClientIP,
 		&a.AuthType, &a.AuthPlugin, &a.AuthStatus, &a.AuthSubject, &a.AuthEmail, &a.AuthPlan,
-		&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw,
+		&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw, &a.MaxConcurrency, &a.GroupRoutingPolicy,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -876,6 +886,10 @@ type UpdateParams struct {
 	AuthPlugin          string
 	ClientProfile       string
 	ClientProfileConfig map[string]any
+
+	// MaxConcurrency caps in-flight requests through the account
+	// (migration 0037). 0 = unlimited.
+	MaxConcurrency int
 }
 
 // Update replaces the mutable columns of the account identified by id.
@@ -950,8 +964,9 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
             forward_client_ip = $23,
             auth_type = COALESCE(NULLIF($24, ''), 'api_key'), auth_plugin = NULLIF($25, ''),
             client_profile = NULLIF($26, ''), client_profile_config = $27,
+            max_concurrency = $28,
             updated_at = NOW()
-         WHERE id = $28`
+         WHERE id = $29`
 
 	tag, err := r.pool.Exec(ctx, q,
 		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
@@ -960,6 +975,7 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
 		p.HealthProbeEnabled, proxyEnc, paramsJSON, windowsJSON, p.ActiveTimezone, p.ForwardClientIP,
 		p.AuthType, p.AuthPlugin, p.ClientProfile, profileConfigJSON,
+		p.MaxConcurrency,
 		id,
 	)
 	if err != nil {

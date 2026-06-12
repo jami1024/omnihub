@@ -46,7 +46,7 @@ func newOpenAIHandler(t *testing.T, upstreamURL string, resErr error) gin.Handle
 		err:    resErr,
 	}
 	return gateway.OpenAIChatCompletionsHandler(
-		forward.New(nil), res, nil, nil, pricing.Default(), nil, nil, nil, nil,
+		forward.New(nil), res, nil, nil, pricing.Default(), nil, nil, nil, nil, nil,
 	)
 }
 

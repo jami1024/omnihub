@@ -75,6 +75,10 @@ type accountDTO struct {
 	RefreshError        string         `json:"refresh_error"`
 	ClientProfile       string         `json:"client_profile"`
 	ClientProfileConfig map[string]any `json:"client_profile_config"`
+
+	// MaxConcurrency caps in-flight requests through the account
+	// (0 = unlimited; enforced in-process).
+	MaxConcurrency int `json:"max_concurrency"`
 }
 
 // toDTO projects a provider.Account (+ its enabled flag) onto the
@@ -148,6 +152,7 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		RefreshError:            a.RefreshError,
 		ClientProfile:           a.ClientProfile,
 		ClientProfileConfig:     profileConfig,
+		MaxConcurrency:          a.MaxConcurrency,
 	}
 }
 
@@ -340,6 +345,8 @@ type accountInput struct {
 	AuthPlugin          string         `json:"auth_plugin"`
 	ClientProfile       string         `json:"client_profile"`
 	ClientProfileConfig map[string]any `json:"client_profile_config"`
+
+	MaxConcurrency int `json:"max_concurrency"`
 }
 
 // circuitDuration converts the millisecond wire value into the
@@ -387,6 +394,10 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 		authType, aerr := normalizeAuthType(in.AuthType)
 		if aerr != "" {
 			writeBadRequest(c, aerr)
+			return
+		}
+		if in.MaxConcurrency < 0 {
+			writeBadRequest(c, "max_concurrency cannot be negative (0 = unlimited)")
 			return
 		}
 		// api_key accounts must ship a secret at create time. oauth /
@@ -454,6 +465,7 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			AuthPlugin:              strings.TrimSpace(in.AuthPlugin),
 			ClientProfile:           strings.TrimSpace(in.ClientProfile),
 			ClientProfileConfig:     in.ClientProfileConfig,
+			MaxConcurrency:          in.MaxConcurrency,
 		}
 
 		id, err := store.Insert(c.Request.Context(), params)
@@ -510,6 +522,10 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 		authType, aerr := normalizeAuthType(in.AuthType)
 		if aerr != "" {
 			writeBadRequest(c, aerr)
+			return
+		}
+		if in.MaxConcurrency < 0 {
+			writeBadRequest(c, "max_concurrency cannot be negative (0 = unlimited)")
 			return
 		}
 		redirects, rerr := sanitizeRedirects(in.ModelRedirects)
@@ -569,6 +585,7 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			AuthPlugin:              strings.TrimSpace(in.AuthPlugin),
 			ClientProfile:           strings.TrimSpace(in.ClientProfile),
 			ClientProfileConfig:     in.ClientProfileConfig,
+			MaxConcurrency:          in.MaxConcurrency,
 		}
 
 		if err := store.Update(c.Request.Context(), id, params); err != nil {

@@ -98,6 +98,7 @@ export function GroupsPage() {
                 <tr>
                   <Th>{t('common.name')}</Th>
                   <Th className="text-right">{t('groups.colCost')}</Th>
+                  <Th>{t('groups.colRouting')}</Th>
                   <Th className="text-right">{t('groups.colAccounts')}</Th>
                   <Th>{t('groups.colDescription')}</Th>
                   <Th className="text-right">{t('common.actions')}</Th>
@@ -108,6 +109,9 @@ export function GroupsPage() {
                   <tr key={g.id} className="transition-colors hover:bg-surface-2">
                     <Td className="font-medium">{g.name}</Td>
                     <Td className="text-right tabular-nums">{g.cost_multiplier}</Td>
+                    <Td className="text-muted">
+                      {g.routing_policy === 'round_robin' ? t('groups.policyRoundRobin') : t('groups.policyWeightedRandom')}
+                    </Td>
                     <Td className="text-right tabular-nums">{g.account_count}</Td>
                     <Td className="text-muted">{g.description || '—'}</Td>
                     <Td className="text-right">
@@ -173,6 +177,7 @@ function GroupForm({
   const [name, setName] = useState(group?.name ?? '')
   const [mult, setMult] = useState(String(group?.cost_multiplier ?? 1))
   const [description, setDescription] = useState(group?.description ?? '')
+  const [routingPolicy, setRoutingPolicy] = useState(group?.routing_policy || 'weighted_random')
   const [localErr, setLocalErr] = useState<string | null>(null)
 
   function handleSubmit(e: React.FormEvent) {
@@ -187,7 +192,12 @@ function GroupForm({
       setLocalErr(t('groups.multiplierInvalid'))
       return
     }
-    onSubmit({ name: name.trim(), cost_multiplier: m, description: description.trim() })
+    onSubmit({
+      name: name.trim(),
+      cost_multiplier: m,
+      description: description.trim(),
+      routing_policy: routingPolicy,
+    })
   }
 
   return (
@@ -206,6 +216,13 @@ function GroupForm({
           value={mult}
           onChange={(e) => setMult(e.target.value)}
         />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-sm text-muted">{t('groups.routingPolicy')}</span>
+        <select className={FIELD} value={routingPolicy} onChange={(e) => setRoutingPolicy(e.target.value)}>
+          <option value="weighted_random">{t('groups.policyWeightedRandom')}</option>
+          <option value="round_robin">{t('groups.policyRoundRobin')}</option>
+        </select>
       </label>
       <label className="block space-y-1">
         <span className="text-sm text-muted">{t('groups.descriptionOptional')}</span>
