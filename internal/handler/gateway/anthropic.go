@@ -119,32 +119,122 @@ const (
 	maxRateLimitCooldown     = 30 * time.Minute
 )
 
-// applyRateLimitCooldown parks a 429'd account for as long as the
-// upstream asked: Retry-After (seconds or HTTP-date), falling back to
-// the codex backend's x-codex-primary-reset-after-seconds, falling
-// back to the default. No-op for non-429 statuses.
-func applyRateLimitCooldown(tracker *health.Tracker, accountID int64, resp *http.Response) {
+// applyRateLimitCooldown parks a 429'd account until the upstream says
+// capacity returns. The reset signal is taken from the first source
+// that yields a usable value (see rateLimitCooldown): the standard
+// Retry-After header, Anthropic's OAuth ratelimit-reset headers, the
+// codex backend's reset-after header, or a reset hint in the error
+// body. body may be nil (header-only). No-op for non-429 statuses.
+func applyRateLimitCooldown(tracker *health.Tracker, accountID int64, resp *http.Response, body []byte) {
 	if tracker == nil || resp == nil || resp.StatusCode != http.StatusTooManyRequests {
 		return
 	}
-	d := defaultRateLimitCooldown
-	if ra := strings.TrimSpace(resp.Header.Get("Retry-After")); ra != "" {
-		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
-			d = time.Duration(secs) * time.Second
-		} else if at, err := http.ParseTime(ra); err == nil {
-			if until := time.Until(at); until > 0 {
-				d = until
-			}
-		}
-	} else if ra := strings.TrimSpace(resp.Header.Get("x-codex-primary-reset-after-seconds")); ra != "" {
-		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
-			d = time.Duration(secs) * time.Second
-		}
+	d, ok := rateLimitCooldown(resp.Header, body)
+	if !ok || d < time.Second {
+		d = defaultRateLimitCooldown
 	}
 	if d > maxRateLimitCooldown {
 		d = maxRateLimitCooldown
 	}
 	tracker.SetCooldown(accountID, time.Now().Add(d))
+}
+
+// rateLimitCooldown derives how long to park a rate-limited account
+// from the upstream's reset signals, in priority order. Returns
+// (0, false) when no source yields a positive future reset.
+func rateLimitCooldown(h http.Header, body []byte) (time.Duration, bool) {
+	// 1) Retry-After: relative seconds or an HTTP-date. The most
+	//    explicit and standard signal, so it wins.
+	if ra := strings.TrimSpace(h.Get("Retry-After")); ra != "" {
+		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second, true
+		}
+		if at, err := http.ParseTime(ra); err == nil {
+			if until := time.Until(at); until > 0 {
+				return until, true
+			}
+		}
+	}
+	// 2) Anthropic OAuth ratelimit-reset headers (absolute time —
+	//    RFC3339 or unix seconds). Prefer the unified field; otherwise
+	//    take the SOONEST window reset so the account is not benched
+	//    longer than necessary (a later 429 re-parks it).
+	if d, ok := parseAbsReset(h.Get("anthropic-ratelimit-unified-reset")); ok {
+		return d, true
+	}
+	var best time.Duration
+	found := false
+	for _, k := range []string{"anthropic-ratelimit-unified-5h-reset", "anthropic-ratelimit-unified-7d-reset"} {
+		if d, ok := parseAbsReset(h.Get(k)); ok && (!found || d < best) {
+			best, found = d, true
+		}
+	}
+	if found {
+		return best, true
+	}
+	// 3) Codex backend reset-after header (relative seconds).
+	if ra := strings.TrimSpace(h.Get("x-codex-primary-reset-after-seconds")); ra != "" {
+		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second, true
+		}
+	}
+	// 4) Reset hint in the error body (codex usage_limit_reached /
+	//    claude rate-limit errors carry resets_in_seconds / resets_at).
+	return rateLimitBodyReset(body)
+}
+
+// parseAbsReset parses an absolute reset timestamp — RFC3339 or unix
+// seconds — into the remaining duration until it. Returns (0, false)
+// for empty, unparseable, or already-elapsed values.
+func parseAbsReset(s string) (time.Duration, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "null" {
+		return 0, false
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		if until := time.Until(t); until > 0 {
+			return until, true
+		}
+		return 0, false
+	}
+	if sec, err := strconv.ParseInt(s, 10, 64); err == nil && sec > 0 {
+		if until := time.Until(time.Unix(sec, 0)); until > 0 {
+			return until, true
+		}
+	}
+	return 0, false
+}
+
+// rateLimitBodyReset extracts a reset hint from a (truncated) error
+// body. Handles both the top-level and error-nested shapes used by the
+// codex (usage_limit_reached) and claude rate-limit responses:
+// resets_in_seconds (relative) or resets_at (absolute unix / RFC3339).
+func rateLimitBodyReset(body []byte) (time.Duration, bool) {
+	if len(body) == 0 {
+		return 0, false
+	}
+	var p struct {
+		ResetsInSeconds *int64          `json:"resets_in_seconds"`
+		ResetsAt        json.RawMessage `json:"resets_at"`
+		Error           struct {
+			ResetsInSeconds *int64          `json:"resets_in_seconds"`
+			ResetsAt        json.RawMessage `json:"resets_at"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &p) != nil {
+		return 0, false
+	}
+	for _, s := range []*int64{p.ResetsInSeconds, p.Error.ResetsInSeconds} {
+		if s != nil && *s > 0 {
+			return time.Duration(*s) * time.Second, true
+		}
+	}
+	for _, raw := range []json.RawMessage{p.ResetsAt, p.Error.ResetsAt} {
+		if d, ok := parseAbsReset(strings.Trim(string(raw), `"`)); ok {
+			return d, true
+		}
+	}
+	return 0, false
 }
 
 // ensureFreshAccount runs the TokenManager gate for one resolved
@@ -324,13 +414,14 @@ func AnthropicMessagesHandler(
 			}
 
 			if forward.IsRetriable(resp.StatusCode) {
-				applyRateLimitCooldown(tracker, account.ID, resp)
 				// Capture (cap at 8 KiB) before closing so the retry-
 				// exhaustion record carries the upstream's actual
 				// reply — for 429 that's the precise rate-limit message
-				// and remaining-tokens info, otherwise invisible.
+				// and remaining-tokens info, otherwise invisible. The
+				// same body feeds the cooldown's reset-hint parsing.
 				lastBody, _ = io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 				_ = resp.Body.Close()
+				applyRateLimitCooldown(tracker, account.ID, resp, lastBody)
 				if tracker != nil {
 					tracker.RecordFailure(account.ID, fmt.Errorf("upstream HTTP %d", resp.StatusCode))
 				}
@@ -376,9 +467,9 @@ func AnthropicMessagesHandler(
 				if forward.IsRetriable(retryResp.StatusCode) {
 					// The refreshed retry hit a 5xx/429 — hand it to the
 					// normal failover path instead of committing it.
-					applyRateLimitCooldown(tracker, account.ID, retryResp)
 					lastBody, _ = io.ReadAll(io.LimitReader(retryResp.Body, 8<<10))
 					_ = retryResp.Body.Close()
+					applyRateLimitCooldown(tracker, account.ID, retryResp, lastBody)
 					if tracker != nil {
 						tracker.RecordFailure(account.ID, fmt.Errorf("upstream HTTP %d", retryResp.StatusCode))
 					}

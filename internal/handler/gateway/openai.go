@@ -161,9 +161,9 @@ func OpenAIChatCompletionsHandler(
 			}
 
 			if forward.IsRetriable(resp.StatusCode) {
-				applyRateLimitCooldown(tracker, account.ID, resp)
 				lastBody, _ = io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 				_ = resp.Body.Close()
+				applyRateLimitCooldown(tracker, account.ID, resp, lastBody)
 				if tracker != nil {
 					tracker.RecordFailure(account.ID, fmt.Errorf("upstream HTTP %d", resp.StatusCode))
 				}
@@ -205,9 +205,9 @@ func OpenAIChatCompletionsHandler(
 					continue
 				}
 				if forward.IsRetriable(retryResp.StatusCode) {
-					applyRateLimitCooldown(tracker, account.ID, retryResp)
 					lastBody, _ = io.ReadAll(io.LimitReader(retryResp.Body, 8<<10))
 					_ = retryResp.Body.Close()
+					applyRateLimitCooldown(tracker, account.ID, retryResp, lastBody)
 					if tracker != nil {
 						tracker.RecordFailure(account.ID, fmt.Errorf("upstream HTTP %d", retryResp.StatusCode))
 					}
