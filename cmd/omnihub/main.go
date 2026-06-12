@@ -709,6 +709,8 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry, authPlugins 
 	// model list for Responses-speaking clients.
 	gwOpenAI.POST("/v1/responses", gateway.ResponsesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, concurrencyGuard, gatewaySettings))
 	gwOpenAI.GET("/v1/models", gateway.ModelsHandler(codex.KnownModels))
+	// Capability negotiation for OmniHub-aware clients (omnihub-cli).
+	gwOpenAI.GET("/v1/omnihub/capabilities", gateway.CapabilitiesHandler(version))
 
 	stickyDesc := "off"
 	if sessions != nil {
