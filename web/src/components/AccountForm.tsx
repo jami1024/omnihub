@@ -274,6 +274,13 @@ export function AccountForm({
         end: w.end.trim(),
       })),
       active_timezone: timezone.trim(),
+      // Auth model has no form controls yet (phase 1): echo the stored
+      // values on edit so the PUT-style update doesn't reset an oauth
+      // account back to api_key; default new accounts to api_key.
+      auth_type: account?.auth_type ?? 'api_key',
+      auth_plugin: account?.auth_plugin ?? '',
+      client_profile: account?.client_profile ?? '',
+      client_profile_config: account?.client_profile_config ?? {},
     }
     onSubmit(input)
   }

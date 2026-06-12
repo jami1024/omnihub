@@ -67,7 +67,11 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
                a.custom_headers, a.endpoints, a.health_probe_enabled,
                COALESCE(a.proxy_url, ''), a.param_overrides,
-               a.active_windows, COALESCE(a.active_timezone, ''), a.forward_client_ip
+               a.active_windows, COALESCE(a.active_timezone, ''), a.forward_client_ip,
+               a.auth_type, COALESCE(a.auth_plugin, ''), a.auth_status,
+               COALESCE(a.auth_subject, ''), COALESCE(a.auth_email, ''), COALESCE(a.auth_plan, ''),
+               a.auth_expires_at, a.last_refresh_at, COALESCE(a.refresh_error, ''),
+               COALESCE(a.client_profile, ''), a.client_profile_config
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.enabled = TRUE
@@ -93,8 +97,9 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			headersRaw       []byte
 			endpointsRaw     []byte
 
-			paramsRaw  []byte
-			windowsRaw []byte
+			paramsRaw        []byte
+			windowsRaw       []byte
+			profileConfigRaw []byte
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &a.Weight, &a.Priority, &multiplier,
@@ -103,6 +108,8 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 			&a.GroupID, &a.GroupName, &groupMultiplier,
 			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone, &a.ForwardClientIP,
+			&a.AuthType, &a.AuthPlugin, &a.AuthStatus, &a.AuthSubject, &a.AuthEmail, &a.AuthPlan,
+			&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan account row: %w", err)
 		}
@@ -113,7 +120,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 		// can't be decrypted because the key is wrong/missing) must NOT
 		// brick the whole routing pool — skip the unreadable account and
 		// keep the rest serving. The resolver simply sees fewer upstreams.
-		if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw); err != nil {
+		if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw, profileConfigRaw); err != nil {
 			slog.Warn("skipping unreadable account in routing pool",
 				"account", a.Name, "id", a.ID, "err", err.Error())
 			continue
@@ -126,7 +133,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 // decodeRow runs every decode/decrypt step for one scanned account row.
 // Returns the first error; callers decide whether to skip (routing pool)
 // or surface it (single-row lookups).
-func (r *AccountRepo) decodeRow(a *provider.Account, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw []byte) error {
+func (r *AccountRepo) decodeRow(a *provider.Account, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw, profileConfigRaw []byte) error {
 	if err := decodeCredentials(a, credentialsRaw, r.cipher); err != nil {
 		return err
 	}
@@ -143,6 +150,9 @@ func (r *AccountRepo) decodeRow(a *provider.Account, credentialsRaw, redirectsRa
 		return err
 	}
 	if err := decodeWindows(a, windowsRaw); err != nil {
+		return err
+	}
+	if err := decodeProfileConfig(a, profileConfigRaw); err != nil {
 		return err
 	}
 	return decodeProxy(a, r.cipher)
@@ -291,6 +301,29 @@ func marshalWindows(w []provider.ActiveWindow) ([]byte, error) {
 	return json.Marshal(w)
 }
 
+// decodeProfileConfig unmarshals the client_profile_config JSONB object
+// onto the account. An empty / "{}" payload leaves it nil. Values are
+// opaque profile knobs (no secrets) so they are not encrypted.
+func decodeProfileConfig(a *provider.Account, raw []byte) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(raw, &a.ClientProfileConfig); err != nil {
+		return fmt.Errorf("decode client_profile_config for account %q: %w", a.Name, err)
+	}
+	return nil
+}
+
+// marshalProfileConfig encodes the client profile config for the
+// client_profile_config JSONB column, defaulting nil/empty to "{}"
+// (the column is NOT NULL).
+func marshalProfileConfig(c map[string]any) ([]byte, error) {
+	if len(c) == 0 {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(c)
+}
+
 // CountAll returns the total number of rows regardless of enabled
 // flag. Used by the bootstrap path to decide whether to seed from
 // environment variables on first boot.
@@ -337,6 +370,15 @@ type InsertParams struct {
 	ActiveWindows      []provider.ActiveWindow
 	ActiveTimezone     string
 	ForwardClientIP    bool
+
+	// Upstream auth model (migration 0036). Only the admin-configurable
+	// columns are set here; the runtime-maintained ones (auth_status,
+	// auth_subject/email/plan, auth_expires_at, last_refresh_at,
+	// refresh_error) default in SQL and are written by the TokenManager.
+	AuthType            string
+	AuthPlugin          string
+	ClientProfile       string
+	ClientProfileConfig map[string]any
 }
 
 // marshalRedirects encodes a redirect rule set for the model_redirects
@@ -360,7 +402,11 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
                a.custom_headers, a.endpoints, a.health_probe_enabled,
                COALESCE(a.proxy_url, ''), a.param_overrides,
-               a.active_windows, COALESCE(a.active_timezone, ''), a.forward_client_ip
+               a.active_windows, COALESCE(a.active_timezone, ''), a.forward_client_ip,
+               a.auth_type, COALESCE(a.auth_plugin, ''), a.auth_status,
+               COALESCE(a.auth_subject, ''), COALESCE(a.auth_email, ''), COALESCE(a.auth_plan, ''),
+               a.auth_expires_at, a.last_refresh_at, COALESCE(a.refresh_error, ''),
+               COALESCE(a.client_profile, ''), a.client_profile_config
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          ORDER BY a.id ASC`
@@ -388,8 +434,9 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			headersRaw       []byte
 			endpointsRaw     []byte
 
-			paramsRaw  []byte
-			windowsRaw []byte
+			paramsRaw        []byte
+			windowsRaw       []byte
+			profileConfigRaw []byte
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &enabled,
@@ -399,13 +446,15 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 			&a.GroupID, &a.GroupName, &groupMultiplier,
 			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone, &a.ForwardClientIP,
+			&a.AuthType, &a.AuthPlugin, &a.AuthStatus, &a.AuthSubject, &a.AuthEmail, &a.AuthPlan,
+			&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan account row: %w", err)
 		}
 		a.CostMultiplier = multiplier
 		a.GroupCostMultiplier = groupMultiplier
 		applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
-		if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw); err != nil {
+		if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw, profileConfigRaw); err != nil {
 			slog.Warn("skipping unreadable account in list", "account", a.Name, "id", a.ID, "err", err.Error())
 			continue
 		}
@@ -621,6 +670,10 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 	if err != nil {
 		return 0, fmt.Errorf("encode active_windows: %w", err)
 	}
+	profileConfigJSON, err := marshalProfileConfig(p.ClientProfileConfig)
+	if err != nil {
+		return 0, fmt.Errorf("encode client_profile_config: %w", err)
+	}
 
 	const q = `
         INSERT INTO accounts (
@@ -629,9 +682,11 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
             circuit_failure_threshold, circuit_open_duration_ms, circuit_half_open_success,
             model_redirects, daily_usd_limit, total_usd_limit, group_id, custom_headers, endpoints,
             health_probe_enabled, proxy_url, param_overrides, active_windows, active_timezone,
-            forward_client_ip
+            forward_client_ip,
+            auth_type, auth_plugin, client_profile, client_profile_config
         )
-        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NULLIF($19, ''), $20, $21, NULLIF($22, ''), $23)
+        VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NULLIF($19, ''), $20, $21, NULLIF($22, ''), $23,
+                COALESCE(NULLIF($24, ''), 'api_key'), NULLIF($25, ''), NULLIF($26, ''), $27)
         RETURNING id`
 
 	var id int64
@@ -641,6 +696,7 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
 		p.HealthProbeEnabled, proxyEnc, paramsJSON, windowsJSON, p.ActiveTimezone, p.ForwardClientIP,
+		p.AuthType, p.AuthPlugin, p.ClientProfile, profileConfigJSON,
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -665,7 +721,11 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
                a.group_id, COALESCE(g.name, ''), COALESCE(g.cost_multiplier, 1)::float8,
                a.custom_headers, a.endpoints, a.health_probe_enabled,
                COALESCE(a.proxy_url, ''), a.param_overrides,
-               a.active_windows, COALESCE(a.active_timezone, ''), a.forward_client_ip
+               a.active_windows, COALESCE(a.active_timezone, ''), a.forward_client_ip,
+               a.auth_type, COALESCE(a.auth_plugin, ''), a.auth_status,
+               COALESCE(a.auth_subject, ''), COALESCE(a.auth_email, ''), COALESCE(a.auth_plan, ''),
+               a.auth_expires_at, a.last_refresh_at, COALESCE(a.refresh_error, ''),
+               COALESCE(a.client_profile, ''), a.client_profile_config
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.id = $1`
@@ -682,8 +742,9 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		headersRaw       []byte
 		endpointsRaw     []byte
 
-		paramsRaw  []byte
-		windowsRaw []byte
+		paramsRaw        []byte
+		windowsRaw       []byte
+		profileConfigRaw []byte
 	)
 	err := r.pool.QueryRow(ctx, q, id).Scan(
 		&a.ID, &a.Name, &a.Provider, &enabled,
@@ -693,6 +754,8 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		&redirectsRaw, &a.DailyUSDLimit, &a.TotalUSDLimit,
 		&a.GroupID, &a.GroupName, &groupMultiplier,
 		&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone, &a.ForwardClientIP,
+		&a.AuthType, &a.AuthPlugin, &a.AuthStatus, &a.AuthSubject, &a.AuthEmail, &a.AuthPlan,
+		&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -703,7 +766,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 	a.CostMultiplier = multiplier
 	a.GroupCostMultiplier = groupMultiplier
 	applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
-	if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw); err != nil {
+	if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw, profileConfigRaw); err != nil {
 		return nil, false, err
 	}
 	return &a, enabled, nil
@@ -743,6 +806,16 @@ type UpdateParams struct {
 	ActiveWindows      []provider.ActiveWindow
 	ActiveTimezone     string
 	ForwardClientIP    bool
+
+	// Upstream auth model (migration 0036). PUT-style replace of the
+	// admin-configurable columns only. The runtime-maintained columns
+	// (auth_status, auth_subject/email/plan, auth_expires_at,
+	// last_refresh_at, refresh_error) are deliberately NOT updated here so
+	// an admin edit never clobbers live TokenManager state.
+	AuthType            string
+	AuthPlugin          string
+	ClientProfile       string
+	ClientProfileConfig map[string]any
 }
 
 // Update replaces the mutable columns of the account identified by id.
@@ -798,6 +871,10 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
 	if err != nil {
 		return fmt.Errorf("encrypt proxy_url: %w", err)
 	}
+	profileConfigJSON, err := marshalProfileConfig(p.ClientProfileConfig)
+	if err != nil {
+		return fmt.Errorf("encode client_profile_config: %w", err)
+	}
 
 	const q = `
         UPDATE accounts SET
@@ -810,8 +887,11 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
             group_id = $15, custom_headers = $16, endpoints = $17,
             health_probe_enabled = $18, proxy_url = NULLIF($19, ''),
             param_overrides = $20, active_windows = $21, active_timezone = NULLIF($22, ''),
-            forward_client_ip = $23, updated_at = NOW()
-         WHERE id = $24`
+            forward_client_ip = $23,
+            auth_type = COALESCE(NULLIF($24, ''), 'api_key'), auth_plugin = NULLIF($25, ''),
+            client_profile = NULLIF($26, ''), client_profile_config = $27,
+            updated_at = NOW()
+         WHERE id = $28`
 
 	tag, err := r.pool.Exec(ctx, q,
 		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
@@ -819,6 +899,7 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
 		p.CircuitFailureThreshold, openDurationMs, p.CircuitHalfOpenSuccess,
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
 		p.HealthProbeEnabled, proxyEnc, paramsJSON, windowsJSON, p.ActiveTimezone, p.ForwardClientIP,
+		p.AuthType, p.AuthPlugin, p.ClientProfile, profileConfigJSON,
 		id,
 	)
 	if err != nil {

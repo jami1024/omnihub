@@ -64,6 +64,20 @@ export interface Account {
   active_windows: ActiveWindow[]
   active_timezone: string
   forward_client_ip: boolean
+  // Upstream auth model. auth_type/auth_plugin/client_profile(_config)
+  // are admin-configurable; the rest are read-only runtime state
+  // maintained by the server (TokenManager).
+  auth_type: string
+  auth_plugin: string
+  auth_status: string
+  auth_subject: string
+  auth_email: string
+  auth_plan: string
+  auth_expires_at: string | null
+  last_refresh_at: string | null
+  refresh_error: string
+  client_profile: string
+  client_profile_config: Record<string, unknown>
 }
 
 // AccountInput is the create/update body. On create, credentials is
@@ -93,6 +107,13 @@ export interface AccountInput {
   active_windows: ActiveWindow[]
   active_timezone: string
   forward_client_ip: boolean
+  // Upstream auth model (admin-configurable subset). The server treats
+  // the update as a PUT-style replace, so edits must echo the existing
+  // values back or an oauth account silently resets to api_key.
+  auth_type: string
+  auth_plugin: string
+  client_profile: string
+  client_profile_config: Record<string, unknown>
 }
 
 const ACCOUNTS_KEY = ['accounts'] as const

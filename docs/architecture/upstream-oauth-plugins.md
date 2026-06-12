@@ -112,6 +112,36 @@ anthropic-workspace-id: <workspace_id>
 anthropic-beta: <comma-separated beta list>
 ```
 
+### ClientMetadata 透传（SDK 指纹 allow-list）
+
+三个 Driver 在构造请求时，除上述固定 header 外，还会把入口处采集的 `req.ClientMetadata` 逐项透传给上游（见 `anthropic/request.go`、`openai/request.go`、`claudeplatform/request.go` 末尾的 `for k, v := range req.ClientMetadata`）。
+
+采集发生在网关入口 `collectClientMetadata`（`internal/handler/gateway/anthropic.go`，anthropic / openai 两个入口均调用），**不是全量透传，而是只读一份固定 allow-list**（`clientMetadataHeaders`）：
+
+```text
+x-stainless-lang
+x-stainless-package-version
+x-stainless-os
+x-stainless-arch
+x-stainless-runtime
+x-stainless-runtime-version
+x-stainless-retry-count
+x-stainless-timeout
+x-stainless-helper-method
+x-app
+x-claude-code-session-id
+x-client-request-id
+```
+
+规则：
+
+- 逐个读 allow-list header，**空值跳过**，一个都未命中则不附加任何 header。
+- 用途是改善上游 **prompt cache 分区**与 analytics（提高 cache 命中率）。
+- 明确**不透传** IP、`User-Agent`、`Authorization` 等含 PII 或身份的 header。
+- 透传的是**下游客户端自带**的 SDK 指纹（如真实 Claude Code 的 `x-stainless-*` / `x-app`）；OmniHub 不在此处伪造指纹，指纹真实性取决于下游实际发送的内容。
+
+这条与第 16 节 “`X-OmniHub-*` 默认不透传给上游” 不冲突：`X-OmniHub-*` 是 OmniHub 自有 header（不透传），`x-stainless-*` / `x-app` 是上游 SDK header（按 allow-list 透传），两套 header 各司其职。
+
 ### Forwarder 现有统一约束
 
 Forwarder 当前会：

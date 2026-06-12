@@ -60,6 +60,21 @@ type accountDTO struct {
 	ActiveWindows      []provider.ActiveWindow  `json:"active_windows"`
 	ActiveTimezone     string                   `json:"active_timezone"`
 	ForwardClientIP    bool                     `json:"forward_client_ip"`
+
+	// Upstream auth model. auth_type / auth_plugin / client_profile /
+	// client_profile_config are admin-configurable; the rest are
+	// read-only runtime state maintained by the TokenManager.
+	AuthType            string         `json:"auth_type"`
+	AuthPlugin          string         `json:"auth_plugin"`
+	AuthStatus          string         `json:"auth_status"`
+	AuthSubject         string         `json:"auth_subject"`
+	AuthEmail           string         `json:"auth_email"`
+	AuthPlan            string         `json:"auth_plan"`
+	AuthExpiresAt       *time.Time     `json:"auth_expires_at"`
+	LastRefreshAt       *time.Time     `json:"last_refresh_at"`
+	RefreshError        string         `json:"refresh_error"`
+	ClientProfile       string         `json:"client_profile"`
+	ClientProfileConfig map[string]any `json:"client_profile_config"`
 }
 
 // toDTO projects a provider.Account (+ its enabled flag) onto the
@@ -92,6 +107,10 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 	if windows == nil {
 		windows = []provider.ActiveWindow{} // serialise as [] not null
 	}
+	profileConfig := a.ClientProfileConfig
+	if profileConfig == nil {
+		profileConfig = map[string]any{} // serialise as {} not null
+	}
 	return accountDTO{
 		ID:                      a.ID,
 		Name:                    a.Name,
@@ -118,6 +137,17 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		ActiveWindows:           windows,
 		ActiveTimezone:          a.ActiveTimezone,
 		ForwardClientIP:         a.ForwardClientIP,
+		AuthType:                a.AuthType,
+		AuthPlugin:              a.AuthPlugin,
+		AuthStatus:              a.AuthStatus,
+		AuthSubject:             a.AuthSubject,
+		AuthEmail:               a.AuthEmail,
+		AuthPlan:                a.AuthPlan,
+		AuthExpiresAt:           a.AuthExpiresAt,
+		LastRefreshAt:           a.LastRefreshAt,
+		RefreshError:            a.RefreshError,
+		ClientProfile:           a.ClientProfile,
+		ClientProfileConfig:     profileConfig,
 	}
 }
 
@@ -186,6 +216,31 @@ func sanitizeProxyURL(raw string) (string, string) {
 		return "", "proxy URL has no host"
 	}
 	return raw, ""
+}
+
+// validAuthTypes is the set accepted by the auth_type column (mirrors
+// the CHECK constraint in migration 0036).
+var validAuthTypes = map[string]bool{
+	"api_key":         true,
+	"oauth":           true,
+	"imported_oauth":  true,
+	"service_account": true,
+	"adc":             true,
+	"worker":          true,
+}
+
+// normalizeAuthType trims and validates the requested auth type,
+// defaulting an empty value to "api_key" (the historical behaviour).
+// Returns the cleaned value or an error message.
+func normalizeAuthType(raw string) (string, string) {
+	t := strings.TrimSpace(raw)
+	if t == "" {
+		return "api_key", ""
+	}
+	if !validAuthTypes[t] {
+		return "", "auth_type must be one of api_key, oauth, imported_oauth, service_account, adc, worker"
+	}
+	return t, ""
 }
 
 // validateParamOverrides bounds-checks the per-account generation
@@ -278,6 +333,13 @@ type accountInput struct {
 	ActiveWindows      []provider.ActiveWindow  `json:"active_windows"`
 	ActiveTimezone     string                   `json:"active_timezone"`
 	ForwardClientIP    bool                     `json:"forward_client_ip"`
+
+	// Upstream auth model (admin-configurable subset only). The runtime
+	// columns are never accepted from the client.
+	AuthType            string         `json:"auth_type"`
+	AuthPlugin          string         `json:"auth_plugin"`
+	ClientProfile       string         `json:"client_profile"`
+	ClientProfileConfig map[string]any `json:"client_profile_config"`
 }
 
 // circuitDuration converts the millisecond wire value into the
@@ -322,7 +384,16 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			writeBadRequest(c, "name and provider are required")
 			return
 		}
-		if len(in.Credentials) == 0 {
+		authType, aerr := normalizeAuthType(in.AuthType)
+		if aerr != "" {
+			writeBadRequest(c, aerr)
+			return
+		}
+		// api_key accounts must ship a secret at create time. oauth /
+		// imported_oauth / worker accounts receive their credentials
+		// later via the auth plugin (import / login), so an empty set is
+		// allowed for them.
+		if authType == "api_key" && len(in.Credentials) == 0 {
 			writeBadRequest(c, "credentials are required (at least api_key)")
 			return
 		}
@@ -379,6 +450,10 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			ActiveWindows:           in.ActiveWindows,
 			ActiveTimezone:          strings.TrimSpace(in.ActiveTimezone),
 			ForwardClientIP:         in.ForwardClientIP,
+			AuthType:                authType,
+			AuthPlugin:              strings.TrimSpace(in.AuthPlugin),
+			ClientProfile:           strings.TrimSpace(in.ClientProfile),
+			ClientProfileConfig:     in.ClientProfileConfig,
 		}
 
 		id, err := store.Insert(c.Request.Context(), params)
@@ -430,6 +505,11 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 		// empty map so the operator can't blank credentials by accident.
 		if in.Credentials != nil && len(in.Credentials) == 0 {
 			writeBadRequest(c, "credentials cannot be empty; omit the field to keep the existing secret")
+			return
+		}
+		authType, aerr := normalizeAuthType(in.AuthType)
+		if aerr != "" {
+			writeBadRequest(c, aerr)
 			return
 		}
 		redirects, rerr := sanitizeRedirects(in.ModelRedirects)
@@ -485,6 +565,10 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			ActiveWindows:           in.ActiveWindows,
 			ActiveTimezone:          strings.TrimSpace(in.ActiveTimezone),
 			ForwardClientIP:         in.ForwardClientIP,
+			AuthType:                authType,
+			AuthPlugin:              strings.TrimSpace(in.AuthPlugin),
+			ClientProfile:           strings.TrimSpace(in.ClientProfile),
+			ClientProfileConfig:     in.ClientProfileConfig,
 		}
 
 		if err := store.Update(c.Request.Context(), id, params); err != nil {

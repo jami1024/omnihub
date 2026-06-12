@@ -104,6 +104,7 @@ export function AccountsPage() {
                 <tr>
                   <Th>{t('common.name')}</Th>
                   <Th>{t('accounts.provider')}</Th>
+                  <Th>{t('accounts.auth')}</Th>
                   <Th>{t('common.status')}</Th>
                   <Th className="text-right">{t('accounts.weight')}</Th>
                   <Th className="text-right">{t('accounts.priority')}</Th>
@@ -117,6 +118,9 @@ export function AccountsPage() {
                   <tr key={a.id} className="transition-colors hover:bg-surface-2">
                     <Td className="font-medium">{a.name}</Td>
                     <Td className="text-muted">{a.provider}</Td>
+                    <Td>
+                      <AuthCell account={a} />
+                    </Td>
                     <Td>
                       <StatusBadge enabled={a.enabled} />
                     </Td>
@@ -216,6 +220,31 @@ function EmptyAccounts({ onCreate }: { onCreate: () => void }) {
       }
       visual={<AccountsGlyph />}
     />
+  )
+}
+
+// ROUTABLE_AUTH_STATUSES are the auth_status values the resolver still
+// routes; anything else means the account is (or will soon be) skipped,
+// so the cell flags it. Mirrors the server's status model.
+const ROUTABLE_AUTH_STATUSES = new Set(['ok', 'expiring', 'refreshing'])
+
+// AuthCell shows how the account authenticates upstream (auth_type) plus
+// a status dot when the runtime auth state is degraded. Identity details
+// (email / plan / refresh error) surface in the hover title.
+function AuthCell({ account: a }: { account: Account }) {
+  const degraded = a.auth_status !== 'ok'
+  const tone = !degraded
+    ? 'bg-emerald-500'
+    : ROUTABLE_AUTH_STATUSES.has(a.auth_status)
+      ? 'bg-amber-500'
+      : 'bg-danger'
+  const title = [a.auth_email, a.auth_plan, a.refresh_error].filter(Boolean).join(' · ')
+  return (
+    <span className="inline-flex items-center gap-1.5" title={title || undefined}>
+      <span className={`inline-block h-2 w-2 rounded-full ${tone}`} />
+      <span className="font-mono text-xs text-muted">{a.auth_type}</span>
+      {degraded && <span className="font-mono text-xs text-danger">{a.auth_status}</span>}
+    </span>
   )
 }
 

@@ -250,6 +250,7 @@ const zh: Record<string, string> = {
   "accountForm.weight": "权重",
   "accountForm.weightHelp": "默认 100。同一优先级内按权重分流；例如 100 和 50 大约是 2:1。",
   "accountForm.activeHealthProbeHelp": "不确定就继承默认值。开启后系统会主动探测该供应商是否可用。",
+  "accounts.auth": "认证",
   "accounts.context": "供应商路由",
   "accounts.costMultiplierShort": "成本系数",
   "accounts.credentials": "凭证",

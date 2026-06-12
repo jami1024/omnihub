@@ -250,6 +250,7 @@ const en: Record<string, string> = {
   "accountForm.weight": "Weight",
   "accountForm.weightHelp": "Default is 100. Providers in the same priority tier split traffic by weight; 100 and 50 is roughly a 2:1 split.",
   "accountForm.activeHealthProbeHelp": "Inherit the default if you are not sure. When enabled, the system actively checks whether this provider is reachable.",
+  "accounts.auth": "Auth",
   "accounts.context": "Provider routing",
   "accounts.costMultiplierShort": "Cost ×",
   "accounts.credentials": "Credentials",

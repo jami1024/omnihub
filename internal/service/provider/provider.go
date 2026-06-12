@@ -132,6 +132,48 @@ type Account struct {
 	// strip-everything behaviour; all OTHER forwarding headers are
 	// stripped regardless, and client auth is never forwarded.
 	ForwardClientIP bool
+
+	// --- Upstream auth model (migration 0036) ---
+
+	// AuthType selects how this account authenticates upstream:
+	// "api_key" (default), "oauth", "imported_oauth", "service_account",
+	// "adc", or "worker". The TokenManager and drivers branch on it.
+	AuthType string
+
+	// AuthPlugin names the UpstreamAuthProvider that owns this account's
+	// auth lifecycle (login / import / refresh / validate / revoke),
+	// e.g. "codex-oauth", "claude-oauth". Empty for plain api_key.
+	AuthPlugin string
+
+	// AuthStatus is the routability signal maintained by the runtime.
+	// "ok" / "expiring" are routable; "refresh_failed", "login_required",
+	// "revoked", "quota_exhausted", "rate_limited", "tier_insufficient",
+	// "unsupported_region", "disabled" are skipped by the resolver.
+	// Defaults to "ok".
+	AuthStatus string
+
+	// AuthSubject / AuthEmail / AuthPlan describe the authenticated
+	// upstream identity, populated by the auth plugin's Validate step.
+	// Display / attribution only — never forwarded upstream.
+	AuthSubject string
+	AuthEmail   string
+	AuthPlan    string
+
+	// AuthExpiresAt is when the current OAuth access token expires; the
+	// TokenManager refreshes ahead of it. Nil for non-expiring auth.
+	AuthExpiresAt *time.Time
+
+	// LastRefreshAt / RefreshError record the most recent token-refresh
+	// outcome (written by the TokenManager). Empty RefreshError = ok.
+	LastRefreshAt *time.Time
+	RefreshError  string
+
+	// ClientProfile selects the compatible request shape the driver
+	// emits (e.g. "codex-compatible", "claude-compatible"); empty uses
+	// the driver default. ClientProfileConfig carries profile-specific
+	// knobs as opaque JSON.
+	ClientProfile       string
+	ClientProfileConfig map[string]any
 }
 
 // EndpointURLs returns the ordered list of base URLs to try for this
