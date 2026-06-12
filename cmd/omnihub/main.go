@@ -44,6 +44,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/anthropic"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/claudeplatform"
+	"github.com/jami1024/omnihub/internal/service/provider/drivers/claudesub"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/codex"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/openai"
 	"github.com/jami1024/omnihub/internal/service/resolver"
@@ -269,6 +270,7 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 	// admin credential-import endpoints.
 	authPlugins := upstreamauth.NewRegistry()
 	authPlugins.Register("codex-oauth", upstreamauth.NewCodexOAuth())
+	authPlugins.Register("claude-oauth", upstreamauth.NewClaudeOAuth())
 
 	// mountGatewayRoutes builds the in-memory circuit-breaker Tracker;
 	// hand it to the admin routes so the dashboard can read live breaker
@@ -1200,6 +1202,7 @@ func buildDriverRegistry() *provider.Registry {
 	reg.MustRegister(claudeplatform.New())
 	reg.MustRegister(openai.New())
 	reg.MustRegister(codex.New())
+	reg.MustRegister(claudesub.New())
 	return reg
 }
 

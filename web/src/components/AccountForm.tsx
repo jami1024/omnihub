@@ -338,7 +338,7 @@ export function AccountForm({
             className={FIELD}
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
-            placeholder="anthropic, openai, claude-platform, openai-codex"
+            placeholder="anthropic, openai, claude-platform, openai-codex, claude-subscription"
           />
         </Field>
       </div>

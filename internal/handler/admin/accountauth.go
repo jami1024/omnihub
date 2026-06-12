@@ -112,6 +112,26 @@ func ImportAccountCredentialsHandler(store accountAuthStore, reg *upstreamauth.R
 			upd.Email = bundle.Profile.Email
 			upd.Plan = bundle.Profile.Plan
 		}
+
+		// Best-effort identity enrichment: some credential files carry no
+		// email/uuid (Claude's .credentials.json), so ask the plugin to
+		// validate the imported tokens against the provider's profile
+		// endpoint. Failures are non-fatal — the import already succeeded.
+		if profile, verr := plugin.Validate(c.Request.Context(), &upstreamauth.ValidateRequest{
+			Credentials: bundle.Credentials,
+			ProxyURL:    account.ProxyURL,
+		}); verr == nil && profile != nil {
+			if profile.Subject != "" {
+				upd.Subject = profile.Subject
+			}
+			if profile.Email != "" {
+				upd.Email = profile.Email
+			}
+			if profile.Plan != "" {
+				upd.Plan = profile.Plan
+			}
+			bundle.Profile = profile
+		}
 		if err := store.UpdateAuthRuntime(c.Request.Context(), id, upd); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "persist credentials: " + err.Error()})
 			return

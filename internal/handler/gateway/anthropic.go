@@ -39,9 +39,10 @@ import (
 )
 
 // anthropicCompatibleProviders is the allow-list for the Anthropic
-// Messages endpoint. Both the direct API driver and Claude Platform
-// on AWS accept the same wire format.
-var anthropicCompatibleProviders = []string{"anthropic", "claude-platform"}
+// Messages endpoint. The direct API driver, Claude Platform on AWS and
+// the experimental Claude subscription driver all accept the same wire
+// format.
+var anthropicCompatibleProviders = []string{"anthropic", "claude-platform", "claude-subscription"}
 
 // clientMetadataHeaders is the allow-list of inbound HTTP headers
 // the gateway forwards to compatible upstream LLMs. Limited to:
