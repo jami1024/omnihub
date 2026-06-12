@@ -21,7 +21,6 @@ import (
 	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/resolver"
-	"github.com/jami1024/omnihub/internal/service/session"
 	"github.com/jami1024/omnihub/internal/service/usage"
 )
 
@@ -91,7 +90,7 @@ func OpenAIChatCompletionsHandler(
 			}
 		}
 
-		sessionKey := session.KeyFor(guard.KeyName(c), req)
+		sessionKey := sessionKeyFor(c, guard.KeyName(c), req)
 
 		var (
 			attempted     []int64

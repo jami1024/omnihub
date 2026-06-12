@@ -1,13 +1,12 @@
 package gateway
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +22,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/pricing"
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/resolver"
+	"github.com/jami1024/omnihub/internal/service/session"
 	"github.com/jami1024/omnihub/internal/service/usage"
 )
 
@@ -31,22 +31,18 @@ import (
 // this wire format today.
 var responsesCompatibleProviders = []string{"openai-codex"}
 
-// responsesSessionKey derives the sticky-session key for /v1/responses.
-// The Responses body is opaque to the gateway (pass-through), so unlike
-// session.KeyFor it cannot hash system/user text; instead it uses the
-// client's own conversation identifier (prompt_cache_key, which Codex
-// CLI sends per session). No identifier → no stickiness.
-func responsesSessionKey(virtualKey, model, affinity string) string {
-	if affinity == "" {
-		return ""
+// responsesSessionKey derives the sticky-session key for /v1/responses
+// per the §11.2 priority order. The Responses body is opaque to the
+// gateway (pass-through), so unlike session.KeyFor there is no content
+// digest to fall back on: an explicit X-OmniHub-Session-ID header wins,
+// then the body's own conversation identifier (prompt_cache_key /
+// session_id / conversation_id, lifted at parse time). No identifier →
+// no stickiness.
+func responsesSessionKey(c *gin.Context, virtualKey, model, affinity string) string {
+	if sid := strings.TrimSpace(c.GetHeader(omnihubSessionHeader)); sid != "" {
+		affinity = sid
 	}
-	h := sha256.New()
-	h.Write([]byte(virtualKey))
-	h.Write([]byte{0})
-	h.Write([]byte(model))
-	h.Write([]byte{0})
-	h.Write([]byte(affinity))
-	return hex.EncodeToString(h.Sum(nil)[:16])
+	return session.KeyForExplicit(virtualKey, model, affinity)
 }
 
 // ResponsesHandler returns a gin.HandlerFunc for the OpenAI-compatible
@@ -104,7 +100,7 @@ func ResponsesHandler(
 			}
 		}
 
-		sessionKey := responsesSessionKey(guard.KeyName(c), req.Model, affinity)
+		sessionKey := responsesSessionKey(c, guard.KeyName(c), req.Model, affinity)
 
 		var (
 			attempted     []int64

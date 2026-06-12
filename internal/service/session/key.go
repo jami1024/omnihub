@@ -30,6 +30,26 @@ import (
 // stable in the common case.
 const systemTextLimit = 8192
 
+// KeyForExplicit derives the session key from a client-supplied
+// session identifier (X-OmniHub-Session-ID, prompt_cache_key, a
+// metadata user id, ...). It takes priority over the content digest:
+// an explicit identifier is stable across turns even when the content
+// prefix drifts, so it produces stronger stickiness (design doc §11.2).
+// Returns "" when sessionID is empty.
+func KeyForExplicit(virtualKey, model, sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	h := sha256.New()
+	h.Write([]byte(virtualKey))
+	h.Write([]byte{0})
+	h.Write([]byte(model))
+	h.Write([]byte{0})
+	h.Write([]byte(sessionID))
+	digest := h.Sum(nil)
+	return hex.EncodeToString(digest[:16])
+}
+
 // KeyFor derives the session key for a request. virtualKey scopes the
 // binding to one caller (so two clients with identical prompts do
 // not share an upstream). Returns "" when the request lacks any

@@ -89,6 +89,27 @@ type TokenFreshener interface {
 	ForceRefresh(ctx context.Context, accountID int64) (*provider.Account, error)
 }
 
+// omnihubSessionHeader is the gateway's own client-supplied session
+// identifier (design doc §10). It is consumed here for sticky routing
+// and never reaches the upstream: drivers build outbound requests from
+// scratch and only copy the ClientMetadata allow-list, which does not
+// include X-OmniHub-*.
+const omnihubSessionHeader = "X-OmniHub-Session-ID"
+
+// sessionKeyFor implements the SessionHash priority order from the
+// design doc §11.2: an explicit X-OmniHub-Session-ID header wins, then
+// the request's metadata.user_id hint, then the content-digest
+// fallback (system + first user message).
+func sessionKeyFor(c *gin.Context, virtualKey string, req *ir.UnifiedRequest) string {
+	if sid := strings.TrimSpace(c.GetHeader(omnihubSessionHeader)); sid != "" {
+		return session.KeyForExplicit(virtualKey, req.Model, sid)
+	}
+	if uid, ok := req.Metadata["user_id"].(string); ok && uid != "" {
+		return session.KeyForExplicit(virtualKey, req.Model, "user:"+uid)
+	}
+	return session.KeyFor(virtualKey, req)
+}
+
 // ensureFreshAccount runs the TokenManager gate for one resolved
 // account. Non-OAuth accounts and a nil freshener pass through.
 func ensureFreshAccount(ctx context.Context, tokens TokenFreshener, account *provider.Account) (*provider.Account, error) {
@@ -186,7 +207,7 @@ func AnthropicMessagesHandler(
 		// Derive a session key so consecutive turns of the same
 		// conversation hit the same upstream — Anthropic prompt
 		// cache is per-account, so stickiness drives cost down.
-		sessionKey := session.KeyFor(guard.KeyName(c), &req)
+		sessionKey := sessionKeyFor(c, guard.KeyName(c), &req)
 
 		// Retry loop: at most maxFailoverAttempts distinct accounts.
 		var (
