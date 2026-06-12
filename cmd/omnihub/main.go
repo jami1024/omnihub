@@ -44,6 +44,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/provider"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/anthropic"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/claudeplatform"
+	"github.com/jami1024/omnihub/internal/service/provider/drivers/codex"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/openai"
 	"github.com/jami1024/omnihub/internal/service/resolver"
 	"github.com/jami1024/omnihub/internal/service/session"
@@ -690,12 +691,20 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry, authPlugins 
 	)
 	gwOpenAI.POST("/v1/chat/completions", gateway.OpenAIChatCompletionsHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, gatewaySettings))
 
+	// OpenAI Responses endpoint (EXPERIMENTAL): pass-through to Codex
+	// subscription accounts via the openai-codex driver. Same middleware
+	// stack as /v1/chat/completions (Codex CLI is not Claude CLI, so the
+	// Claude UA gate is omitted). /v1/models serves the static codex
+	// model list for Responses-speaking clients.
+	gwOpenAI.POST("/v1/responses", gateway.ResponsesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, gatewaySettings))
+	gwOpenAI.GET("/v1/models", gateway.ModelsHandler(codex.KnownModels))
+
 	stickyDesc := "off"
 	if sessions != nil {
 		stickyDesc = sessionTTL.String()
 	}
 	slog.Info("gateway mounted",
-		"paths", []string{"/v1/messages", "/v1/chat/completions"},
+		"paths", []string{"/v1/messages", "/v1/chat/completions", "/v1/responses"},
 		"account_count", accountPool.Size(),
 		"circuit_failure_threshold", healthCfg.FailureThreshold,
 		"circuit_open_duration", healthCfg.OpenDuration,
@@ -1190,6 +1199,7 @@ func buildDriverRegistry() *provider.Registry {
 	reg.MustRegister(anthropic.New())
 	reg.MustRegister(claudeplatform.New())
 	reg.MustRegister(openai.New())
+	reg.MustRegister(codex.New())
 	return reg
 }
 
