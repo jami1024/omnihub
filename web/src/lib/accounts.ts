@@ -179,6 +179,43 @@ export function useDeleteAccount() {
   })
 }
 
+// ImportResult mirrors the server's importAccountsResult.
+export interface ImportResult {
+  created: number
+  skipped: number
+  failed: number
+  errors?: { kind: string; name: string; message: string }[]
+}
+
+// useExportAccounts downloads a cleartext-credential backup of all
+// accounts as a JSON file. fetch (via api) carries the Bearer token,
+// then a Blob triggers the browser download.
+export function useExportAccounts() {
+  return useMutation({
+    mutationFn: async () => {
+      const bundle = await api<unknown>('/accounts/export')
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'omnihub-accounts.json'
+      a.click()
+      URL.revokeObjectURL(url)
+    },
+  })
+}
+
+// useImportAccounts restores accounts from a backup bundle. on_conflict
+// defaults to "skip" (a name clash is left untouched); "fail" reports it.
+export function useImportAccounts() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: { accounts: unknown[]; on_conflict?: string }) =>
+      api<ImportResult>('/accounts/import', { method: 'POST', body: JSON.stringify(payload) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
+  })
+}
+
 // QuotaWindow / QuotaInfo mirror the server's provider.QuotaInfo: the
 // subscription account's rolling usage windows plus the raw upstream
 // payload for providers without a stable schema.

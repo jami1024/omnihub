@@ -360,6 +360,11 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	// Phase 6 — subscription quota windows (codex wham/usage, claude
 	// /api/oauth/usage) surfaced per account.
 	authed.GET("/accounts/:id/quota", adminhandler.QuotaAccountByIDHandler(accountRepo, registry))
+	// Bulk backup/restore: export is a cleartext-credential operator
+	// backup; import inserts each account independently (skip on name
+	// conflict by default, group bound by name).
+	authed.GET("/accounts/export", adminhandler.ExportAccountsHandler(accountRepo))
+	authed.POST("/accounts/import", adminhandler.ImportAccountsHandler(accountRepo, groupRepo))
 
 	// M8b-3 — provider groups: organisational buckets with a shared cost
 	// multiplier. The provider_groups NOTIFY trigger (migration 0018)

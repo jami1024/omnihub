@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Layout } from '../components/Layout'
 import { Modal } from '../components/Modal'
 import { EmptyState, ErrorNotice, LoadingTable, MetricStrip, PageHeader } from '../components/PageChrome'
@@ -11,11 +11,14 @@ import {
   useAccounts,
   useCreateAccount,
   useDeleteAccount,
+  useExportAccounts,
+  useImportAccounts,
   useImportCredentials,
   useTestAccountById,
   useUpdateAccount,
   type Account,
   type AccountInput,
+  type ImportResult,
 } from '../lib/accounts'
 
 // editing tracks which dialog (if any) is open: 'new' for the create
@@ -29,8 +32,12 @@ export function AccountsPage() {
   const update = useUpdateAccount()
   const del = useDeleteAccount()
   const importCreds = useImportCredentials()
+  const exportAccounts = useExportAccounts()
+  const importAccounts = useImportAccounts()
+  const fileInput = useRef<HTMLInputElement>(null)
   const [editing, setEditing] = useState<Editing>(null)
   const [formErr, setFormErr] = useState<string | null>(null)
+  const [importMsg, setImportMsg] = useState<string | null>(null)
   const accountCount = accounts?.length ?? 0
   const enabledCount = accounts?.filter((a) => a.enabled).length ?? 0
   const providerCount = accounts ? new Set(accounts.map((a) => a.provider)).size : 0
@@ -98,6 +105,45 @@ export function AccountsPage() {
     del.mutate(a.id)
   }
 
+  function handleExport() {
+    setImportMsg(null)
+    if (!confirm(t('accounts.exportConfirm'))) return
+    exportAccounts.mutate()
+  }
+
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    setImportMsg(null)
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-selecting the same file later
+    if (!file) return
+    file
+      .text()
+      .then((text) => {
+        const bundle = JSON.parse(text) as { accounts?: unknown[] }
+        if (!Array.isArray(bundle.accounts)) {
+          throw new Error(t('accounts.importBadFile'))
+        }
+        importAccounts.mutate(
+          { accounts: bundle.accounts },
+          {
+            onSuccess: (res: ImportResult) =>
+              setImportMsg(
+                t('accounts.importDone', {
+                  created: res.created,
+                  skipped: res.skipped,
+                  failed: res.failed,
+                }),
+              ),
+            onError: (err: unknown) =>
+              setImportMsg(err instanceof ApiError ? err.message : t('accounts.requestFailed')),
+          },
+        )
+      })
+      .catch((err: unknown) =>
+        setImportMsg(err instanceof Error ? err.message : t('accounts.importBadFile')),
+      )
+  }
+
   return (
     <Layout>
       <main className="mx-auto w-full max-w-7xl px-6 py-8">
@@ -107,11 +153,40 @@ export function AccountsPage() {
           title={t('accounts.title')}
           description={t('accounts.description')}
           action={
-            <button onClick={openNew} className="btn btn-primary h-10">
-              {t('accounts.newAccount')}
-            </button>
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileInput}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={handleImportFile}
+              />
+              <button
+                onClick={() => fileInput.current?.click()}
+                disabled={importAccounts.isPending}
+                className="btn btn-secondary h-10 disabled:opacity-50"
+              >
+                {importAccounts.isPending ? t('accounts.importing') : t('accounts.import')}
+              </button>
+              <button
+                onClick={handleExport}
+                disabled={exportAccounts.isPending || accountCount === 0}
+                className="btn btn-secondary h-10 disabled:opacity-50"
+              >
+                {t('accounts.export')}
+              </button>
+              <button onClick={openNew} className="btn btn-primary h-10">
+                {t('accounts.newAccount')}
+              </button>
+            </div>
           }
         />
+
+        {importMsg && (
+          <div className="mt-4">
+            <ErrorNotice>{importMsg}</ErrorNotice>
+          </div>
+        )}
 
         <MetricStrip
           metrics={[
