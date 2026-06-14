@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/jami1024/omnihub/internal/ir"
 	protoopenai "github.com/jami1024/omnihub/internal/protocol/openai"
@@ -56,23 +57,34 @@ func (d *Driver) BuildRequest(
 		out[k] = v
 	}
 
-	model, err := json.Marshal(req.Model)
+	// Normalise the model to a backend-accepted slug (gpt-5 → gpt-5.4,
+	// gpt-5-codex → gpt-5.3-codex, ...); unknown values pass through.
+	model, err := json.Marshal(normalizeModel(req.Model))
 	if err != nil {
 		return nil, err
 	}
 	out["model"] = model
 	out["store"] = json.RawMessage("false")
-	if _, ok := out["instructions"]; !ok {
-		out["instructions"] = json.RawMessage(`""`)
+	// instructions must be a non-empty Codex CLI prompt or the backend
+	// rejects the request. Keep the client's own when present; otherwise
+	// inject the official base prompt.
+	if !hasNonEmpty(out, "instructions") {
+		ins, err := json.Marshal(defaultInstructions)
+		if err != nil {
+			return nil, err
+		}
+		out["instructions"] = ins
 	}
 	if req.Stream {
 		out["stream"] = json.RawMessage("true")
 	} else {
 		delete(out, "stream")
 	}
-	delete(out, "temperature")
-	delete(out, "top_p")
-	delete(out, "max_output_tokens")
+	// Strip generation/identity fields the codex backend rejects on
+	// OAuth (subscription) traffic.
+	for _, f := range unsupportedFields {
+		delete(out, f)
+	}
 
 	body, err := json.Marshal(out)
 	if err != nil {
@@ -96,6 +108,37 @@ func (d *Driver) BuildRequest(
 	}
 	httpReq.Header.Set("OpenAI-Beta", "responses=experimental")
 	httpReq.Header.Set("originator", originatorValue)
+	// The codex backend validates the User-Agent looks like a Codex CLI;
+	// the driver builds the request from scratch and does not forward the
+	// downstream client's UA, so it must set one here.
+	httpReq.Header.Set("User-Agent", userAgent)
 
 	return httpReq, nil
+}
+
+// unsupportedFields are body fields the codex (subscription) backend
+// rejects; they are stripped before dispatch. Mirrors sub2api's list.
+var unsupportedFields = []string{
+	"temperature",
+	"top_p",
+	"max_output_tokens",
+	"max_completion_tokens",
+	"frequency_penalty",
+	"presence_penalty",
+	"user",
+	"metadata",
+	"prompt_cache_retention",
+	"safety_identifier",
+	"stream_options",
+}
+
+// hasNonEmpty reports whether the payload carries a non-empty value for
+// the given key (a present-but-"" instructions still counts as missing).
+func hasNonEmpty(payload map[string]json.RawMessage, key string) bool {
+	v, ok := payload[key]
+	if !ok {
+		return false
+	}
+	s := strings.TrimSpace(string(v))
+	return s != "" && s != `""` && s != "null"
 }

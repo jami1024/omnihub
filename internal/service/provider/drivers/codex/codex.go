@@ -15,6 +15,7 @@ package codex
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"io"
 	"net/http"
@@ -47,19 +48,63 @@ const (
 	// originatorValue identifies the calling client family to the codex
 	// backend. The native Codex CLI sends codex_cli_rs.
 	originatorValue = "codex_cli_rs"
+
+	// codexCLIVersion / userAgent mimic the native Codex CLI. The codex
+	// backend rejects requests whose User-Agent is not a Codex CLI UA
+	// (returning a misleading "model not supported" 400), so the driver
+	// MUST send this — it does not forward the downstream client's UA.
+	// Bump alongside the real CLI as the backend tightens checks.
+	codexCLIVersion = "0.125.0"
+	userAgent       = "codex_cli_rs/" + codexCLIVersion + " (Linux; x86_64) terminal"
 )
 
+// defaultInstructions is the official Codex CLI base system prompt. The
+// codex backend treats a request whose `instructions` is empty as an
+// illegal (non-CLI) request and rejects it, so the driver injects this
+// when the client did not send its own. Sourced verbatim from the
+// public Codex CLI prompt; replace when the CLI updates it.
+//
+//go:embed instructions.txt
+var defaultInstructions string
+
+// codexModelMap normalises a requested model to a slug the codex
+// backend currently accepts. The backend rejects older/alias names
+// (e.g. gpt-5-codex) with a misleading "model not supported" 400, so
+// known aliases are mapped; an unknown model passes through unchanged.
+// Mirrors sub2api's table — adjust as the backend's accepted set moves.
+var codexModelMap = map[string]string{
+	"gpt-5":              "gpt-5.4",
+	"gpt-5-codex":        "gpt-5.3-codex",
+	"gpt-5.1":            "gpt-5.4",
+	"gpt-5.1-codex":      "gpt-5.3-codex",
+	"gpt-5.1-codex-max":  "gpt-5.3-codex",
+	"gpt-5.1-codex-mini": "gpt-5.3-codex",
+	"gpt-5.2":            "gpt-5.2",
+	"gpt-5.2-codex":      "gpt-5.2",
+	"gpt-5.3":            "gpt-5.3-codex",
+	"gpt-5.3-codex":      "gpt-5.3-codex",
+	"gpt-5.4":            "gpt-5.4",
+	"codex-mini-latest":  "gpt-5.3-codex",
+}
+
+// normalizeModel maps a requested model onto a backend-accepted slug,
+// passing unknown values through untouched.
+func normalizeModel(model string) string {
+	if m, ok := codexModelMap[model]; ok {
+		return m
+	}
+	return model
+}
+
 // KnownModels is the static model list served by /v1/models for this
-// driver. The codex backend has no public model-list endpoint; this
-// mirrors what current Codex subscriptions accept. Model redirects can
-// map anything else onto these.
+// driver — the aliases a client may request. The driver normalises each
+// to a backend-accepted slug (see codexModelMap) before dispatch.
 var KnownModels = []string{
 	"gpt-5",
 	"gpt-5-codex",
-	"gpt-5.1",
 	"gpt-5.1-codex",
-	"gpt-5.1-codex-max",
-	"gpt-5.1-codex-mini",
+	"gpt-5.3-codex",
+	"gpt-5.4",
 	"codex-mini-latest",
 }
 
