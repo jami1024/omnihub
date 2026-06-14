@@ -71,6 +71,36 @@ type Forwarder struct {
 	// proxyClients caches one *http.Client per distinct account proxy
 	// URL so a proxied account adds no per-request client-build cost.
 	proxyClients sync.Map // map[string]*http.Client
+	// proxyResolver turns an account's proxy binding into a dial URL
+	// (pool-bound proxy with expiry fallback). Nil = legacy behaviour:
+	// use the account's inline ProxyURL directly.
+	proxyResolver ProxyResolver
+}
+
+// ProxyResolver maps an account to the egress proxy URL it should use
+// for this request ("" = connect directly). Implemented by
+// proxypool.Pool; injected so forward does not depend on the pool.
+type ProxyResolver interface {
+	Resolve(account *provider.Account) string
+}
+
+// SetProxyResolver installs the proxy-pool resolver. Without it, the
+// forwarder falls back to each account's inline ProxyURL.
+func (f *Forwarder) SetProxyResolver(r ProxyResolver) *Forwarder {
+	f.proxyResolver = r
+	return f
+}
+
+// proxyURLFor returns the egress proxy URL for an account: the
+// resolver's verdict when one is installed, else the inline ProxyURL.
+func (f *Forwarder) proxyURLFor(account *provider.Account) string {
+	if account == nil {
+		return ""
+	}
+	if f.proxyResolver != nil {
+		return f.proxyResolver.Resolve(account)
+	}
+	return account.ProxyURL
 }
 
 // New returns a Forwarder using the given client. A nil client falls
@@ -134,22 +164,23 @@ func defaultTransport() *http.Transport {
 // a bad value degrades to a direct connection rather than failing every
 // request.
 func (f *Forwarder) clientFor(account *provider.Account) *http.Client {
-	if account == nil || account.ProxyURL == "" {
+	proxyURL := f.proxyURLFor(account)
+	if proxyURL == "" {
 		return f.client
 	}
-	if c, ok := f.proxyClients.Load(account.ProxyURL); ok {
+	if c, ok := f.proxyClients.Load(proxyURL); ok {
 		return c.(*http.Client)
 	}
-	u, err := url.Parse(account.ProxyURL)
+	u, err := url.Parse(proxyURL)
 	if err != nil || u.Host == "" {
-		slog.Warn("invalid account proxy_url; connecting directly",
-			"account", account.Name, "proxy_url", account.ProxyURL)
+		slog.Warn("invalid proxy URL; connecting directly",
+			"account", account.Name, "proxy_url", proxyURL)
 		return f.client
 	}
 	tr := defaultTransport()
 	tr.Proxy = http.ProxyURL(u)
 	c := &http.Client{Transport: tr}
-	actual, _ := f.proxyClients.LoadOrStore(account.ProxyURL, c)
+	actual, _ := f.proxyClients.LoadOrStore(proxyURL, c)
 	return actual.(*http.Client)
 }
 

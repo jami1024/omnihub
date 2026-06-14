@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ApiError } from '../lib/api'
 import { useI18n } from '../lib/i18n'
 import { useGroups } from '../lib/groups'
+import { useProxies } from '../lib/proxies'
 import {
   useAuthPlugins,
   useTestAccount,
@@ -94,6 +95,8 @@ export function AccountForm({
   )
   const [endpoints, setEndpoints] = useState<string[]>(account?.endpoints ?? [])
   const [proxyURL, setProxyURL] = useState(account?.proxy_url ?? '')
+  const { data: proxies } = useProxies()
+  const [proxyID, setProxyID] = useState(account?.proxy_id != null ? String(account.proxy_id) : '')
   const [forwardClientIP, setForwardClientIP] = useState(account?.forward_client_ip ?? false)
   const po = account?.param_overrides
   const [ovMaxTokens, setOvMaxTokens] = useState(numToStr(po?.max_tokens))
@@ -288,6 +291,7 @@ export function AccountForm({
       endpoints: endpoints.map((e) => e.trim()).filter((e) => e !== ''),
       health_probe_enabled: healthProbe === '' ? null : healthProbe === 'true',
       proxy_url: proxyURL.trim(),
+      proxy_id: proxyID === '' ? null : Number(proxyID),
       forward_client_ip: forwardClientIP,
       param_overrides: {
         ...(strToNum(ovMaxTokens) != null ? { max_tokens: strToNum(ovMaxTokens)! } : {}),
@@ -400,15 +404,26 @@ export function AccountForm({
         />
       </Field>
 
-      <details className="rounded-lg border border-line p-3" open={endpoints.length > 0 || proxyURL !== ''}>
+      <details className="rounded-lg border border-line p-3" open={endpoints.length > 0 || proxyURL !== '' || proxyID !== ''}>
         <summary className="cursor-pointer text-sm text-muted">{t('accountForm.networkSummary')}</summary>
         <div className="mt-3">
+          <Field label={t('accountForm.proxy')} help={t('accountForm.proxyHelp')}>
+            <select className={FIELD} value={proxyID} onChange={(e) => setProxyID(e.target.value)}>
+              <option value="">{t('accountForm.proxyNone')}</option>
+              {(proxies ?? []).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.protocol}://{p.host}:{p.port})
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label={t('accountForm.proxyUrl')}>
             <input
               className={FIELD}
               value={proxyURL}
               onChange={(e) => setProxyURL(e.target.value)}
               placeholder={t('accountForm.proxyUrlPlaceholder')}
+              disabled={proxyID !== ''}
             />
           </Field>
           <label className="mt-3 flex items-start gap-2 text-sm">

@@ -79,6 +79,10 @@ type accountDTO struct {
 	// MaxConcurrency caps in-flight requests through the account
 	// (0 = unlimited; enforced in-process).
 	MaxConcurrency int `json:"max_concurrency"`
+
+	// ProxyID binds the account to a proxies row (migration 0038);
+	// null = inline proxy_url / direct.
+	ProxyID *int64 `json:"proxy_id"`
 }
 
 // toDTO projects a provider.Account (+ its enabled flag) onto the
@@ -153,6 +157,7 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		ClientProfile:           a.ClientProfile,
 		ClientProfileConfig:     profileConfig,
 		MaxConcurrency:          a.MaxConcurrency,
+		ProxyID:                 a.ProxyID,
 	}
 }
 
@@ -346,7 +351,8 @@ type accountInput struct {
 	ClientProfile       string         `json:"client_profile"`
 	ClientProfileConfig map[string]any `json:"client_profile_config"`
 
-	MaxConcurrency int `json:"max_concurrency"`
+	MaxConcurrency int    `json:"max_concurrency"`
+	ProxyID        *int64 `json:"proxy_id"`
 }
 
 // circuitDuration converts the millisecond wire value into the
@@ -466,6 +472,7 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			ClientProfile:           strings.TrimSpace(in.ClientProfile),
 			ClientProfileConfig:     in.ClientProfileConfig,
 			MaxConcurrency:          in.MaxConcurrency,
+			ProxyID:                 in.ProxyID,
 		}
 
 		id, err := store.Insert(c.Request.Context(), params)
@@ -586,6 +593,7 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			ClientProfile:           strings.TrimSpace(in.ClientProfile),
 			ClientProfileConfig:     in.ClientProfileConfig,
 			MaxConcurrency:          in.MaxConcurrency,
+			ProxyID:                 in.ProxyID,
 		}
 
 		if err := store.Update(c.Request.Context(), id, params); err != nil {

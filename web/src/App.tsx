@@ -6,6 +6,7 @@ import { LandingPage } from './pages/Landing'
 import { UnifiedLoginPage } from './pages/UnifiedLogin'
 import { AccountsPage } from './pages/Accounts'
 import { GroupsPage } from './pages/Groups'
+import { ProxiesPage } from './pages/Proxies'
 import { KeysPage } from './pages/Keys'
 import { BlockedIPsPage } from './pages/BlockedIPs'
 import { AlertChannelsPage } from './pages/AlertChannels'
@@ -75,6 +76,7 @@ function AdminRoutes() {
       <Route path="" element={<AdminProtected><Suspense fallback={<PageLoading />}><DashboardPage /></Suspense></AdminProtected>} />
       <Route path="accounts" element={<AdminProtected><AccountsPage /></AdminProtected>} />
       <Route path="groups" element={<AdminProtected><GroupsPage /></AdminProtected>} />
+      <Route path="proxies" element={<AdminProtected><ProxiesPage /></AdminProtected>} />
       <Route path="keys" element={<AdminProtected><KeysPage /></AdminProtected>} />
       <Route path="blocked-ips" element={<AdminProtected><BlockedIPsPage /></AdminProtected>} />
       <Route path="alert-channels" element={<AdminProtected><AlertChannelsPage /></AdminProtected>} />

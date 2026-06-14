@@ -112,8 +112,15 @@ type Account struct {
 	HealthProbeEnabled *bool
 
 	// ProxyURL optionally routes this account's upstream requests through
-	// an http/https/socks5 proxy. Empty means connect directly.
+	// an http/https/socks5 proxy. Empty means connect directly. Legacy
+	// inline binding: used only when ProxyID is nil (migration 0038).
 	ProxyURL string
+
+	// ProxyID binds this account to a row in the proxies table
+	// (migration 0038). Nil means "no pool binding" — fall back to the
+	// inline ProxyURL. The ProxyResolver turns the binding into a dial
+	// URL, applying expiry fallback.
+	ProxyID *int64
 
 	// ParamOverrides force per-account generation parameters (max_tokens,
 	// temperature, top_p, thinking budget) onto each request. The zero

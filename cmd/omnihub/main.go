@@ -47,6 +47,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/claudesub"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/codex"
 	"github.com/jami1024/omnihub/internal/service/provider/drivers/openai"
+	"github.com/jami1024/omnihub/internal/service/proxypool"
 	"github.com/jami1024/omnihub/internal/service/resolver"
 	"github.com/jami1024/omnihub/internal/service/session"
 	"github.com/jami1024/omnihub/internal/service/upstreamauth"
@@ -67,6 +68,7 @@ var (
 	pool             *pgxpool.Pool
 	writeBuffer      *repository.WriteBuffer
 	accountPool      *account.Pool
+	proxyPool        *proxypool.Pool
 	apiKeyPool       *apikey.Pool
 	blockedIPPool    *blockedip.Pool
 	alertChannelPool *alertchannel.Pool
@@ -168,6 +170,10 @@ func runGateway() {
 	registry := buildDriverRegistry()
 	if err := setupAccountPool(rootCtx); err != nil {
 		slog.Error("account pool init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := setupProxyPool(rootCtx); err != nil {
+		slog.Error("proxy pool init failed", "err", err)
 		os.Exit(1)
 	}
 	if err := setupApiKeyPool(rootCtx); err != nil {
@@ -374,6 +380,16 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	authed.POST("/groups", adminhandler.CreateGroupHandler(groupRepo))
 	authed.PATCH("/groups/:id", adminhandler.UpdateGroupHandler(groupRepo))
 	authed.DELETE("/groups/:id", adminhandler.DeleteGroupHandler(groupRepo))
+
+	// Phase C — proxy pool (migration 0038): egress proxies as a
+	// first-class resource. The proxies NOTIFY trigger refreshes the
+	// in-memory ProxyPool so binding edits take effect without restart.
+	proxyRepo := repository.NewProxyRepo(pool, accountCipher)
+	authed.GET("/proxies", adminhandler.ListProxiesHandler(proxyRepo))
+	authed.POST("/proxies", adminhandler.CreateProxyHandler(proxyRepo))
+	authed.PATCH("/proxies/:id", adminhandler.UpdateProxyHandler(proxyRepo))
+	authed.DELETE("/proxies/:id", adminhandler.DeleteProxyHandler(proxyRepo))
+	authed.POST("/proxies/:id/test", adminhandler.TestProxyHandler(proxyRepo))
 
 	// M3 — virtual key management. Writes flow through the api_keys
 	// NOTIFY trigger (migration 0008), so the in-memory key pool refreshes
@@ -663,6 +679,12 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry, authPlugins 
 	tokenManager.Start(context.Background(), accountPool.All, time.Minute)
 
 	forwarder := forward.New(nil)
+	// Bind the proxy pool so account proxy_id → dial URL (with expiry
+	// fallback). Without a pool (log-only mode) accounts use inline
+	// proxy_url via the forwarder's legacy path.
+	if proxyPool != nil {
+		forwarder.SetProxyResolver(proxyPool)
+	}
 	// Hot-reloadable, DB-backed price source (built by setupPricePool).
 	// Falls back to the static defaults if the pool wasn't built.
 	var prices pricing.Calculator = pricePool
@@ -1256,6 +1278,23 @@ func setupAccountPool(ctx context.Context) error {
 		"refresh_interval", accountPoolRefreshInterval,
 		"notify_channel", account.DefaultNotifyChannel,
 	)
+	return nil
+}
+
+// setupProxyPool wires the in-memory proxy pool (migration 0038). The
+// forwarder's ProxyResolver reads it to turn an account's proxy_id into
+// a dial URL. No DB → no pool (accounts fall back to inline proxy_url).
+func setupProxyPool(ctx context.Context) error {
+	if pool == nil {
+		return nil
+	}
+	proxyPool = proxypool.NewPool(repository.NewProxyRepo(pool, accountCipher))
+	if err := proxyPool.Start(ctx, accountPoolRefreshInterval); err != nil {
+		return err
+	}
+	// Reuse the generic NOTIFY listener on the proxies channel.
+	account.NewListener(pool, proxypool.NotifyChannel, proxyPool.Refresh).Start(ctx)
+	slog.Info("proxy pool ready", "size", proxyPool.Size(), "notify_channel", proxypool.NotifyChannel)
 	return nil
 }
 

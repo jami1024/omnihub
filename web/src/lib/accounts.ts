@@ -80,6 +80,8 @@ export interface Account {
   client_profile_config: Record<string, unknown>
   // In-flight request cap (0 = unlimited; enforced in-process).
   max_concurrency: number
+  // Bound proxy (migration 0038); null = inline proxy_url / direct.
+  proxy_id: number | null
 }
 
 // AccountInput is the create/update body. On create, credentials is
@@ -117,6 +119,7 @@ export interface AccountInput {
   client_profile: string
   client_profile_config: Record<string, unknown>
   max_concurrency: number
+  proxy_id: number | null
 }
 
 const ACCOUNTS_KEY = ['accounts'] as const

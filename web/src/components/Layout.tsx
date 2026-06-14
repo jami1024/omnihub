@@ -17,6 +17,7 @@ const NAV: NavItem[] = [
   { to: '/admin', labelKey: 'nav.dashboard' },
   { to: '/admin/accounts', labelKey: 'nav.accounts' },
   { to: '/admin/groups', labelKey: 'nav.groups' },
+  { to: '/admin/proxies', labelKey: 'nav.proxies' },
   { to: '/admin/keys', labelKey: 'nav.keys' },
   { to: '/admin/health', labelKey: 'nav.health' },
   { to: '/admin/users', labelKey: 'nav.users' },
