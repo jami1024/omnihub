@@ -26,8 +26,15 @@ type proxyStore interface {
 	Delete(ctx context.Context, id int64) error
 }
 
+// ProxyHealthLookup exposes the live health of a proxy (implemented by
+// proxypool.Pool). Nil = no health data (the list omits health).
+type ProxyHealthLookup interface {
+	ProxyHealth(id int64) (healthy bool, latencyMs int64, checkedUnix int64, ok bool)
+}
+
 // proxyDTO is the redacted JSON shape returned to the SPA. The password
-// is never returned — only whether one is set.
+// is never returned — only whether one is set. Health fields are nil
+// until the prober has evaluated the proxy.
 type proxyDTO struct {
 	ID            int64  `json:"id"`
 	Name          string `json:"name"`
@@ -40,15 +47,18 @@ type proxyDTO struct {
 	ExpiresAt     *int64 `json:"expires_at"`
 	FallbackMode  string `json:"fallback_mode"`
 	BackupProxyID *int64 `json:"backup_proxy_id"`
+	Healthy       *bool  `json:"healthy"`
+	LatencyMs     *int64 `json:"latency_ms"`
+	LastChecked   *int64 `json:"last_checked"`
 }
 
-func proxyToDTO(p *provider.Proxy) proxyDTO {
+func proxyToDTO(p *provider.Proxy, health ProxyHealthLookup) proxyDTO {
 	var exp *int64
 	if p.ExpiresAt != nil {
 		u := p.ExpiresAt.Unix()
 		exp = &u
 	}
-	return proxyDTO{
+	dto := proxyDTO{
 		ID:            p.ID,
 		Name:          p.Name,
 		Protocol:      p.Protocol,
@@ -61,6 +71,13 @@ func proxyToDTO(p *provider.Proxy) proxyDTO {
 		FallbackMode:  p.FallbackMode,
 		BackupProxyID: p.BackupProxyID,
 	}
+	if health != nil {
+		if healthy, latency, checked, ok := health.ProxyHealth(p.ID); ok {
+			h, l, c := healthy, latency, checked
+			dto.Healthy, dto.LatencyMs, dto.LastChecked = &h, &l, &c
+		}
+	}
+	return dto
 }
 
 // proxyInput is the create/update body. Password is a pointer so an
@@ -137,7 +154,8 @@ func validateProxyInput(in *proxyInput) (repository.ProxyParams, string) {
 }
 
 // ListProxiesHandler returns GET /admin/api/proxies → {"proxies":[…]}.
-func ListProxiesHandler(store proxyStore) gin.HandlerFunc {
+// health may be nil (no live health, e.g. log-only mode).
+func ListProxiesHandler(store proxyStore, health ProxyHealthLookup) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		proxies, err := store.ListAll(c.Request.Context())
 		if err != nil {
@@ -147,7 +165,7 @@ func ListProxiesHandler(store proxyStore) gin.HandlerFunc {
 		}
 		out := make([]proxyDTO, len(proxies))
 		for i, p := range proxies {
-			out[i] = proxyToDTO(p)
+			out[i] = proxyToDTO(p, health)
 		}
 		c.JSON(http.StatusOK, gin.H{"proxies": out})
 	}
@@ -185,7 +203,7 @@ func CreateProxyHandler(store proxyStore) gin.HandlerFunc {
 			return
 		}
 		slog.Info("admin: proxy created", "id", id, "name", params.Name, "admin", adminActor(c))
-		c.JSON(http.StatusCreated, proxyToDTO(p))
+		c.JSON(http.StatusCreated, proxyToDTO(p, nil))
 	}
 }
 
@@ -235,7 +253,7 @@ func UpdateProxyHandler(store proxyStore) gin.HandlerFunc {
 			return
 		}
 		slog.Info("admin: proxy updated", "id", id, "name", params.Name, "admin", adminActor(c))
-		c.JSON(http.StatusOK, proxyToDTO(p))
+		c.JSON(http.StatusOK, proxyToDTO(p, nil))
 	}
 }
 

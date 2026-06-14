@@ -385,7 +385,14 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	// first-class resource. The proxies NOTIFY trigger refreshes the
 	// in-memory ProxyPool so binding edits take effect without restart.
 	proxyRepo := repository.NewProxyRepo(pool, accountCipher)
-	authed.GET("/proxies", adminhandler.ListProxiesHandler(proxyRepo))
+	// A nil *proxypool.Pool must reach the handler as a nil interface,
+	// not a non-nil interface wrapping a nil pointer (which would panic
+	// on ProxyHealth). Only assign when the pool exists.
+	var proxyHealth adminhandler.ProxyHealthLookup
+	if proxyPool != nil {
+		proxyHealth = proxyPool
+	}
+	authed.GET("/proxies", adminhandler.ListProxiesHandler(proxyRepo, proxyHealth))
 	authed.POST("/proxies", adminhandler.CreateProxyHandler(proxyRepo))
 	authed.PATCH("/proxies/:id", adminhandler.UpdateProxyHandler(proxyRepo))
 	authed.DELETE("/proxies/:id", adminhandler.DeleteProxyHandler(proxyRepo))
@@ -1295,7 +1302,33 @@ func setupProxyPool(ctx context.Context) error {
 	// Reuse the generic NOTIFY listener on the proxies channel.
 	account.NewListener(pool, proxypool.NotifyChannel, proxyPool.Refresh).Start(ctx)
 	slog.Info("proxy pool ready", "size", proxyPool.Size(), "notify_channel", proxypool.NotifyChannel)
+
+	// Background health probing: a dead proxy is routed around (resolver
+	// degrades it to backup / direct) without waiting for bound accounts'
+	// breakers. On by default (cheap GET, no upstream token cost);
+	// disable with OMNIHUB_PROXY_PROBE_ENABLED=false.
+	if proxyProbeEnabled() {
+		interval := proxyProbeInterval()
+		proxypool.NewProber(proxyPool, interval).Start(ctx)
+		slog.Info("proxy health prober started", "interval", interval)
+	}
 	return nil
+}
+
+// proxyProbeEnabled reports whether the background proxy health prober
+// runs. Default true; OMNIHUB_PROXY_PROBE_ENABLED=false disables it.
+func proxyProbeEnabled() bool {
+	return !strings.EqualFold(strings.TrimSpace(os.Getenv("OMNIHUB_PROXY_PROBE_ENABLED")), "false")
+}
+
+// proxyProbeInterval reads OMNIHUB_PROXY_PROBE_INTERVAL (a Go duration),
+// defaulting to 60s and flooring at 10s.
+func proxyProbeInterval() time.Duration {
+	d, err := time.ParseDuration(strings.TrimSpace(os.Getenv("OMNIHUB_PROXY_PROBE_INTERVAL")))
+	if err != nil || d < 10*time.Second {
+		return 60 * time.Second
+	}
+	return d
 }
 
 func handleHealth(c *gin.Context) {

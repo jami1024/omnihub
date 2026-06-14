@@ -17,6 +17,10 @@ export interface Proxy {
   expires_at: number | null
   fallback_mode: string
   backup_proxy_id: number | null
+  // Live health from the background prober; null until first probe.
+  healthy: boolean | null
+  latency_ms: number | null
+  last_checked: number | null
 }
 
 // ProxyInput is the create/update body. On update, omit password

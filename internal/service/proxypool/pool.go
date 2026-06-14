@@ -18,6 +18,21 @@ import (
 // publishes to (migration 0038).
 const NotifyChannel = "omnihub_proxies_changed"
 
+// healthFailThreshold is how many CONSECUTIVE failed probes mark a
+// proxy unhealthy (de-bounce so one transient blip doesn't degrade it).
+// One success restores it.
+const healthFailThreshold = 3
+
+// proxyHealth is the prober's per-proxy runtime state. An absent entry
+// means "not yet probed" and is treated as healthy (optimistic), so the
+// resolver never degrades a proxy the prober hasn't evaluated.
+type proxyHealth struct {
+	consecFails int
+	healthy     bool
+	latencyMs   int64
+	checkedUnix int64 // unix seconds; 0 = never
+}
+
 // Source returns every proxy. Implemented by repository.ProxyRepo.
 type Source interface {
 	ListAll(ctx context.Context) ([]*provider.Proxy, error)
@@ -29,8 +44,9 @@ type Pool struct {
 	source Source
 	now    func() time.Time
 
-	mu   sync.RWMutex
-	byID map[int64]*provider.Proxy
+	mu     sync.RWMutex
+	byID   map[int64]*provider.Proxy
+	health map[int64]*proxyHealth
 }
 
 // NewPool returns an empty pool. Call Refresh / Start before serving.
@@ -39,6 +55,7 @@ func NewPool(source Source) *Pool {
 		source: source,
 		now:    time.Now,
 		byID:   make(map[int64]*provider.Proxy),
+		health: make(map[int64]*proxyHealth),
 	}
 }
 
@@ -55,8 +72,71 @@ func (p *Pool) Refresh(ctx context.Context) error {
 	}
 	p.mu.Lock()
 	p.byID = byID
+	// GC health entries for proxies that left the pool.
+	for id := range p.health {
+		if _, ok := byID[id]; !ok {
+			delete(p.health, id)
+		}
+	}
 	p.mu.Unlock()
 	return nil
+}
+
+// AllActive returns a snapshot of the active proxies, for the prober.
+func (p *Pool) AllActive() []*provider.Proxy {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make([]*provider.Proxy, 0, len(p.byID))
+	for _, pr := range p.byID {
+		if pr.Active() {
+			out = append(out, pr)
+		}
+	}
+	return out
+}
+
+// RecordProbe folds one probe outcome into a proxy's health. A failure
+// increments the consecutive-fail counter and marks the proxy unhealthy
+// once it crosses the threshold; a success restores it immediately.
+func (p *Pool) RecordProbe(id int64, ok bool, latencyMs int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	h := p.health[id]
+	if h == nil {
+		h = &proxyHealth{healthy: true}
+		p.health[id] = h
+	}
+	h.checkedUnix = p.now().Unix()
+	h.latencyMs = latencyMs
+	if ok {
+		h.consecFails = 0
+		h.healthy = true
+		return
+	}
+	h.consecFails++
+	if h.consecFails >= healthFailThreshold {
+		h.healthy = false
+	}
+}
+
+// ProxyHealth returns the live health of a proxy as primitives (for the
+// admin layer, which must not import this package's types). ok is false
+// when the proxy has never been probed. checkedUnix is unix seconds.
+func (p *Pool) ProxyHealth(id int64) (healthy bool, latencyMs int64, checkedUnix int64, ok bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	h := p.health[id]
+	if h == nil || h.checkedUnix == 0 {
+		return false, 0, 0, false
+	}
+	return h.healthy, h.latencyMs, h.checkedUnix, true
+}
+
+// healthyLocked reports whether a proxy is currently routable health-
+// wise. An un-probed proxy (no entry) is optimistically healthy.
+func (p *Pool) healthyLocked(id int64) bool {
+	h := p.health[id]
+	return h == nil || h.healthy
 }
 
 // Start runs Refresh once, then re-refreshes every interval until ctx
@@ -95,10 +175,13 @@ func (p *Pool) Size() int {
 //   - no binding (ProxyID nil) → the legacy inline ProxyURL, so
 //     existing accounts keep working;
 //   - a disabled or vanished proxy → "" (direct);
-//   - an unexpired active proxy → its URL;
-//   - an expired proxy → per fallback_mode: "none" keeps using it
-//     (expiry is advisory), "direct" routes direct, "proxy" follows the
-//     backup chain to the first usable proxy (cycle-safe), "" if none.
+//   - a healthy, unexpired active proxy → its URL;
+//   - an expired but healthy proxy → per fallback_mode: "none" keeps
+//     using it (expiry is advisory), "direct" routes direct, "proxy"
+//     follows the backup chain to the first usable proxy (cycle-safe);
+//   - an UNHEALTHY proxy (the prober's probes are failing) → always
+//     degrade: follow the backup chain when configured, else direct —
+//     "none" is ignored because there is no point keeping a dead proxy.
 func (p *Pool) Resolve(account *provider.Account) string {
 	if account == nil {
 		return ""
@@ -124,18 +207,29 @@ func (p *Pool) resolveLocked(id int64, now time.Time, visited map[int64]struct{}
 	if pr == nil || !pr.Active() {
 		return "" // vanished or disabled → direct
 	}
-	if !pr.IsExpired(now) {
+	healthy := p.healthyLocked(id)
+	fresh := !pr.IsExpired(now)
+	if healthy && fresh {
 		return pr.URL()
 	}
-	switch pr.FallbackMode {
-	case "direct":
-		return ""
-	case "proxy":
-		if pr.BackupProxyID != nil {
-			return p.resolveLocked(*pr.BackupProxyID, now, visited)
+	if healthy && !fresh {
+		// Expired but reachable: fallback_mode decides.
+		switch pr.FallbackMode {
+		case "direct":
+			return ""
+		case "proxy":
+			if pr.BackupProxyID != nil {
+				return p.resolveLocked(*pr.BackupProxyID, now, visited)
+			}
+			return ""
+		default: // "none" — expiry is advisory, keep using it
+			return pr.URL()
 		}
-		return ""
-	default: // "none" — expiry is advisory, keep using it
-		return pr.URL()
 	}
+	// Unhealthy: degrade regardless of fallback_mode — try the backup
+	// chain, else direct. Keeping a dead proxy ("none") is pointless.
+	if pr.FallbackMode == "proxy" && pr.BackupProxyID != nil {
+		return p.resolveLocked(*pr.BackupProxyID, now, visited)
+	}
+	return ""
 }

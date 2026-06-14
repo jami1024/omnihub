@@ -102,6 +102,7 @@ export function ProxiesPage() {
                   <Th>{t('common.name')}</Th>
                   <Th>{t('proxies.endpoint')}</Th>
                   <Th>{t('common.status')}</Th>
+                  <Th>{t('proxies.health')}</Th>
                   <Th>{t('proxies.fallback')}</Th>
                   <Th className="text-right">{t('common.actions')}</Th>
                 </tr>
@@ -114,6 +115,9 @@ export function ProxiesPage() {
                       {p.protocol}://{p.username ? `${p.username}@` : ''}{p.host}:{p.port}
                     </Td>
                     <Td className={p.status === 'active' ? '' : 'text-muted'}>{p.status}</Td>
+                    <Td>
+                      <HealthCell proxy={p} />
+                    </Td>
                     <Td className="text-muted">{p.fallback_mode}</Td>
                     <Td className="text-right">
                       <RowTest id={p.id} />
@@ -158,6 +162,25 @@ export function ProxiesPage() {
         )}
       </main>
     </Layout>
+  )
+}
+
+// HealthCell shows the background prober's verdict: a green/red dot with
+// latency, or "—" when the proxy hasn't been probed yet.
+function HealthCell({ proxy }: { proxy: Proxy }) {
+  const { t } = useI18n()
+  if (proxy.healthy == null) {
+    return <span className="text-muted">—</span>
+  }
+  const tone = proxy.healthy ? 'bg-emerald-500' : 'bg-danger'
+  return (
+    <span className="inline-flex items-center gap-1.5" title={t('proxies.healthHint')}>
+      <span className={`inline-block h-2 w-2 rounded-full ${tone}`} />
+      <span className="font-mono text-xs text-muted">
+        {proxy.healthy ? t('proxies.healthy') : t('proxies.unhealthy')}
+        {proxy.latency_ms != null ? ` · ${proxy.latency_ms}ms` : ''}
+      </span>
+    </span>
   )
 }
 
