@@ -105,6 +105,42 @@ func TestResponsesHandler_BadJSON(t *testing.T) {
 	}
 }
 
+// TestResponsesHandler_NonStreamPassthrough covers a stream=false
+// /v1/responses request: the codex driver omits stream, asks for a JSON
+// Accept, and the upstream JSON body is passed through verbatim with
+// usage sniffed from the response object. (B-3: whether the real codex
+// backend honours stream=false is a live question, but the gateway's
+// own JSON pass-through path is exercised here.)
+func TestResponsesHandler_NonStreamPassthrough(t *testing.T) {
+	const upstreamBody = `{"id":"resp_ns","object":"response","model":"gpt-5-codex","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":11,"output_tokens":2}}`
+	var gotAccept string
+	var gotBody map[string]json.RawMessage
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, upstreamBody)
+	}))
+	defer upstream.Close()
+
+	h := newResponsesHandler(t, upstream.URL)
+	rec := doResponsesRequest(h, `{"model":"gpt-5-codex","stream":false,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if gotAccept != "application/json" {
+		t.Errorf("non-stream Accept = %q, want application/json", gotAccept)
+	}
+	if _, ok := gotBody["stream"]; ok {
+		t.Error("stream:false must be omitted from the upstream body, not sent")
+	}
+	if rec.Body.String() != upstreamBody {
+		t.Error("non-stream response not passed through verbatim")
+	}
+}
+
 func TestModelsHandler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
