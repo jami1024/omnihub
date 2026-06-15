@@ -364,6 +364,13 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	// plus the plugin metadata list the account form's auth picker reads.
 	authed.GET("/auth-plugins", adminhandler.ListAuthPluginsHandler(authPlugins))
 	authed.POST("/accounts/:id/import-credentials", adminhandler.ImportAccountCredentialsHandler(accountRepo, authPlugins))
+	// Browser OAuth login (PKCE): begin returns an authorize URL the
+	// operator opens, exchange takes the pasted-back code and updates the
+	// SAME account row. The session store holds the PKCE verifier between
+	// the two calls (in-memory, 10m TTL).
+	oauthSessions := adminhandler.NewOAuthSessionStore(context.Background())
+	authed.POST("/accounts/:id/oauth/begin", adminhandler.BeginOAuthLoginHandler(accountRepo, authPlugins, oauthSessions))
+	authed.POST("/accounts/:id/oauth/exchange", adminhandler.ExchangeOAuthLoginHandler(accountRepo, authPlugins, oauthSessions))
 	// Phase 6 — subscription quota windows (codex wham/usage, claude
 	// /api/oauth/usage) surfaced per account.
 	authed.GET("/accounts/:id/quota", adminhandler.QuotaAccountByIDHandler(accountRepo, registry))

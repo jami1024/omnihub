@@ -268,6 +268,35 @@ export interface ImportCredentialsResult {
   profile?: { subject: string; email: string; plan: string }
 }
 
+// OAuthBeginResult is the begin-login reply: the authorize URL to open
+// and the session id to carry into the exchange step.
+export interface OAuthBeginResult {
+  session_id: string
+  authorize_url: string
+}
+
+// useBeginOAuthLogin starts a browser OAuth login for an existing
+// account, returning the authorize URL + session id.
+export function useBeginOAuthLogin() {
+  return useMutation({
+    mutationFn: (id: number) => api<OAuthBeginResult>(`/accounts/${id}/oauth/begin`, { method: 'POST' }),
+  })
+}
+
+// useExchangeOAuthLogin completes the login: the pasted-back code (+
+// state) is exchanged for tokens and written onto the account.
+export function useExchangeOAuthLogin() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, session_id, code, state }: { id: number; session_id: string; code: string; state: string }) =>
+      api<ImportCredentialsResult>(`/accounts/${id}/oauth/exchange`, {
+        method: 'POST',
+        body: JSON.stringify({ session_id, code, state }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
+  })
+}
+
 // useImportCredentials pushes pasted CLI credentials (e.g. the content
 // of ~/.codex/auth.json) onto an existing account via its auth plugin.
 export function useImportCredentials() {

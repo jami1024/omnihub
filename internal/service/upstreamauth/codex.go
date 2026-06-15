@@ -19,8 +19,19 @@ import (
 const (
 	codexPluginName   = "codex-oauth"
 	codexTokenURL     = "https://auth.openai.com/oauth/token"
+	codexAuthorizeURL = "https://auth.openai.com/oauth/authorize"
 	codexClientID     = "app_EMoamEEZ73f0CkXaXp7hrann"
 	codexRefreshScope = "openid profile email"
+	// codexLoginScope is the broader scope requested at browser login
+	// (offline_access yields a refresh_token).
+	codexLoginScope = "openid profile email offline_access"
+	// codexRedirectURI is the native Codex CLI's loopback callback. The
+	// browser lands there after login; with no local listener the page
+	// just fails to load, but the address bar holds ?code=&state= which
+	// the admin pastes back. An admin can override it.
+	codexRedirectURI = "http://localhost:1455/auth/callback"
+	// codexOriginator identifies the client family in the authorize URL.
+	codexOriginator = "codex_cli_rs"
 	// codexAuthClaim is the namespaced JWT claim OpenAI puts account
 	// metadata under (chatgpt_account_id, chatgpt_plan_type, ...).
 	codexAuthClaim = "https://api.openai.com/auth"
@@ -65,7 +76,7 @@ func (p *CodexOAuth) Metadata(context.Context) (*Metadata, error) {
 		Name:               codexPluginName,
 		DisplayName:        "OpenAI Codex OAuth",
 		SupportedProviders: []string{"openai-codex"},
-		AuthMethods:        []string{"import_auth_json"},
+		AuthMethods:        []string{"import_auth_json", "browser_oauth"},
 		Experimental:       true,
 	}, nil
 }
@@ -192,49 +203,120 @@ func (p *CodexOAuth) Refresh(ctx context.Context, req *RefreshRequest) (*TokenBu
 		return nil, fmt.Errorf("codex-oauth: no refresh_token stored; re-import auth.json")
 	}
 	old := req.Credentials
-
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
 		"client_id":     {codexClientID},
 		"refresh_token": {old[credRefreshToken]},
 		"scope":         {codexRefreshScope},
 	}
+	tr, err := p.postCodexToken(ctx, form, req.ProxyURL)
+	if err != nil {
+		return nil, err
+	}
+	return bundleFromCodexToken(tr, old, "codex_auth_json"), nil
+}
+
+// BeginAuth generates a PKCE browser-login authorize URL. The returned
+// CodeVerifier and State are held by the admin layer until the callback.
+func (p *CodexOAuth) BeginAuth(_ context.Context, req *BeginAuthRequest) (*BeginAuthResponse, error) {
+	verifier, err := generateCodeVerifier()
+	if err != nil {
+		return nil, err
+	}
+	state, err := generateState()
+	if err != nil {
+		return nil, err
+	}
+	redirect := codexRedirectURI
+	if req != nil && req.RedirectURI != "" {
+		redirect = req.RedirectURI
+	}
+	params := url.Values{
+		"response_type":              {"code"},
+		"client_id":                  {codexClientID},
+		"redirect_uri":               {redirect},
+		"scope":                      {codexLoginScope},
+		"state":                      {state},
+		"code_challenge":             {codeChallengeS256(verifier)},
+		"code_challenge_method":      {"S256"},
+		"id_token_add_organizations": {"true"},
+		"codex_cli_simplified_flow":  {"true"},
+		"originator":                 {codexOriginator},
+	}
+	return &BeginAuthResponse{
+		AuthorizeURL: codexAuthorizeURL + "?" + params.Encode(),
+		State:        state,
+		CodeVerifier: verifier,
+	}, nil
+}
+
+// ExchangeCallback swaps the authorization code (+ PKCE verifier) for a
+// fresh token bundle. State validation is the admin layer's job.
+func (p *CodexOAuth) ExchangeCallback(ctx context.Context, req *CallbackRequest) (*TokenBundle, error) {
+	if req == nil || req.Code == "" || req.CodeVerifier == "" {
+		return nil, fmt.Errorf("codex-oauth: code and code_verifier are required")
+	}
+	redirect := codexRedirectURI
+	if req.RedirectURI != "" {
+		redirect = req.RedirectURI
+	}
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"client_id":     {codexClientID},
+		"code":          {req.Code},
+		"redirect_uri":  {redirect},
+		"code_verifier": {req.CodeVerifier},
+	}
+	tr, err := p.postCodexToken(ctx, form, req.ProxyURL)
+	if err != nil {
+		return nil, err
+	}
+	return bundleFromCodexToken(tr, nil, "codex_oauth_login"), nil
+}
+
+// postCodexToken POSTs a form to the token endpoint and returns the
+// parsed response. A dead grant (invalid_grant / 401 / 403) is wrapped
+// with ErrLoginRequired.
+func (p *CodexOAuth) postCodexToken(ctx context.Context, form url.Values, proxyURL string) (codexTokenResponse, error) {
 	tokenURL := p.TokenURL
 	if tokenURL == "" {
 		tokenURL = codexTokenURL
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, fmt.Errorf("codex-oauth: build refresh request: %w", err)
+		return codexTokenResponse{}, fmt.Errorf("codex-oauth: build token request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client, err := p.refreshClient(req.ProxyURL)
+	client, err := p.refreshClient(proxyURL)
 	if err != nil {
-		return nil, err
+		return codexTokenResponse{}, err
 	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("codex-oauth: refresh request failed: %w", err)
+		return codexTokenResponse{}, fmt.Errorf("codex-oauth: token request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	var tr codexTokenResponse
 	if err := json.Unmarshal(body, &tr); err != nil && resp.StatusCode == http.StatusOK {
-		return nil, fmt.Errorf("codex-oauth: decode refresh response: %w", err)
+		return codexTokenResponse{}, fmt.Errorf("codex-oauth: decode token response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK || tr.AccessToken == "" {
 		msg := strings.TrimSpace(firstNonEmpty(tr.ErrorDesc, tr.Error, truncate(string(body), 200)))
-		// invalid_grant (or a flat 401/403 from the auth server) means
-		// the refresh token itself is dead — no retry can fix it, the
-		// admin must re-login and re-import.
 		if tr.Error == "invalid_grant" || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return nil, fmt.Errorf("codex-oauth: refresh rejected (HTTP %d): %s: %w", resp.StatusCode, msg, ErrLoginRequired)
+			return tr, fmt.Errorf("codex-oauth: token rejected (HTTP %d): %s: %w", resp.StatusCode, msg, ErrLoginRequired)
 		}
-		return nil, fmt.Errorf("codex-oauth: refresh rejected (HTTP %d): %s", resp.StatusCode, msg)
+		return tr, fmt.Errorf("codex-oauth: token rejected (HTTP %d): %s", resp.StatusCode, msg)
 	}
+	return tr, nil
+}
 
+// bundleFromCodexToken builds a TokenBundle from a successful token
+// response, merging with prior credentials (old may be nil for a fresh
+// login). defaultSource tags where the credentials came from.
+func bundleFromCodexToken(tr codexTokenResponse, old map[string]string, defaultSource string) *TokenBundle {
 	ttl := time.Duration(tr.ExpiresIn) * time.Second
 	if ttl <= 0 {
 		ttl = codexDefaultTokenTTL
@@ -252,7 +334,7 @@ func (p *CodexOAuth) Refresh(ctx context.Context, req *RefreshRequest) (*TokenBu
 		credRefreshToken: firstNonEmpty(tr.RefreshToken, old[credRefreshToken]),
 		credAccountID:    firstNonEmpty(profile.Subject, old[credAccountID]),
 		credExpiresAt:    strconv.FormatInt(expiresAt.Unix(), 10),
-		credSource:       firstNonEmpty(old[credSource], "codex_auth_json"),
+		credSource:       firstNonEmpty(old[credSource], defaultSource),
 		credSourceSchema: firstNonEmpty(old[credSourceSchema], "1"),
 	}
 	if idToken != "" {
@@ -265,7 +347,7 @@ func (p *CodexOAuth) Refresh(ctx context.Context, req *RefreshRequest) (*TokenBu
 		creds[credPlan] = v
 	}
 
-	return &TokenBundle{Credentials: creds, ExpiresAt: &expiresAt, Profile: &profile}, nil
+	return &TokenBundle{Credentials: creds, ExpiresAt: &expiresAt, Profile: &profile}
 }
 
 // Validate re-derives the profile from stored tokens. Offline: claims

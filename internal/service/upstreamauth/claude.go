@@ -17,9 +17,16 @@ import (
 // client: the gateway refreshes tokens exactly the way the CLI itself
 // would, so imported ~/.claude/.credentials.json sessions keep working.
 const (
-	claudePluginName = "claude-oauth"
-	claudeTokenURL   = "https://console.anthropic.com/v1/oauth/token"
-	claudeClientID   = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	claudePluginName   = "claude-oauth"
+	claudeTokenURL     = "https://console.anthropic.com/v1/oauth/token"
+	claudeAuthorizeURL = "https://claude.ai/oauth/authorize"
+	claudeClientID     = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	// claudeRedirectURI is the official Claude Code OAuth callback. The
+	// browser lands there after login showing the code; the admin pastes
+	// it back. An admin can override it.
+	claudeRedirectURI = "https://platform.claude.com/oauth/code/callback"
+	// claudeLoginScope is requested at browser login.
+	claudeLoginScope = "org:create_api_key user:profile user:inference user:sessions:claude_code"
 	// claudeProfileURL returns the authenticated account's identity
 	// (email, pro/max flags) — used by Validate to enrich the admin UI.
 	claudeProfileURL = "https://api.anthropic.com/api/oauth/profile"
@@ -53,7 +60,7 @@ func (p *ClaudeOAuth) Metadata(context.Context) (*Metadata, error) {
 		Name:               claudePluginName,
 		DisplayName:        "Claude Pro/Max OAuth",
 		SupportedProviders: []string{"claude-subscription"},
-		AuthMethods:        []string{"import_credentials_json"},
+		AuthMethods:        []string{"import_credentials_json", "browser_oauth"},
 		Experimental:       true,
 	}, nil
 }
@@ -159,48 +166,118 @@ func (p *ClaudeOAuth) Refresh(ctx context.Context, req *RefreshRequest) (*TokenB
 		return nil, fmt.Errorf("claude-oauth: no refresh_token stored; re-import credentials")
 	}
 	old := req.Credentials
-
-	payload, err := json.Marshal(map[string]string{
+	tr, err := p.postClaudeToken(ctx, map[string]string{
 		"grant_type":    "refresh_token",
 		"refresh_token": old[credRefreshToken],
 		"client_id":     claudeClientID,
-	})
+	}, req.ProxyURL)
 	if err != nil {
-		return nil, fmt.Errorf("claude-oauth: encode refresh request: %w", err)
+		return nil, err
+	}
+	return bundleFromClaudeToken(tr, old, "claude_credentials_json"), nil
+}
+
+// BeginAuth generates a PKCE browser-login authorize URL for Claude.
+func (p *ClaudeOAuth) BeginAuth(_ context.Context, req *BeginAuthRequest) (*BeginAuthResponse, error) {
+	verifier, err := generateCodeVerifier()
+	if err != nil {
+		return nil, err
+	}
+	state, err := generateState()
+	if err != nil {
+		return nil, err
+	}
+	redirect := claudeRedirectURI
+	if req != nil && req.RedirectURI != "" {
+		redirect = req.RedirectURI
+	}
+	params := url.Values{
+		"code":                  {"true"}, // Claude-specific: request a pasteable code
+		"client_id":             {claudeClientID},
+		"response_type":         {"code"},
+		"redirect_uri":          {redirect},
+		"scope":                 {claudeLoginScope},
+		"state":                 {state},
+		"code_challenge":        {codeChallengeS256(verifier)},
+		"code_challenge_method": {"S256"},
+	}
+	return &BeginAuthResponse{
+		AuthorizeURL: claudeAuthorizeURL + "?" + params.Encode(),
+		State:        state,
+		CodeVerifier: verifier,
+	}, nil
+}
+
+// ExchangeCallback swaps the authorization code (+ PKCE verifier) for a
+// fresh Claude token bundle.
+func (p *ClaudeOAuth) ExchangeCallback(ctx context.Context, req *CallbackRequest) (*TokenBundle, error) {
+	if req == nil || req.Code == "" || req.CodeVerifier == "" {
+		return nil, fmt.Errorf("claude-oauth: code and code_verifier are required")
+	}
+	redirect := claudeRedirectURI
+	if req.RedirectURI != "" {
+		redirect = req.RedirectURI
+	}
+	tr, err := p.postClaudeToken(ctx, map[string]string{
+		"grant_type":    "authorization_code",
+		"client_id":     claudeClientID,
+		"code":          req.Code,
+		"redirect_uri":  redirect,
+		"code_verifier": req.CodeVerifier,
+		"state":         req.State,
+	}, req.ProxyURL)
+	if err != nil {
+		return nil, err
+	}
+	return bundleFromClaudeToken(tr, nil, "claude_oauth_login"), nil
+}
+
+// postClaudeToken POSTs a JSON body to the token endpoint and returns
+// the parsed response. A dead grant is wrapped with ErrLoginRequired.
+func (p *ClaudeOAuth) postClaudeToken(ctx context.Context, payload map[string]string, proxyURL string) (claudeTokenResponse, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return claudeTokenResponse{}, fmt.Errorf("claude-oauth: encode token request: %w", err)
 	}
 	tokenURL := p.TokenURL
 	if tokenURL == "" {
 		tokenURL = claudeTokenURL
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, bytes.NewReader(payload))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("claude-oauth: build refresh request: %w", err)
+		return claudeTokenResponse{}, fmt.Errorf("claude-oauth: build token request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	client, err := p.client(req.ProxyURL)
+	client, err := p.client(proxyURL)
 	if err != nil {
-		return nil, err
+		return claudeTokenResponse{}, err
 	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("claude-oauth: refresh request failed: %w", err)
+		return claudeTokenResponse{}, fmt.Errorf("claude-oauth: token request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	var tr claudeTokenResponse
 	if err := json.Unmarshal(body, &tr); err != nil && resp.StatusCode == http.StatusOK {
-		return nil, fmt.Errorf("claude-oauth: decode refresh response: %w", err)
+		return claudeTokenResponse{}, fmt.Errorf("claude-oauth: decode token response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK || tr.AccessToken == "" {
 		msg := strings.TrimSpace(firstNonEmpty(tr.ErrorDesc, tr.Error, truncate(string(body), 200)))
 		if tr.Error == "invalid_grant" || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return nil, fmt.Errorf("claude-oauth: refresh rejected (HTTP %d): %s: %w", resp.StatusCode, msg, ErrLoginRequired)
+			return tr, fmt.Errorf("claude-oauth: token rejected (HTTP %d): %s: %w", resp.StatusCode, msg, ErrLoginRequired)
 		}
-		return nil, fmt.Errorf("claude-oauth: refresh rejected (HTTP %d): %s", resp.StatusCode, msg)
+		return tr, fmt.Errorf("claude-oauth: token rejected (HTTP %d): %s", resp.StatusCode, msg)
 	}
+	return tr, nil
+}
 
+// bundleFromClaudeToken builds a TokenBundle from a successful token
+// response, merging with prior credentials (old may be nil for a fresh
+// login).
+func bundleFromClaudeToken(tr claudeTokenResponse, old map[string]string, defaultSource string) *TokenBundle {
 	ttl := time.Duration(tr.ExpiresIn) * time.Second
 	if ttl <= 0 {
 		ttl = claudeDefaultTokenTTL
@@ -211,7 +288,7 @@ func (p *ClaudeOAuth) Refresh(ctx context.Context, req *RefreshRequest) (*TokenB
 		credAccessToken:  tr.AccessToken,
 		credRefreshToken: firstNonEmpty(tr.RefreshToken, old[credRefreshToken]),
 		credExpiresAt:    strconv.FormatInt(expiresAt.Unix(), 10),
-		credSource:       firstNonEmpty(old[credSource], "claude_credentials_json"),
+		credSource:       firstNonEmpty(old[credSource], defaultSource),
 		credSourceSchema: firstNonEmpty(old[credSourceSchema], "1"),
 	}
 	if scopes := firstNonEmpty(tr.Scope, old["scopes"]); scopes != "" {
@@ -232,7 +309,7 @@ func (p *ClaudeOAuth) Refresh(ctx context.Context, req *RefreshRequest) (*TokenB
 		Credentials: creds,
 		ExpiresAt:   &expiresAt,
 		Profile:     &AccountProfile{Plan: plan, Subject: old[credAccountID], Email: old[credEmail]},
-	}, nil
+	}
 }
 
 // claudeProfileResponse is the /api/oauth/profile reply subset the

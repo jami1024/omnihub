@@ -9,8 +9,10 @@ import { useI18n } from '../lib/i18n'
 import {
   useAccountQuota,
   useAccounts,
+  useBeginOAuthLogin,
   useCreateAccount,
   useDeleteAccount,
+  useExchangeOAuthLogin,
   useExportAccounts,
   useImportAccounts,
   useImportCredentials,
@@ -38,6 +40,7 @@ export function AccountsPage() {
   const [editing, setEditing] = useState<Editing>(null)
   const [formErr, setFormErr] = useState<string | null>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
+  const [relogin, setRelogin] = useState<Account | null>(null)
   const accountCount = accounts?.length ?? 0
   const enabledCount = accounts?.filter((a) => a.enabled).length ?? 0
   const providerCount = accounts ? new Set(accounts.map((a) => a.provider)).size : 0
@@ -244,6 +247,14 @@ export function AccountsPage() {
                     <Td className="text-right">
                       <RowTest id={a.id} />
                       {a.auth_type !== 'api_key' && <RowQuota id={a.id} />}
+                      {a.auth_type !== 'api_key' && (
+                        <button
+                          onClick={() => setRelogin(a)}
+                          className="mr-1 inline-flex min-h-10 items-center rounded-md px-2 text-muted underline-offset-4 hover:bg-surface-2 hover:text-ink hover:underline sm:mr-3 sm:px-1"
+                        >
+                          {t('accounts.relogin')}
+                        </button>
+                      )}
                       <button
                         onClick={() => openEdit(a)}
                         className="mr-1 inline-flex min-h-10 items-center rounded-md px-2 text-muted underline-offset-4 hover:bg-surface-2 hover:text-ink hover:underline sm:mr-3 sm:px-1"
@@ -285,7 +296,129 @@ export function AccountsPage() {
           />
         </Modal>
       )}
+
+      {relogin && (
+        <Modal title={t('accounts.reloginTitle', { name: relogin.name })} onClose={() => setRelogin(null)}>
+          <ReloginForm account={relogin} onClose={() => setRelogin(null)} />
+        </Modal>
+      )}
     </Layout>
+  )
+}
+
+// parseCallback extracts code + state from whatever the operator pastes:
+// a full callback URL (?code=&state=), the Claude "code#state" form, or
+// a bare code.
+function parseCallback(raw: string): { code: string; state: string } {
+  const v = raw.trim()
+  if (v.includes('://') || v.includes('code=')) {
+    try {
+      const u = new URL(v.includes('://') ? v : 'http://x/?' + v.replace(/^\?/, ''))
+      return { code: u.searchParams.get('code') ?? '', state: u.searchParams.get('state') ?? '' }
+    } catch {
+      /* fall through */
+    }
+  }
+  if (v.includes('#')) {
+    const [code, state] = v.split('#', 2)
+    return { code, state: state ?? '' }
+  }
+  return { code: v, state: '' }
+}
+
+// ReloginForm drives the two-step browser OAuth login for an existing
+// account: generate an authorize URL → operator logs in → paste the
+// callback code back → exchange + persist.
+function ReloginForm({ account, onClose }: { account: Account; onClose: () => void }) {
+  const { t } = useI18n()
+  const begin = useBeginOAuthLogin()
+  const exchange = useExchangeOAuthLogin()
+  const [session, setSession] = useState<string | null>(null)
+  const [authURL, setAuthURL] = useState<string | null>(null)
+  const [pasted, setPasted] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+  const [done, setDone] = useState(false)
+
+  function start() {
+    setErr(null)
+    begin.mutate(account.id, {
+      onSuccess: (r) => {
+        setSession(r.session_id)
+        setAuthURL(r.authorize_url)
+        window.open(r.authorize_url, '_blank', 'noopener')
+      },
+      onError: (e: unknown) => setErr(e instanceof ApiError ? e.message : t('accounts.requestFailed')),
+    })
+  }
+
+  function finish() {
+    setErr(null)
+    const { code, state } = parseCallback(pasted)
+    if (!session || !code) {
+      setErr(t('accounts.reloginNoCode'))
+      return
+    }
+    exchange.mutate(
+      { id: account.id, session_id: session, code, state },
+      {
+        onSuccess: () => setDone(true),
+        onError: (e: unknown) => setErr(e instanceof ApiError ? e.message : t('accounts.requestFailed')),
+      },
+    )
+  }
+
+  if (done) {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-ink">{t('accounts.reloginDone')}</p>
+        <div className="flex justify-end">
+          <button onClick={onClose} className="btn btn-primary h-10">
+            {t('common.done')}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted">{t('accounts.reloginHelp')}</p>
+
+      {!authURL ? (
+        <button onClick={start} disabled={begin.isPending} className="btn btn-primary h-10 disabled:opacity-50">
+          {begin.isPending ? t('common.loading') : t('accounts.reloginStart')}
+        </button>
+      ) : (
+        <>
+          <p className="text-xs text-muted">
+            {t('accounts.reloginOpened')}{' '}
+            <a href={authURL} target="_blank" rel="noopener noreferrer" className="text-brand underline">
+              {t('accounts.reloginReopen')}
+            </a>
+          </p>
+          <label className="block space-y-1">
+            <span className="text-sm text-muted">{t('accounts.reloginPaste')}</span>
+            <textarea
+              className="field h-24 font-mono text-xs"
+              value={pasted}
+              onChange={(e) => setPasted(e.target.value)}
+              placeholder="code=...&state=...  /  code#state  /  <bare code>"
+              spellCheck={false}
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className="btn btn-secondary h-10">
+              {t('common.cancel')}
+            </button>
+            <button onClick={finish} disabled={exchange.isPending} className="btn btn-primary h-10 disabled:opacity-50">
+              {exchange.isPending ? t('common.saving') : t('accounts.reloginFinish')}
+            </button>
+          </div>
+        </>
+      )}
+
+      {err && <ErrorNotice>{err}</ErrorNotice>}
+    </div>
   )
 }
 
