@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -319,5 +320,121 @@ func TestProxyHandler(store proxyStore) gin.HandlerFunc {
 		_ = resp.Body.Close()
 		c.JSON(http.StatusOK, gin.H{"status": "green", "http_status": resp.StatusCode,
 			"latency_ms": latency, "message": "proxy reachable"})
+	}
+}
+
+// importProxiesRequest is the bulk-import body: a list of proxy lines
+// (URL form "socks5://u:p@host:port" or "host:port[:user:pass]") plus a
+// default protocol for the bare host:port form.
+type importProxiesRequest struct {
+	Proxies         []string `json:"proxies"`
+	DefaultProtocol string   `json:"default_protocol"`
+}
+
+type proxyImportError struct {
+	Line    string `json:"line"`
+	Message string `json:"message"`
+}
+
+type importProxiesResult struct {
+	Created int                `json:"created"`
+	Skipped int                `json:"skipped"`
+	Failed  int                `json:"failed"`
+	Errors  []proxyImportError `json:"errors,omitempty"`
+}
+
+// parseProxyLine parses one bulk-import line into ProxyParams. A line
+// containing "://" is parsed as a URL; otherwise it is "host:port" or
+// "host:port:user:pass" (common proxy-vendor format), tagged with the
+// default protocol. The proxy name defaults to host:port.
+func parseProxyLine(line, defaultProto string) (repository.ProxyParams, error) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return repository.ProxyParams{}, errors.New("empty line")
+	}
+	if strings.Contains(line, "://") {
+		u, err := url.Parse(line)
+		if err != nil || u.Hostname() == "" || u.Port() == "" {
+			return repository.ProxyParams{}, errors.New("invalid proxy URL")
+		}
+		proto := u.Scheme
+		if !validProxyProtocols[proto] {
+			return repository.ProxyParams{}, fmt.Errorf("unsupported protocol %q", proto)
+		}
+		port, _ := strconv.Atoi(u.Port())
+		pw, _ := u.User.Password()
+		return repository.ProxyParams{
+			Name: u.Host, Protocol: proto, Host: u.Hostname(), Port: port,
+			Username: u.User.Username(), Password: pw, Status: "active", FallbackMode: "none",
+		}, nil
+	}
+
+	proto := strings.TrimSpace(defaultProto)
+	if proto == "" {
+		proto = "http"
+	}
+	if !validProxyProtocols[proto] {
+		return repository.ProxyParams{}, fmt.Errorf("unsupported default_protocol %q", proto)
+	}
+	parts := strings.Split(line, ":")
+	var host, portStr, user, pass string
+	switch len(parts) {
+	case 2:
+		host, portStr = parts[0], parts[1]
+	case 4:
+		host, portStr, user, pass = parts[0], parts[1], parts[2], parts[3]
+	default:
+		return repository.ProxyParams{}, errors.New("expected host:port or host:port:user:pass")
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		return repository.ProxyParams{}, errors.New("invalid port")
+	}
+	return repository.ProxyParams{
+		Name: host + ":" + portStr, Protocol: proto, Host: host, Port: port,
+		Username: user, Password: pass, Status: "active", FallbackMode: "none",
+	}, nil
+}
+
+// ImportProxiesHandler handles POST /admin/api/proxies/import — bulk
+// create proxies from pasted lines. Each line is inserted independently;
+// a duplicate name (same host:port) is skipped, a malformed line fails,
+// neither aborts the batch. The result reports per-line outcomes.
+func ImportProxiesHandler(store proxyStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var in importProxiesRequest
+		if err := c.ShouldBindJSON(&in); err != nil {
+			writeBadRequest(c, "invalid JSON: "+err.Error())
+			return
+		}
+		if len(in.Proxies) == 0 {
+			writeBadRequest(c, "no proxies to import")
+			return
+		}
+		res := importProxiesResult{}
+		for _, line := range in.Proxies {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			params, perr := parseProxyLine(line, in.DefaultProtocol)
+			if perr != nil {
+				res.Failed++
+				res.Errors = append(res.Errors, proxyImportError{Line: line, Message: perr.Error()})
+				continue
+			}
+			if _, err := store.Insert(c.Request.Context(), params); err != nil {
+				if errors.Is(err, repository.ErrProxyNameTaken) {
+					res.Skipped++
+					continue
+				}
+				res.Failed++
+				res.Errors = append(res.Errors, proxyImportError{Line: line, Message: err.Error()})
+				continue
+			}
+			res.Created++
+		}
+		slog.Info("admin: proxies imported",
+			"created", res.Created, "skipped", res.Skipped, "failed", res.Failed, "admin", adminActor(c))
+		c.JSON(http.StatusOK, res)
 	}
 }

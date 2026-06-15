@@ -89,3 +89,22 @@ export function useTestProxy() {
     mutationFn: (id: number) => api<ProxyTestResult>(`/proxies/${id}/test`, { method: 'POST' }),
   })
 }
+
+// ProxyImportResult mirrors the server's importProxiesResult.
+export interface ProxyImportResult {
+  created: number
+  skipped: number
+  failed: number
+  errors?: { line: string; message: string }[]
+}
+
+// useImportProxies bulk-creates proxies from pasted lines (URL form or
+// host:port[:user:pass]). default_protocol tags the bare host:port form.
+export function useImportProxies() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: { proxies: string[]; default_protocol: string }) =>
+      api<ProxyImportResult>('/proxies/import', { method: 'POST', body: JSON.stringify(payload) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: PROXIES_KEY }),
+  })
+}

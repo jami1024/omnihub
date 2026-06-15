@@ -398,6 +398,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	authed.PATCH("/proxies/:id", adminhandler.UpdateProxyHandler(proxyRepo))
 	authed.DELETE("/proxies/:id", adminhandler.DeleteProxyHandler(proxyRepo))
 	authed.POST("/proxies/:id/test", adminhandler.TestProxyHandler(proxyRepo))
+	authed.POST("/proxies/import", adminhandler.ImportProxiesHandler(proxyRepo))
 
 	// M3 — virtual key management. Writes flow through the api_keys
 	// NOTIFY trigger (migration 0008), so the in-memory key pool refreshes

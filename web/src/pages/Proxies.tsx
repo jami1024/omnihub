@@ -8,14 +8,16 @@ import { useI18n } from '../lib/i18n'
 import {
   useCreateProxy,
   useDeleteProxy,
+  useImportProxies,
   useProxies,
   useTestProxy,
   useUpdateProxy,
   type Proxy,
+  type ProxyImportResult,
   type ProxyInput,
 } from '../lib/proxies'
 
-type Editing = 'new' | Proxy | null
+type Editing = 'new' | 'import' | Proxy | null
 
 const FIELD = 'w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-ink'
 
@@ -42,7 +44,7 @@ export function ProxiesPage() {
       setFormErr(e instanceof ApiError ? e.message : t('proxies.saveError'))
     if (editing === 'new') {
       create.mutate(input, { onSuccess: close, onError })
-    } else if (editing) {
+    } else if (editing && editing !== 'import') {
       update.mutate({ id: editing.id, input }, { onSuccess: close, onError })
     }
   }
@@ -61,9 +63,14 @@ export function ProxiesPage() {
           title={t('proxies.title')}
           description={t('proxies.description')}
           action={
-            <button onClick={() => { setFormErr(null); setEditing('new') }} className="btn btn-primary h-10">
-              {t('proxies.newProxy')}
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => { setFormErr(null); setEditing('import') }} className="btn btn-secondary h-10">
+                {t('proxies.import')}
+              </button>
+              <button onClick={() => { setFormErr(null); setEditing('new') }} className="btn btn-primary h-10">
+                {t('proxies.newProxy')}
+              </button>
+            </div>
           }
         />
 
@@ -148,11 +155,17 @@ export function ProxiesPage() {
           </div>
         )}
 
-        {editing && (
+        {editing === 'import' && (
+          <Modal title={t('proxies.importTitle')} onClose={close}>
+            <ImportForm onClose={close} />
+          </Modal>
+        )}
+
+        {editing && editing !== 'import' && (
           <Modal title={editing === 'new' ? t('proxies.newProxy') : t('proxies.editTitle', { name: editing.name })} onClose={close}>
             <ProxyForm
               proxy={editing === 'new' ? undefined : editing}
-              others={(proxies ?? []).filter((p) => editing === 'new' || p.id !== editing.id)}
+              others={(proxies ?? []).filter((p) => typeof editing === 'string' || p.id !== editing.id)}
               submitting={create.isPending || update.isPending}
               error={formErr}
               onCancel={close}
@@ -162,6 +175,80 @@ export function ProxiesPage() {
         )}
       </main>
     </Layout>
+  )
+}
+
+// ImportForm bulk-creates proxies from pasted lines (one per line).
+function ImportForm({ onClose }: { onClose: () => void }) {
+  const { t } = useI18n()
+  const importProxies = useImportProxies()
+  const [text, setText] = useState('')
+  const [proto, setProto] = useState('http')
+  const [result, setResult] = useState<ProxyImportResult | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  function handleImport() {
+    setErr(null)
+    setResult(null)
+    const lines = text.split('\n').map((l) => l.trim()).filter((l) => l !== '')
+    if (lines.length === 0) {
+      setErr(t('proxies.importEmpty'))
+      return
+    }
+    importProxies.mutate(
+      { proxies: lines, default_protocol: proto },
+      {
+        onSuccess: (r) => setResult(r),
+        onError: (e: unknown) => setErr(e instanceof ApiError ? e.message : t('proxies.saveError')),
+      },
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted">{t('proxies.importHelp')}</p>
+      <textarea
+        className={FIELD + ' h-40 font-mono text-xs'}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={'socks5://user:pass@1.2.3.4:1080\n5.6.7.8:8080:user:pass\n9.9.9.9:3128'}
+        spellCheck={false}
+      />
+      <label className="flex items-center gap-2 text-sm">
+        <span className="text-muted">{t('proxies.importDefaultProtocol')}</span>
+        <select className={FIELD + ' w-40'} value={proto} onChange={(e) => setProto(e.target.value)}>
+          <option value="http">http</option>
+          <option value="https">https</option>
+          <option value="socks5">socks5</option>
+          <option value="socks5h">socks5h</option>
+        </select>
+      </label>
+
+      {err && <ErrorNotice>{err}</ErrorNotice>}
+      {result && (
+        <ErrorNotice>
+          {t('proxies.importDone', {
+            created: result.created,
+            skipped: result.skipped,
+            failed: result.failed,
+          })}
+        </ErrorNotice>
+      )}
+
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onClose} className="btn btn-secondary h-10">
+          {result ? t('common.done') : t('common.cancel')}
+        </button>
+        <button
+          type="button"
+          onClick={handleImport}
+          disabled={importProxies.isPending}
+          className="btn btn-primary h-10 disabled:opacity-50"
+        >
+          {importProxies.isPending ? t('common.saving') : t('proxies.import')}
+        </button>
+      </div>
+    </div>
   )
 }
 
