@@ -31,6 +31,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/alert"
 	"github.com/jami1024/omnihub/internal/service/alertchannel"
 	"github.com/jami1024/omnihub/internal/service/apikey"
+	"github.com/jami1024/omnihub/internal/service/authguard"
 	"github.com/jami1024/omnihub/internal/service/billing"
 	"github.com/jami1024/omnihub/internal/service/blockedip"
 	"github.com/jami1024/omnihub/internal/service/forward"
@@ -685,6 +686,19 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry, authPlugins 
 	)
 	tokenManager.Start(context.Background(), accountPool.All, time.Minute)
 
+	// Auto-park accounts that persistently fail upstream auth. The
+	// circuit breaker ignores 4xx, so a revoked/expired api_key would
+	// 401 every request forever; authguard parks it (auth_status=revoked,
+	// which the resolver skips) after a streak of failures and a
+	// background sweeper restores it once a connectivity probe passes.
+	// OAuth accounts are left to the TokenManager.
+	authFailGuard := authguard.New(authFailThreshold(),
+		authParker{repo: repository.NewAccountRepo(pool, accountCipher)})
+	authFailGuard.StartRecovery(context.Background(), accountPool.All,
+		authTester{registry: registry}, authRecoveryInterval())
+	slog.Info("account auth-failure guard enabled",
+		"threshold", authFailThreshold(), "recovery_interval", authRecoveryInterval())
+
 	forwarder := forward.New(nil)
 	// Bind the proxy pool so account proxy_id → dial URL (with expiry
 	// fallback). Without a pool (log-only mode) accounts use inline
@@ -722,7 +736,7 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry, authPlugins 
 		auth.Middleware(),
 		guard.RequestLog(),
 	)
-	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, concurrencyGuard, gatewaySettings))
+	gw.POST("/v1/messages", gateway.AnthropicMessagesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, concurrencyGuard, authFailGuard, gatewaySettings))
 
 	// OpenAI Chat Completions endpoint. OpenAI SDK clients are not Claude
 	// CLI, so the Claude-CLI client gate is intentionally omitted here;
@@ -734,14 +748,14 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry, authPlugins 
 		auth.Middleware(),
 		guard.RequestLog(),
 	)
-	gwOpenAI.POST("/v1/chat/completions", gateway.OpenAIChatCompletionsHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, concurrencyGuard, gatewaySettings))
+	gwOpenAI.POST("/v1/chat/completions", gateway.OpenAIChatCompletionsHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, concurrencyGuard, authFailGuard, gatewaySettings))
 
 	// OpenAI Responses endpoint (EXPERIMENTAL): pass-through to Codex
 	// subscription accounts via the openai-codex driver. Same middleware
 	// stack as /v1/chat/completions (Codex CLI is not Claude CLI, so the
 	// Claude UA gate is omitted). /v1/models serves the static codex
 	// model list for Responses-speaking clients.
-	gwOpenAI.POST("/v1/responses", gateway.ResponsesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, concurrencyGuard, gatewaySettings))
+	gwOpenAI.POST("/v1/responses", gateway.ResponsesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, concurrencyGuard, authFailGuard, gatewaySettings))
 	gwOpenAI.GET("/v1/models", gateway.ModelsHandler(codex.KnownModels))
 	// Capability negotiation for OmniHub-aware clients (omnihub-cli).
 	gwOpenAI.GET("/v1/omnihub/capabilities", gateway.CapabilitiesHandler(version))
@@ -1313,6 +1327,62 @@ func setupProxyPool(ctx context.Context) error {
 		slog.Info("proxy health prober started", "interval", interval)
 	}
 	return nil
+}
+
+// authParker adapts AccountRepo.UpdateAuthRuntime to authguard.Parker:
+// Park flips an account to auth_status=revoked (the resolver skips it),
+// Restore returns it to ok. Only the runtime auth columns are touched.
+type authParker struct{ repo *repository.AccountRepo }
+
+func (p authParker) Park(ctx context.Context, id int64, reason string) error {
+	return p.repo.UpdateAuthRuntime(ctx, id, repository.AuthRuntimeUpdate{
+		Status: "revoked", RefreshError: reason})
+}
+
+func (p authParker) Restore(ctx context.Context, id int64) error {
+	return p.repo.UpdateAuthRuntime(ctx, id, repository.AuthRuntimeUpdate{
+		Status: "ok", RefreshError: ""})
+}
+
+// authTester adapts the driver registry to authguard.Tester: a parked
+// account recovers when its driver's connectivity probe goes green. A
+// driver without a Tester can't be verified, so it never auto-recovers.
+type authTester struct{ registry *provider.Registry }
+
+func (t authTester) Test(ctx context.Context, a *provider.Account) bool {
+	d, ok := t.registry.Get(a.Provider)
+	if !ok {
+		return false
+	}
+	tester, ok := d.(provider.Tester)
+	if !ok {
+		return false
+	}
+	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	return tester.Test(cctx, a).Status == provider.TestGreen
+}
+
+// authFailThreshold reads OMNIHUB_AUTH_FAIL_THRESHOLD (consecutive auth
+// failures before an account is parked), defaulting to the package
+// default and flooring at 1.
+func authFailThreshold() int {
+	if v := strings.TrimSpace(os.Getenv("OMNIHUB_AUTH_FAIL_THRESHOLD")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
+			return n
+		}
+	}
+	return authguard.DefaultThreshold
+}
+
+// authRecoveryInterval reads OMNIHUB_AUTH_RECOVERY_INTERVAL (how often
+// parked accounts are re-probed), defaulting to the package default and
+// flooring at 30s.
+func authRecoveryInterval() time.Duration {
+	if d, err := time.ParseDuration(strings.TrimSpace(os.Getenv("OMNIHUB_AUTH_RECOVERY_INTERVAL"))); err == nil && d >= 30*time.Second {
+		return d
+	}
+	return authguard.DefaultRecoveryInterval
 }
 
 // proxyProbeEnabled reports whether the background proxy health prober

@@ -79,6 +79,13 @@ type RuntimeSettings interface {
 	FailoverMaxAttempts() int
 }
 
+// AuthGuard parks accounts that persistently fail upstream auth (a
+// revoked/expired api_key that 401s every request). *authguard.Guard
+// implements it; nil disables the feature.
+type AuthGuard interface {
+	Record(ctx context.Context, account *provider.Account, status int)
+}
+
 // TokenFreshener keeps OAuth-backed accounts' upstream tokens fresh.
 // *upstreamauth.TokenManager implements it; nil disables refresh (all
 // accounts are treated as static-credential).
@@ -287,6 +294,7 @@ func AnthropicMessagesHandler(
 	charger BillingCharger,
 	tokens TokenFreshener,
 	conc *limits.ConcurrencyGuard,
+	authGuard AuthGuard,
 	settings ...RuntimeSettings,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -516,6 +524,9 @@ func AnthropicMessagesHandler(
 			// Commit: this response is what the client gets.
 			result, writeErr := forwarder.WriteResponse(c.Writer, resp, &req, sentAt, usage.Anthropic)
 			recordHealthAfterWrite(tracker, account.ID, result, writeErr)
+			if authGuard != nil {
+				authGuard.Record(c.Request.Context(), account, result.StatusCode)
+			}
 
 			c.Set(guard.CtxKeyUsage, result.Usage)
 			if result.TTFB > 0 {

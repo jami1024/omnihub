@@ -53,7 +53,7 @@ func claudeSubAccount(baseURL, accessToken string) *provider.Account {
 func newAnthropicHandler(account *provider.Account, tracker *health.Tracker, tokens gateway.TokenFreshener) gin.HandlerFunc {
 	res := &stubResolver{account: account, driver: claudesub.New()}
 	return gateway.AnthropicMessagesHandler(
-		forward.New(nil), res, tracker, nil, pricing.Default(), nil, nil, nil, tokens, nil,
+		forward.New(nil), res, tracker, nil, pricing.Default(), nil, nil, nil, tokens, nil, nil,
 	)
 }
 

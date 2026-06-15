@@ -68,6 +68,7 @@ func ResponsesHandler(
 	charger BillingCharger,
 	tokens TokenFreshener,
 	conc *limits.ConcurrencyGuard,
+	authGuard AuthGuard,
 	settings ...RuntimeSettings,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -233,6 +234,9 @@ func ResponsesHandler(
 			// the Responses sniffer pulls usage from response.completed.
 			result, writeErr := forwarder.WriteResponse(c.Writer, resp, req, sentAt, usage.Responses)
 			recordHealthAfterWrite(tracker, account.ID, result, writeErr)
+			if authGuard != nil {
+				authGuard.Record(c.Request.Context(), account, result.StatusCode)
+			}
 
 			c.Set(guard.CtxKeyUsage, result.Usage)
 			if result.TTFB > 0 {
