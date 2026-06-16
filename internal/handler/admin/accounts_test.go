@@ -62,7 +62,7 @@ func (f *fakeAccountStore) DeleteByID(_ context.Context, id int64) error {
 func newAccountEngine(store *fakeAccountStore) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.GET("/admin/api/accounts", handler.ListAccountsHandler(store))
+	r.GET("/admin/api/accounts", handler.ListAccountsHandler(store, nil))
 	r.POST("/admin/api/accounts", handler.CreateAccountHandler(store))
 	r.PATCH("/admin/api/accounts/:id", handler.UpdateAccountHandler(store))
 	r.DELETE("/admin/api/accounts/:id", handler.DeleteAccountHandler(store))

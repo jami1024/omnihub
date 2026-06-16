@@ -82,6 +82,9 @@ export interface Account {
   max_concurrency: number
   // Bound proxy (migration 0038); null = inline proxy_url / direct.
   proxy_id: number | null
+  // Last-known subscription usage windows (codex 5h/7d) captured
+  // passively from upstream traffic; absent for api_key accounts.
+  quota_windows?: QuotaWindow[]
 }
 
 // AccountInput is the create/update body. On create, credentials is

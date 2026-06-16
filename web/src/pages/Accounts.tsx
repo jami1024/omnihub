@@ -22,6 +22,7 @@ import {
   type Account,
   type AccountInput,
   type ImportResult,
+  type QuotaWindow,
 } from '../lib/accounts'
 
 // editing tracks which dialog (if any) is open: 'new' for the create
@@ -297,7 +298,7 @@ export function AccountsPage() {
                     </Td>
                     <Td className="text-right">
                       <RowTest id={a.id} />
-                      {a.auth_type !== 'api_key' && <RowQuota id={a.id} />}
+                      {a.auth_type !== 'api_key' && <RowQuota id={a.id} windows={a.quota_windows} />}
                       {a.auth_type !== 'api_key' && (
                         <button
                           onClick={() => setRelogin(a)}
@@ -544,18 +545,40 @@ function AuthCell({ account: a }: { account: Account }) {
   )
 }
 
-// RowQuota queries a subscription account's remaining quota windows
-// on demand and shows them inline ("5h 32% · 7d 61%"); the raw upstream
+// quotaWindowLabel maps a server window label to friendly text
+// ("5小时" / "7天"). Unknown labels render verbatim.
+function quotaWindowLabel(t: (k: string) => string, raw: string): string {
+  switch (raw) {
+    case 'five_hour':
+    case 'primary':
+      return t('accounts.quota5h')
+    case 'seven_day':
+    case 'secondary':
+      return t('accounts.quota7d')
+    case 'seven_day_sonnet':
+      return t('accounts.quota7dSonnet')
+    case 'seven_day_opus':
+      return t('accounts.quota7dOpus')
+    default:
+      return raw
+  }
+}
+
+// RowQuota shows a subscription account's usage windows ("5小时 32% · 7天
+// 61%"). Codex windows arrive passively on the account (captured from
+// upstream traffic) and render without a click; the button re-probes on
+// demand (and is how claude accounts load theirs). The raw upstream
 // payload lands in the hover title for shapes the server couldn't
 // normalise.
-function RowQuota({ id }: { id: number }) {
+function RowQuota({ id, windows: passive }: { id: number; windows?: QuotaWindow[] }) {
   const { t } = useI18n()
   const quota = useAccountQuota()
-  const windows = quota.data?.windows ?? []
+  const fetched = quota.data?.windows
+  const windows = fetched && fetched.length > 0 ? fetched : (passive ?? [])
   let label = t('accounts.quota')
   if (quota.isPending) label = t('accounts.quotaLoading')
   else if (windows.length > 0) {
-    label = windows.map((w) => `${w.label} ${Math.round(w.used_percent)}%`).join(' · ')
+    label = windows.map((w) => `${quotaWindowLabel(t, w.label)} ${Math.round(w.used_percent)}%`).join(' · ')
   } else if (quota.data) {
     label = t('accounts.quotaRawOnly')
   }

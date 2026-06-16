@@ -31,6 +31,7 @@ import (
 	"github.com/jami1024/omnihub/internal/service/alert"
 	"github.com/jami1024/omnihub/internal/service/alertchannel"
 	"github.com/jami1024/omnihub/internal/service/apikey"
+	"github.com/jami1024/omnihub/internal/service/accountquota"
 	"github.com/jami1024/omnihub/internal/service/authguard"
 	"github.com/jami1024/omnihub/internal/service/billing"
 	"github.com/jami1024/omnihub/internal/service/blockedip"
@@ -284,8 +285,12 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 	// state and reset it. It is nil when the gateway is disabled (no
 	// accounts / no DB), and the admin circuit handlers treat nil as
 	// "circuit data unavailable".
-	tracker := mountGatewayRoutes(r, registry, authPlugins)
-	mountAdminRoutes(r, tracker, registry, authPlugins)
+	// accountQuota holds passively-captured subscription usage (codex
+	// 5h/7d), shared between the gateway capture path and the admin read
+	// path below.
+	accountQuota := accountquota.NewStore()
+	tracker := mountGatewayRoutes(r, registry, authPlugins, accountQuota)
+	mountAdminRoutes(r, tracker, registry, authPlugins, accountQuota)
 
 	return r
 }
@@ -307,7 +312,7 @@ func newRouter(registry *provider.Registry) *gin.Engine {
 // The SPA is served via gin's NoRoute fallback rather than a wildcard
 // route because /admin/api/* already lives under /admin/ and gin
 // disallows a catch-all sharing a prefix with concrete routes.
-func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider.Registry, authPlugins *upstreamauth.Registry) {
+func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider.Registry, authPlugins *upstreamauth.Registry, accountQuota *accountquota.Store) {
 	secret := os.Getenv("OMNIHUB_ADMIN_JWT_SECRET")
 	if secret == "" {
 		slog.Warn("/admin disabled: OMNIHUB_ADMIN_JWT_SECRET not set; the web UI will not authenticate")
@@ -352,7 +357,7 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	// M2 — account management. Writes flow through the accounts table's
 	// NOTIFY trigger (migration 0006), so the in-memory account pool
 	// refreshes within milliseconds of any create/update/delete.
-	authed.GET("/accounts", adminhandler.ListAccountsHandler(accountRepo))
+	authed.GET("/accounts", adminhandler.ListAccountsHandler(accountRepo, accountQuota))
 	authed.POST("/accounts", adminhandler.CreateAccountHandler(accountRepo))
 	authed.PATCH("/accounts/:id", adminhandler.UpdateAccountHandler(accountRepo))
 	authed.DELETE("/accounts/:id", adminhandler.DeleteAccountHandler(accountRepo))
@@ -564,7 +569,7 @@ func adminCredentialsFromEnv() (adminhandler.EnvAdminCredentials, bool) {
 // The operator is expected to add at least one row to the accounts
 // table before the gateway can serve traffic. See the README for the
 // SQL snippets; a CLI / admin API will follow.
-func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry, authPlugins *upstreamauth.Registry) *health.Tracker {
+func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry, authPlugins *upstreamauth.Registry, accountQuota *accountquota.Store) *health.Tracker {
 	if accountPool == nil {
 		slog.Error("/v1/messages disabled: no database configured; set OMNIHUB_DATABASE_URL and add accounts to the accounts table")
 		return nil
@@ -766,7 +771,7 @@ func mountGatewayRoutes(r *gin.Engine, registry *provider.Registry, authPlugins 
 	// stack as /v1/chat/completions (Codex CLI is not Claude CLI, so the
 	// Claude UA gate is omitted). /v1/models serves the static codex
 	// model list for Responses-speaking clients.
-	gwOpenAI.POST("/v1/responses", gateway.ResponsesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, concurrencyGuard, authFailGuard, gatewaySettings))
+	gwOpenAI.POST("/v1/responses", gateway.ResponsesHandler(forwarder, res, tracker, writeBuffer, prices, limiter, blockedIPPool, billingCharger, tokenManager, concurrencyGuard, authFailGuard, accountQuota, gatewaySettings))
 	gwOpenAI.GET("/v1/models", gateway.ModelsHandler(codex.KnownModels))
 	// Capability negotiation for OmniHub-aware clients (omnihub-cli).
 	gwOpenAI.GET("/v1/omnihub/capabilities", gateway.CapabilitiesHandler(version))

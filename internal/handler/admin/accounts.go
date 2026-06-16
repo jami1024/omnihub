@@ -83,6 +83,17 @@ type accountDTO struct {
 	// ProxyID binds the account to a proxies row (migration 0038);
 	// null = inline proxy_url / direct.
 	ProxyID *int64 `json:"proxy_id"`
+
+	// QuotaWindows is the last-known subscription usage (5h / 7d rolling
+	// windows) captured passively from upstream traffic. Populated only
+	// in the list response for OAuth accounts; empty otherwise.
+	QuotaWindows []provider.QuotaWindow `json:"quota_windows,omitempty"`
+}
+
+// quotaSource supplies the latest passively-captured usage windows for an
+// account (the accountquota store). nil-safe at the call site.
+type quotaSource interface {
+	Get(accountID int64) []provider.QuotaWindow
 }
 
 // toDTO projects a provider.Account (+ its enabled flag) onto the
@@ -366,7 +377,9 @@ func (in *accountInput) circuitDuration() *time.Duration {
 }
 
 // ListAccountsHandler returns GET /admin/api/accounts → {"accounts":[…]}.
-func ListAccountsHandler(store accountStore) gin.HandlerFunc {
+// quota may be nil; when set, each OAuth account's DTO carries its
+// last-known usage windows.
+func ListAccountsHandler(store accountStore, quota quotaSource) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		accounts, enabled, err := store.ListAll(c.Request.Context())
 		if err != nil {
@@ -377,6 +390,9 @@ func ListAccountsHandler(store accountStore) gin.HandlerFunc {
 		out := make([]accountDTO, len(accounts))
 		for i, a := range accounts {
 			out[i] = toDTO(a, enabled[i])
+			if quota != nil && a.AuthType != "api_key" {
+				out[i].QuotaWindows = quota.Get(a.ID)
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"accounts": out})
 	}

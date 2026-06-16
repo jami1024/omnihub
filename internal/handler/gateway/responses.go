@@ -13,6 +13,7 @@ import (
 
 	protoopenai "github.com/jami1024/omnihub/internal/protocol/openai"
 	"github.com/jami1024/omnihub/internal/repository"
+	"github.com/jami1024/omnihub/internal/service/accountquota"
 	"github.com/jami1024/omnihub/internal/service/blockedip"
 	"github.com/jami1024/omnihub/internal/service/forward"
 	"github.com/jami1024/omnihub/internal/service/guard"
@@ -69,6 +70,7 @@ func ResponsesHandler(
 	tokens TokenFreshener,
 	conc *limits.ConcurrencyGuard,
 	authGuard AuthGuard,
+	quotaStore *accountquota.Store,
 	settings ...RuntimeSettings,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -236,6 +238,11 @@ func ResponsesHandler(
 			recordHealthAfterWrite(tracker, account.ID, result, writeErr)
 			if authGuard != nil {
 				authGuard.Record(c.Request.Context(), account, result.StatusCode)
+			}
+			// Passively capture the codex 5h/7d usage windows from the
+			// upstream response headers (the only place codex reports them).
+			if quotaStore != nil {
+				quotaStore.RecordCodex(account.ID, resp.Header)
 			}
 
 			c.Set(guard.CtxKeyUsage, result.Usage)
