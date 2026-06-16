@@ -236,13 +236,10 @@ export function AccountForm({
       setLocalErr(t('accountForm.errCredentialRequired'))
       return
     }
-    // OAuth accounts get their secrets from the pasted credential file;
-    // require it on create (an empty oauth account can never route).
-    // On edit a blank textarea simply keeps the stored tokens.
-    if (isImportedOAuth && !isEdit && authJSON.trim() === '') {
-      setLocalErr(t('accountForm.errAuthJsonRequired'))
-      return
-    }
+    // OAuth accounts get their tokens either from a pasted credential
+    // file (import) OR from a later browser "Re-login". An empty auth.json
+    // on create is fine — the account is created credential-less and the
+    // operator finishes it with Re-login; until then it just won't route.
     if (isImportedOAuth && authPlugin.trim() === '') {
       setLocalErr(t('accountForm.errAuthPluginRequired'))
       return
