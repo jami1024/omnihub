@@ -217,20 +217,26 @@ export function AccountForm({
       return
     }
 
+    const isImportedOAuth = authType === 'imported_oauth'
+
     // Collapse the credential rows into a map, dropping blank keys. A
-    // row with a key but no value is a mistake worth flagging.
+    // row with a key but no value is a mistake worth flagging. OAuth
+    // accounts don't use the api_key rows (that fieldset is hidden), so
+    // skip them entirely — the default empty api_key row must not block
+    // an OAuth submit.
     const credentials: Record<string, string> = {}
-    for (const row of creds) {
-      const k = row.key.trim()
-      if (!k) continue
-      if (!row.value) {
-        setLocalErr(t('accountForm.errCredentialNoValue', { key: k }))
-        return
+    if (!isImportedOAuth) {
+      for (const row of creds) {
+        const k = row.key.trim()
+        if (!k) continue
+        if (!row.value) {
+          setLocalErr(t('accountForm.errCredentialNoValue', { key: k }))
+          return
+        }
+        credentials[k] = row.value
       }
-      credentials[k] = row.value
     }
     const hasCreds = Object.keys(credentials).length > 0
-    const isImportedOAuth = authType === 'imported_oauth'
 
     if (!isEdit && !hasCreds && !isImportedOAuth) {
       setLocalErr(t('accountForm.errCredentialRequired'))
