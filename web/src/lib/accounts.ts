@@ -219,6 +219,19 @@ export function useImportAccounts() {
   })
 }
 
+// useImportSub2API imports a sub2api / apipool account export directly.
+// The whole export envelope ({ type, version, proxies, accounts }) is
+// posted verbatim; the server maps platform+type+credentials onto
+// OmniHub's provider + auth model. Reuses the ImportResult shape.
+export function useImportSub2API() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (bundle: unknown) =>
+      api<ImportResult>('/accounts/import-sub2api', { method: 'POST', body: JSON.stringify(bundle) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
+  })
+}
+
 // QuotaWindow / QuotaInfo mirror the server's provider.QuotaInfo: the
 // subscription account's rolling usage windows plus the raw upstream
 // payload for providers without a stable schema.

@@ -15,6 +15,7 @@ import {
   useExchangeOAuthLogin,
   useExportAccounts,
   useImportAccounts,
+  useImportSub2API,
   useImportCredentials,
   useTestAccountById,
   useUpdateAccount,
@@ -36,7 +37,9 @@ export function AccountsPage() {
   const importCreds = useImportCredentials()
   const exportAccounts = useExportAccounts()
   const importAccounts = useImportAccounts()
+  const importSub2API = useImportSub2API()
   const fileInput = useRef<HTMLInputElement>(null)
+  const sub2apiInput = useRef<HTMLInputElement>(null)
   const [editing, setEditing] = useState<Editing>(null)
   const [formErr, setFormErr] = useState<string | null>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
@@ -147,6 +150,40 @@ export function AccountsPage() {
       )
   }
 
+  // handleImportSub2API posts a sub2api / apipool export envelope to the
+  // dedicated mapping endpoint (accounts + nested credentials are
+  // translated server-side).
+  function handleImportSub2API(e: React.ChangeEvent<HTMLInputElement>) {
+    setImportMsg(null)
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    file
+      .text()
+      .then((text) => {
+        const bundle = JSON.parse(text) as { accounts?: unknown[]; data?: { accounts?: unknown[] } }
+        const accounts = bundle.accounts ?? bundle.data?.accounts
+        if (!Array.isArray(accounts)) {
+          throw new Error(t('accounts.importBadFile'))
+        }
+        importSub2API.mutate(bundle, {
+          onSuccess: (res: ImportResult) =>
+            setImportMsg(
+              t('accounts.importDone', {
+                created: res.created,
+                skipped: res.skipped,
+                failed: res.failed,
+              }),
+            ),
+          onError: (err: unknown) =>
+            setImportMsg(err instanceof ApiError ? err.message : t('accounts.requestFailed')),
+        })
+      })
+      .catch((err: unknown) =>
+        setImportMsg(err instanceof Error ? err.message : t('accounts.importBadFile')),
+      )
+  }
+
   return (
     <Layout>
       <main className="mx-auto w-full max-w-7xl px-6 py-8">
@@ -170,6 +207,20 @@ export function AccountsPage() {
                 className="btn btn-secondary h-10 disabled:opacity-50"
               >
                 {importAccounts.isPending ? t('accounts.importing') : t('accounts.import')}
+              </button>
+              <input
+                ref={sub2apiInput}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={handleImportSub2API}
+              />
+              <button
+                onClick={() => sub2apiInput.current?.click()}
+                disabled={importSub2API.isPending}
+                className="btn btn-secondary h-10 disabled:opacity-50"
+              >
+                {importSub2API.isPending ? t('accounts.importing') : t('accounts.importSub2api')}
               </button>
               <button
                 onClick={handleExport}

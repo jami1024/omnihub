@@ -335,6 +335,7 @@ const en: Record<string, string> = {
   "accounts.emptyTitle": "Add the first provider to start routing traffic.",
   "accounts.eyebrow": "PROVIDERS",
   "accounts.importing": "Importing…",
+  "accounts.importSub2api": "Import from sub2api",
   "accounts.loadError": "Could not load providers.",
   "accounts.newAccount": "New provider",
   "accounts.priority": "Priority",

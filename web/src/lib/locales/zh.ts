@@ -335,6 +335,7 @@ const zh: Record<string, string> = {
   "accounts.emptyTitle": "添加第一个供应商以开始路由流量。",
   "accounts.eyebrow": "供应商",
   "accounts.importing": "导入中…",
+  "accounts.importSub2api": "从 sub2api 导入",
   "accounts.loadError": "无法加载供应商。",
   "accounts.newAccount": "新建供应商",
   "accounts.priority": "优先级",

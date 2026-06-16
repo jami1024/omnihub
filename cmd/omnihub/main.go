@@ -379,6 +379,9 @@ func mountAdminRoutes(r *gin.Engine, tracker *health.Tracker, registry *provider
 	// conflict by default, group bound by name).
 	authed.GET("/accounts/export", adminhandler.ExportAccountsHandler(accountRepo))
 	authed.POST("/accounts/import", adminhandler.ImportAccountsHandler(accountRepo, groupRepo))
+	// Direct import of sub2api / apipool account exports: maps their
+	// platform+type+credentials onto OmniHub's provider + auth model.
+	authed.POST("/accounts/import-sub2api", adminhandler.ImportSub2APIHandler(accountRepo))
 
 	// M8b-3 — provider groups: organisational buckets with a shared cost
 	// multiplier. The provider_groups NOTIFY trigger (migration 0018)
