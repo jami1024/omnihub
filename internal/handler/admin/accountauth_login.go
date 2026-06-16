@@ -67,17 +67,30 @@ func (s *OAuthSessionStore) put(id string, sess oauthSession) {
 	s.sessions[id] = sess
 }
 
-func (s *OAuthSessionStore) take(id string) (oauthSession, bool) {
+// peek returns a live session WITHOUT consuming it. An expired session
+// is evicted and reported as missing. The session is only deleted once
+// the exchange fully succeeds (see remove), so a transient failure
+// (state mismatch, upstream hiccup) leaves the session intact for an
+// immediate retry instead of forcing a fresh authorize round-trip.
+func (s *OAuthSessionStore) peek(id string) (oauthSession, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[id]
-	if ok {
-		delete(s.sessions, id) // single-use
-	}
-	if ok && time.Now().After(sess.expiresAt) {
+	if !ok {
 		return oauthSession{}, false
 	}
-	return sess, ok
+	if time.Now().After(sess.expiresAt) {
+		delete(s.sessions, id)
+		return oauthSession{}, false
+	}
+	return sess, true
+}
+
+// remove consumes a session after a successful exchange (single-use).
+func (s *OAuthSessionStore) remove(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, id)
 }
 
 func (s *OAuthSessionStore) gc() {
@@ -182,7 +195,11 @@ func ExchangeOAuthLoginHandler(store accountAuthStore, reg *upstreamauth.Registr
 			writeBadRequest(c, "session_id and code are required")
 			return
 		}
-		sess, ok := sessions.take(in.SessionID)
+		// peek (not consume): keep the session alive across a failed
+		// state check or exchange so the operator can retry the paste
+		// without regenerating the authorize URL. It is removed only
+		// after the tokens are persisted below.
+		sess, ok := sessions.peek(in.SessionID)
 		if !ok {
 			writeBadRequest(c, "login session not found or expired; start again")
 			return
@@ -241,6 +258,7 @@ func ExchangeOAuthLoginHandler(store accountAuthStore, reg *upstreamauth.Registr
 			writeInternal(c, "persist credentials: "+err.Error())
 			return
 		}
+		sessions.remove(in.SessionID) // single-use: consume only on success
 
 		resp := gin.H{"auth_status": upstreamauth.StatusOK, "plugin": sess.plugin}
 		if bundle.ExpiresAt != nil {
