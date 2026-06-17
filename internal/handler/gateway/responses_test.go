@@ -105,22 +105,27 @@ func TestResponsesHandler_BadJSON(t *testing.T) {
 	}
 }
 
-// TestResponsesHandler_NonStreamPassthrough covers a stream=false
-// /v1/responses request: the codex driver omits stream, asks for a JSON
-// Accept, and the upstream JSON body is passed through verbatim with
-// usage sniffed from the response object. (B-3: whether the real codex
-// backend honours stream=false is a live question, but the gateway's
-// own JSON pass-through path is exercised here.)
-func TestResponsesHandler_NonStreamPassthrough(t *testing.T) {
-	const upstreamBody = `{"id":"resp_ns","object":"response","model":"gpt-5-codex","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":11,"output_tokens":2}}`
+// TestResponsesHandler_NonStreamAggregated covers a stream=false
+// /v1/responses request. The codex backend only honours streaming, so
+// the gateway always dispatches stream:true (SSE Accept) and de-streams
+// the response into a single JSON body. The codex stream carries an
+// EMPTY output array on response.completed with the real items arriving
+// via response.output_item.done, so the aggregator must reassemble
+// output[] from those items.
+func TestResponsesHandler_NonStreamAggregated(t *testing.T) {
+	const sse = "event: response.output_item.done\n" +
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"hi"}]}}` + "\n\n" +
+		"event: response.completed\n" +
+		`data: {"type":"response.completed","response":{"id":"resp_ns","object":"response","model":"gpt-5-codex","status":"completed","output":[],"usage":{"input_tokens":11,"output_tokens":2}}}` + "\n\n"
+
 	var gotAccept string
 	var gotBody map[string]json.RawMessage
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAccept = r.Header.Get("Accept")
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, upstreamBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, sse)
 	}))
 	defer upstream.Close()
 
@@ -130,14 +135,43 @@ func TestResponsesHandler_NonStreamPassthrough(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if gotAccept != "application/json" {
-		t.Errorf("non-stream Accept = %q, want application/json", gotAccept)
+	if gotAccept != "text/event-stream" {
+		t.Errorf("upstream Accept = %q, want text/event-stream (codex only streams)", gotAccept)
 	}
-	if _, ok := gotBody["stream"]; ok {
-		t.Error("stream:false must be omitted from the upstream body, not sent")
+	if string(gotBody["stream"]) != "true" {
+		t.Errorf("upstream stream must be forced true, got %s", gotBody["stream"])
 	}
-	if rec.Body.String() != upstreamBody {
-		t.Error("non-stream response not passed through verbatim")
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("client Content-Type = %q, want application/json (de-streamed)", ct)
+	}
+
+	// The de-streamed body must be a single Responses JSON object with
+	// output[] reassembled from the output_item.done event.
+	var out struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+		Output []struct {
+			Type    string `json:"type"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"output"`
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("aggregated body not valid JSON: %v (%s)", err, rec.Body.String())
+	}
+	if out.ID != "resp_ns" || out.Status != "completed" {
+		t.Errorf("metadata lost: id=%q status=%q", out.ID, out.Status)
+	}
+	if len(out.Output) != 1 || len(out.Output[0].Content) != 1 || out.Output[0].Content[0].Text != "hi" {
+		t.Errorf("output not reassembled from items: %+v", out.Output)
+	}
+	if out.Usage.InputTokens != 11 || out.Usage.OutputTokens != 2 {
+		t.Errorf("usage lost: %+v", out.Usage)
 	}
 }
 

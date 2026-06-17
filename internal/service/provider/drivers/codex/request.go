@@ -22,7 +22,10 @@ import (
 //   - instructions always present (required field; "" when absent);
 //   - temperature / top_p / max_output_tokens stripped (rejected by the
 //     backend — the native CLI never sends them);
-//   - stream mirrors the parsed req.Stream.
+//   - stream forced to true — the codex backend ONLY honours streaming
+//     ("Stream must be set to true" otherwise). When the client asked
+//     for a non-streaming response the handler de-streams the SSE back
+//     into a single Responses JSON (see WriteResponsesAggregated).
 //
 // Everything else in the client body passes through untouched.
 func (d *Driver) BuildRequest(
@@ -75,11 +78,10 @@ func (d *Driver) BuildRequest(
 		}
 		out["instructions"] = ins
 	}
-	if req.Stream {
-		out["stream"] = json.RawMessage("true")
-	} else {
-		delete(out, "stream")
-	}
+	// The codex backend rejects non-streaming runs outright, so always
+	// request a stream regardless of what the client asked for; the
+	// gateway aggregates the SSE when the client wanted a single JSON.
+	out["stream"] = json.RawMessage("true")
 	// Strip generation/identity fields the codex backend rejects on
 	// OAuth (subscription) traffic.
 	for _, f := range unsupportedFields {
@@ -97,11 +99,8 @@ func (d *Driver) BuildRequest(
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	if req.Stream {
-		httpReq.Header.Set("Accept", "text/event-stream")
-	} else {
-		httpReq.Header.Set("Accept", "application/json")
-	}
+	// Always stream upstream (see the forced stream:true above).
+	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("Authorization", "Bearer "+token)
 	if accountID := account.Credential("account_id"); accountID != "" {
 		httpReq.Header.Set("chatgpt-account-id", accountID)

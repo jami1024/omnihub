@@ -232,9 +232,19 @@ func ResponsesHandler(
 				sentAt = retrySentAt
 			}
 
-			// Commit: pass-through of the Responses bytes (JSON or SSE);
-			// the Responses sniffer pulls usage from response.completed.
-			result, writeErr := forwarder.WriteResponse(c.Writer, resp, req, sentAt, usage.Responses)
+			// Commit. The codex backend only streams, so the upstream
+			// response is always SSE: pass it through when the client
+			// wanted a stream, otherwise de-stream it into a single
+			// Responses JSON (same protocol, no cross-protocol render).
+			var (
+				result   forward.Result
+				writeErr error
+			)
+			if req.Stream {
+				result, writeErr = forwarder.WriteResponse(c.Writer, resp, req, sentAt, usage.Responses)
+			} else {
+				result, writeErr = forwarder.WriteResponsesAggregated(c.Writer, resp, req, sentAt)
+			}
 			recordHealthAfterWrite(tracker, account.ID, result, writeErr)
 			if authGuard != nil {
 				authGuard.Record(c.Request.Context(), account, result.StatusCode)

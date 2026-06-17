@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jami1024/omnihub/internal/ir"
 	"github.com/jami1024/omnihub/internal/service/forward"
@@ -599,5 +600,110 @@ func TestForwardErrorAugmentationSkippedWhenNoMatch(t *testing.T) {
 	}
 	if rec.Body.String() != original {
 		t.Errorf("body should be untouched, got %s", rec.Body.String())
+	}
+}
+
+// sseResponse builds a fake upstream *http.Response carrying an SSE body
+// for the Responses de-stream tests.
+func sseResponse(body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+// TestWriteResponsesAggregated_ReassemblesOrdered verifies the codex
+// de-stream path rebuilds output[] from response.output_item.done events
+// in output_index order (even when they arrive out of order) and grafts
+// it onto the terminal response object, with usage preserved.
+func TestWriteResponsesAggregated_ReassemblesOrdered(t *testing.T) {
+	const sse = "event: response.output_item.done\n" +
+		`data: {"type":"response.output_item.done","output_index":1,"item":{"id":"msg_b","type":"message","content":[{"type":"output_text","text":"world"}]}}` + "\n\n" +
+		"event: response.output_item.done\n" +
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_a","type":"reasoning"}}` + "\n\n" +
+		"event: response.completed\n" +
+		`data: {"type":"response.completed","response":{"id":"resp_x","status":"completed","output":[],"usage":{"input_tokens":7,"output_tokens":3}}}` + "\n\n"
+
+	rec := httptest.NewRecorder()
+	result, err := forward.New(nil).WriteResponsesAggregated(rec, sseResponse(sse), &ir.UnifiedRequest{}, time.Now())
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if result.StatusCode != http.StatusOK {
+		t.Errorf("status = %d", result.StatusCode)
+	}
+	if result.Usage.InputTokens != 7 || result.Usage.OutputTokens != 3 {
+		t.Errorf("usage = %+v", result.Usage)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var out struct {
+		ID     string `json:"id"`
+		Output []struct {
+			Type    string `json:"type"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("body not JSON: %v (%s)", err, rec.Body.String())
+	}
+	if out.ID != "resp_x" {
+		t.Errorf("id lost: %q", out.ID)
+	}
+	if len(out.Output) != 2 {
+		t.Fatalf("output len = %d, want 2 (%s)", len(out.Output), rec.Body.String())
+	}
+	if out.Output[0].Type != "reasoning" {
+		t.Errorf("output[0] not the index-0 reasoning item: %+v", out.Output[0])
+	}
+	if out.Output[1].Type != "message" || len(out.Output[1].Content) != 1 || out.Output[1].Content[0].Text != "world" {
+		t.Errorf("output[1] not the index-1 message item: %+v", out.Output[1])
+	}
+}
+
+// TestWriteResponsesAggregated_NoTerminalEvent errors when the stream
+// ends without a response.completed/failed/incomplete event — there is
+// no final object to return to the client.
+func TestWriteResponsesAggregated_NoTerminalEvent(t *testing.T) {
+	const sse = "event: response.in_progress\n" +
+		`data: {"type":"response.in_progress","response":{"id":"resp_y","status":"in_progress"}}` + "\n\n"
+
+	rec := httptest.NewRecorder()
+	_, err := forward.New(nil).WriteResponsesAggregated(rec, sseResponse(sse), &ir.UnifiedRequest{}, time.Now())
+	if err == nil {
+		t.Fatal("want error when the stream carries no terminal event")
+	}
+}
+
+// TestWriteResponsesAggregated_NoItemsPassthrough returns the terminal
+// response untouched when no incremental items were captured (a backend
+// that embeds output in response.completed directly).
+func TestWriteResponsesAggregated_NoItemsPassthrough(t *testing.T) {
+	const sse = "event: response.completed\n" +
+		`data: {"type":"response.completed","response":{"id":"resp_z","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":1,"output_tokens":1}}}` + "\n\n"
+
+	rec := httptest.NewRecorder()
+	_, err := forward.New(nil).WriteResponsesAggregated(rec, sseResponse(sse), &ir.UnifiedRequest{}, time.Now())
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	var out struct {
+		ID     string `json:"id"`
+		Output []struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("body not JSON: %v", err)
+	}
+	if out.ID != "resp_z" || len(out.Output) != 1 || out.Output[0].Content[0].Text != "hi" {
+		t.Errorf("terminal output not passed through: %s", rec.Body.String())
 	}
 }

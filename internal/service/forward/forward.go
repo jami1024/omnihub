@@ -592,6 +592,142 @@ func forwardSSE(
 	}
 }
 
+// WriteResponsesAggregated consumes an upstream Responses **SSE** stream
+// and writes the final response to the client as a single non-streaming
+// JSON body. It is the de-streaming counterpart to forwardSSE, used when
+// the client asked for stream:false but the upstream only speaks SSE
+// (the codex backend hard-requires stream:true). This stays within the
+// Responses protocol — no cross-protocol re-rendering.
+//
+// The codex stream cannot be taken verbatim: its terminal
+// response.completed event carries an EMPTY output array, with the real
+// items delivered incrementally via response.output_item.done. The
+// aggregator rebuilds output[] from those items (ordered by
+// output_index) and grafts it onto the terminal response object.
+func (f *Forwarder) WriteResponsesAggregated(
+	w http.ResponseWriter,
+	resp *http.Response,
+	req *ir.UnifiedRequest,
+	requestSentAt time.Time,
+) (Result, error) {
+	defer resp.Body.Close()
+
+	result := Result{StatusCode: resp.StatusCode}
+	if resp.StatusCode >= 400 {
+		body, err := forwardErrorBody(w, resp, req)
+		result.ErrorBody = body
+		return result, err
+	}
+
+	reader := bufio.NewReaderSize(resp.Body, 64*1024)
+	var (
+		finalResponse json.RawMessage
+		items         = map[int]json.RawMessage{}
+		maxIndex      = -1
+		ttfb          time.Duration
+	)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			if ttfb == 0 {
+				ttfb = time.Since(requestSentAt)
+			}
+			if ev, ok := parseResponsesEvent(line); ok {
+				switch ev.Type {
+				case "response.completed", "response.failed", "response.incomplete":
+					if len(ev.Response) > 0 {
+						finalResponse = ev.Response
+					}
+				case "response.output_item.done":
+					if len(ev.Item) > 0 && ev.OutputIndex >= 0 {
+						items[ev.OutputIndex] = ev.Item
+						if ev.OutputIndex > maxIndex {
+							maxIndex = ev.OutputIndex
+						}
+					}
+				}
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return result, fmt.Errorf("read upstream: %w", err)
+		}
+	}
+	result.TTFB = ttfb
+
+	if len(finalResponse) == 0 {
+		return result, errors.New("responses: upstream stream ended without a terminal response event")
+	}
+
+	body, err := assembleResponsesBody(finalResponse, items, maxIndex)
+	if err != nil {
+		return result, err
+	}
+	result.Usage = usage.FromResponsesJSON(body)
+
+	copySafeHeaders(w, resp)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, werr := w.Write(body)
+	return result, werr
+}
+
+// responsesEvent is the subset of a Responses SSE event the aggregator
+// reads: the event type plus the two payloads it grafts together (the
+// terminal "response" object and each incremental "item").
+type responsesEvent struct {
+	Type        string          `json:"type"`
+	Response    json.RawMessage `json:"response"`
+	Item        json.RawMessage `json:"item"`
+	OutputIndex int             `json:"output_index"`
+}
+
+// parseResponsesEvent extracts the event from one SSE "data:" line.
+// Non-data lines (event:, comments, blanks) and non-JSON payloads return
+// ok=false. OutputIndex defaults to -1 when the event omits it.
+func parseResponsesEvent(line []byte) (responsesEvent, bool) {
+	line = bytes.TrimRight(line, "\r\n")
+	if !bytes.HasPrefix(line, []byte("data:")) {
+		return responsesEvent{}, false
+	}
+	payload := bytes.TrimSpace(line[len("data:"):])
+	if len(payload) == 0 || payload[0] != '{' {
+		return responsesEvent{}, false
+	}
+	ev := responsesEvent{OutputIndex: -1}
+	if err := json.Unmarshal(payload, &ev); err != nil {
+		return responsesEvent{}, false
+	}
+	return ev, true
+}
+
+// assembleResponsesBody grafts the collected output items onto the
+// terminal response object. With no items captured the terminal response
+// is returned untouched (it is already complete, or genuinely empty).
+func assembleResponsesBody(finalResponse json.RawMessage, items map[int]json.RawMessage, maxIndex int) ([]byte, error) {
+	if len(items) == 0 {
+		return finalResponse, nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(finalResponse, &obj); err != nil {
+		return nil, fmt.Errorf("responses: decode terminal response: %w", err)
+	}
+	ordered := make([]json.RawMessage, 0, len(items))
+	for i := 0; i <= maxIndex; i++ {
+		if it, ok := items[i]; ok {
+			ordered = append(ordered, it)
+		}
+	}
+	outRaw, err := json.Marshal(ordered)
+	if err != nil {
+		return nil, err
+	}
+	obj["output"] = outRaw
+	return json.Marshal(obj)
+}
+
 // drainTimeout caps how long the gateway keeps reading from upstream
 // after the client has disconnected. The drain exists purely to record
 // the final usage event; anything past this is upstream taking

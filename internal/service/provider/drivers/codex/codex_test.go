@@ -164,6 +164,10 @@ func TestEndpointURLOverride(t *testing.T) {
 	}
 }
 
+// TestNonStreamRequest pins the codex backend's hard requirement that
+// every run streams: even a stream:false client request is dispatched
+// with stream:true and an SSE Accept header (the handler de-streams the
+// response). See WriteResponsesAggregated.
 func TestNonStreamRequest(t *testing.T) {
 	req, _, err := protoopenai.RequestFromResponses([]byte(`{"model":"gpt-5","stream":false}`))
 	if err != nil {
@@ -173,14 +177,14 @@ func TestNonStreamRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	if h := httpReq.Header.Get("Accept"); h != "application/json" {
-		t.Fatalf("accept for non-stream: %q", h)
+	if h := httpReq.Header.Get("Accept"); h != "text/event-stream" {
+		t.Fatalf("accept must force SSE even for non-stream client: %q", h)
 	}
 	raw, _ := io.ReadAll(httpReq.Body)
 	var body map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &body)
-	if _, ok := body["stream"]; ok {
-		t.Fatal("stream:false must be omitted, not sent")
+	if string(body["stream"]) != "true" {
+		t.Fatalf("stream must be forced true, got %s", body["stream"])
 	}
 	// gpt-5 normalises to gpt-5.4.
 	if string(body["model"]) != `"gpt-5.4"` {
