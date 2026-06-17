@@ -213,7 +213,17 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 }
 
 function fmtUSD(n: number): string {
-  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  // Sub-cent amounts (small test traffic) round to $0.00 at two decimals;
+  // widen the fraction window so tiny costs stay legible while large
+  // amounts keep the familiar two-decimal currency look.
+  let maxDigits = 2
+  const abs = Math.abs(n)
+  if (abs > 0 && abs < 0.01) {
+    // Show enough significant digits to surface the leading non-zero
+    // figure, capped at 6 places (matching cost_usd's DB precision).
+    maxDigits = Math.min(6, 2 - Math.floor(Math.log10(abs)))
+  }
+  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: maxDigits })}`
 }
 function fmtInt(n: number): string {
   return n.toLocaleString()
