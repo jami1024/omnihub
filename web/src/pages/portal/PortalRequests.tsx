@@ -99,6 +99,14 @@ export function PortalRequestsPage() {
                         </Td>
                         <Td className="text-right tabular-nums">
                           {r.input_tokens} / {r.output_tokens}
+                          {r.cache_read_input_tokens > 0 && (
+                            <span className="ml-1 text-xs text-muted">
+                              ·{' '}
+                              {t('portalRequests.cacheReadInline', {
+                                n: r.cache_read_input_tokens.toLocaleString(),
+                              })}
+                            </span>
+                          )}
                         </Td>
                         <Td className="text-right tabular-nums">
                           <button
