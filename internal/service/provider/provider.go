@@ -79,6 +79,16 @@ type Account struct {
 	// the first match wins. Empty means "forward the model unchanged".
 	ModelRedirects []ModelRedirect
 
+	// AllowedModels restricts which models this account is willing to
+	// serve. Empty (the default) means "no restriction". When non-empty,
+	// the resolver skips this account for any request whose model is not
+	// listed verbatim — used to pin a subscription account (e.g. Codex /
+	// ChatGPT) to the models its plan accepts, so unsupported models fail
+	// over to a capable account instead of hitting an upstream 400.
+	// The list is matched against the model the client requested, before
+	// any per-account ModelRedirects rewrite it.
+	AllowedModels []string
+
 	// DailyUSDLimit / TotalUSDLimit are optional per-account spend
 	// ceilings the resolver enforces (rolling 24h and lifetime,
 	// respectively). Nil means "no cap".
@@ -245,6 +255,28 @@ func (a *Account) UsesUpstreamOAuth() bool {
 		return false
 	}
 	return a.AuthType == "oauth" || a.AuthType == "imported_oauth"
+}
+
+// ServesModel reports whether this account may serve the given model.
+// An account with no AllowedModels restriction serves everything; so
+// does an empty model string (the caller could not determine a model,
+// so the allow-list cannot meaningfully apply). Otherwise the model
+// must appear verbatim in AllowedModels. Matching is case-sensitive,
+// mirroring the api-key allow-list — provider model identifiers are
+// stable, lowercase strings.
+func (a *Account) ServesModel(model string) bool {
+	if a == nil {
+		return false
+	}
+	if len(a.AllowedModels) == 0 || model == "" {
+		return true
+	}
+	for _, m := range a.AllowedModels {
+		if m == model {
+			return true
+		}
+	}
+	return false
 }
 
 // AuthRoutable reports whether the account's auth lifecycle state

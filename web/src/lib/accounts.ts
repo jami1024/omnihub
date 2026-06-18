@@ -64,6 +64,9 @@ export interface Account {
   active_windows: ActiveWindow[]
   active_timezone: string
   forward_client_ip: boolean
+  // Per-account model allow-list ([] = serve any model). When non-empty,
+  // the resolver skips this account for models not in the list.
+  allowed_models: string[]
   // Upstream auth model. auth_type/auth_plugin/client_profile(_config)
   // are admin-configurable; the rest are read-only runtime state
   // maintained by the server (TokenManager).
@@ -114,6 +117,8 @@ export interface AccountInput {
   active_windows: ActiveWindow[]
   active_timezone: string
   forward_client_ip: boolean
+  // Per-account model allow-list ([] = serve any model).
+  allowed_models: string[]
   // Upstream auth model (admin-configurable subset). The server treats
   // the update as a PUT-style replace, so edits must echo the existing
   // values back or an oauth account silently resets to api_key.

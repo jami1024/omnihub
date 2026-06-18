@@ -70,7 +70,7 @@ func newRes(
 
 func TestResolveReturnsErrWhenPoolEmpty(t *testing.T) {
 	res := newRes(t, nil, nil, nil, nil)
-	_, _, err := res.ResolveForProviders("", nil, nil)
+	_, _, err := res.ResolveForProviders("", "", nil, nil)
 	if !errors.Is(err, resolver.ErrNoUpstream) {
 		t.Errorf("want ErrNoUpstream, got %v", err)
 	}
@@ -86,7 +86,7 @@ func TestResolvePicksTopPriorityBucket(t *testing.T) {
 
 	seen := map[int64]int{}
 	for i := 0; i < 200; i++ {
-		acc, _, err := res.ResolveForProviders("", []string{"anthropic"}, nil)
+		acc, _, err := res.ResolveForProviders("", "", []string{"anthropic"}, nil)
 		if err != nil {
 			t.Fatalf("Resolve: %v", err)
 		}
@@ -109,7 +109,7 @@ func TestResolveWeightedDistribution(t *testing.T) {
 
 	hits := map[int64]int{}
 	for i := 0; i < 1000; i++ {
-		acc, _, _ := res.ResolveForProviders("", []string{"anthropic"}, nil)
+		acc, _, _ := res.ResolveForProviders("", "", []string{"anthropic"}, nil)
 		hits[acc.ID]++
 	}
 	if hits[1] < hits[2]*6 {
@@ -128,7 +128,7 @@ func TestResolveFiltersToAllowedProviders(t *testing.T) {
 	allowed := []string{"anthropic", "claude-platform"}
 	seen := map[string]int{}
 	for i := 0; i < 100; i++ {
-		acc, _, err := res.ResolveForProviders("", allowed, nil)
+		acc, _, err := res.ResolveForProviders("", "", allowed, nil)
 		if err != nil {
 			t.Fatalf("Resolve: %v", err)
 		}
@@ -136,6 +136,55 @@ func TestResolveFiltersToAllowedProviders(t *testing.T) {
 	}
 	if seen["openai"] != 0 {
 		t.Errorf("filter should exclude openai, got %d hits", seen["openai"])
+	}
+}
+
+func TestResolveFiltersByAllowedModels(t *testing.T) {
+	accounts := []*provider.Account{
+		// Restricted to codex slugs only (e.g. a ChatGPT-subscription account).
+		{ID: 1, Name: "codex", Provider: "openai-codex", Weight: 100,
+			AllowedModels: []string{"gpt-5-codex", "gpt-5.3-codex"}},
+		// No restriction — serves any model.
+		{ID: 2, Name: "any", Provider: "openai-codex", Weight: 100},
+	}
+	res := newRes(t, accounts, []string{"openai-codex"}, nil, nil)
+	allowed := []string{"openai-codex"}
+
+	// A model the restricted account does not serve never lands on it.
+	for i := 0; i < 100; i++ {
+		acc, _, err := res.ResolveForProviders("", "gpt-5.4", allowed, nil)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if acc.ID == 1 {
+			t.Fatalf("account 1 must not be selected for gpt-5.4 (not in its allow-list)")
+		}
+	}
+
+	// With the unrestricted account excluded, a matching model still selects
+	// the restricted account.
+	acc, _, err := res.ResolveForProviders("", "gpt-5-codex", allowed, []int64{2})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if acc.ID != 1 {
+		t.Fatalf("expected restricted account 1 for matching model, got %d", acc.ID)
+	}
+
+	// An empty model string disables model filtering entirely.
+	acc, _, err = res.ResolveForProviders("", "", allowed, []int64{2})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if acc.ID != 1 {
+		t.Fatalf("empty model should not filter; expected account 1, got %d", acc.ID)
+	}
+
+	// No account serves the model (restricted one filtered, unrestricted
+	// excluded) → ErrNoUpstream so the caller fails over / 503s.
+	_, _, err = res.ResolveForProviders("", "gpt-5.4", allowed, []int64{2})
+	if !errors.Is(err, resolver.ErrNoUpstream) {
+		t.Fatalf("expected ErrNoUpstream for unservable model, got %v", err)
 	}
 }
 
@@ -148,7 +197,7 @@ func TestResolveExcludesAlreadyTriedIDs(t *testing.T) {
 	res := newRes(t, accounts, []string{"anthropic"}, nil, nil)
 
 	for i := 0; i < 50; i++ {
-		acc, _, err := res.ResolveForProviders("", nil, []int64{1, 2})
+		acc, _, err := res.ResolveForProviders("", "", nil, []int64{1, 2})
 		if err != nil {
 			t.Fatalf("Resolve: %v", err)
 		}
@@ -172,7 +221,7 @@ func TestResolveSkipsUnhealthyAccounts(t *testing.T) {
 	tracker.RecordFailure(1, errors.New("boom"))
 
 	for i := 0; i < 30; i++ {
-		acc, _, err := res.ResolveForProviders("", nil, nil)
+		acc, _, err := res.ResolveForProviders("", "", nil, nil)
 		if err != nil {
 			t.Fatalf("Resolve: %v", err)
 		}
@@ -186,7 +235,7 @@ func TestResolveSkipsUnhealthyAccounts(t *testing.T) {
 func TestResolveReturnsDriver(t *testing.T) {
 	res := newRes(t, []*provider.Account{{ID: 1, Provider: "anthropic", Weight: 1}},
 		[]string{"anthropic"}, nil, nil)
-	_, driver, err := res.ResolveForProviders("", nil, nil)
+	_, driver, err := res.ResolveForProviders("", "", nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -198,7 +247,7 @@ func TestResolveReturnsDriver(t *testing.T) {
 func TestResolveFailsOnUnregisteredDriver(t *testing.T) {
 	res := newRes(t, []*provider.Account{{ID: 1, Provider: "rogue", Weight: 1}},
 		nil, nil, nil)
-	_, _, err := res.ResolveForProviders("", nil, nil)
+	_, _, err := res.ResolveForProviders("", "", nil, nil)
 	if err == nil {
 		t.Errorf("expected error when account references unknown driver")
 	}
@@ -214,14 +263,14 @@ func TestStickySendsSameAccountForSameSession(t *testing.T) {
 	res := newRes(t, accounts, []string{"anthropic"}, nil, store)
 
 	// First call binds the session to whatever account gets picked.
-	first, _, err := res.ResolveForProviders("sess-1", nil, nil)
+	first, _, err := res.ResolveForProviders("sess-1", "", nil, nil)
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
 
 	// 100 follow-up calls should always come back to the same account.
 	for i := 0; i < 100; i++ {
-		acc, _, err := res.ResolveForProviders("sess-1", nil, nil)
+		acc, _, err := res.ResolveForProviders("sess-1", "", nil, nil)
 		if err != nil {
 			t.Fatalf("follow-up %d: %v", i, err)
 		}
@@ -245,7 +294,7 @@ func TestStickyDistinctSessionsCanLandOnDifferentAccounts(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		acc, _, err := res.ResolveForProviders(
 			"sess-"+string(rune('a'+i%26)),
-			nil, nil,
+			"", nil, nil,
 		)
 		if err != nil {
 			t.Fatalf("iter %d: %v", i, err)
@@ -271,7 +320,7 @@ func TestStickyFallsBackWhenBoundAccountUnhealthy(t *testing.T) {
 	tracker.RecordFailure(1, errors.New("boom"))
 
 	for i := 0; i < 20; i++ {
-		acc, _, err := res.ResolveForProviders("sess-1", nil, nil)
+		acc, _, err := res.ResolveForProviders("sess-1", "", nil, nil)
 		if err != nil {
 			t.Fatalf("iter %d: %v", i, err)
 		}
@@ -292,7 +341,7 @@ func TestStickyNotBoundWhenExcludedIsNonEmpty(t *testing.T) {
 	store := session.New(time.Minute)
 	res := newRes(t, accounts, []string{"anthropic"}, nil, store)
 
-	_, _, err := res.ResolveForProviders("sess-1", nil, []int64{1})
+	_, _, err := res.ResolveForProviders("sess-1", "", nil, []int64{1})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -314,7 +363,7 @@ func TestRoundRobinGroupPolicy(t *testing.T) {
 
 	var order []int64
 	for i := 0; i < 6; i++ {
-		a, _, err := res.ResolveForProviders("", nil, nil)
+		a, _, err := res.ResolveForProviders("", "", nil, nil)
 		if err != nil {
 			t.Fatalf("resolve: %v", err)
 		}
@@ -342,7 +391,7 @@ func TestRoundRobinSkipsFilteredAccounts(t *testing.T) {
 	// Exclude account 1 (already attempted): the rotation indexes the
 	// remaining candidate set, so every pick lands on 2.
 	for i := 0; i < 3; i++ {
-		a, _, err := res.ResolveForProviders("", nil, []int64{1})
+		a, _, err := res.ResolveForProviders("", "", nil, []int64{1})
 		if err != nil {
 			t.Fatalf("resolve: %v", err)
 		}
@@ -364,7 +413,7 @@ func TestConcurrencyFilterSkipsSaturated(t *testing.T) {
 	res.SetConcurrencyFilter(&capAllFilter{capped: map[int64]bool{1: true}})
 
 	for i := 0; i < 5; i++ {
-		a, _, err := res.ResolveForProviders("", nil, nil)
+		a, _, err := res.ResolveForProviders("", "", nil, nil)
 		if err != nil {
 			t.Fatalf("resolve: %v", err)
 		}

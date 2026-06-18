@@ -73,7 +73,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
                a.auth_expires_at, a.last_refresh_at, COALESCE(a.refresh_error, ''),
                COALESCE(a.client_profile, ''), a.client_profile_config,
                a.max_concurrency, COALESCE(g.routing_policy, ''),
-               a.proxy_id
+               a.proxy_id, a.allowed_models
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.enabled = TRUE
@@ -102,6 +102,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			paramsRaw        []byte
 			windowsRaw       []byte
 			profileConfigRaw []byte
+			allowedModelsRaw []byte
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &a.Weight, &a.Priority, &multiplier,
@@ -111,7 +112,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 			&a.GroupID, &a.GroupName, &groupMultiplier,
 			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone, &a.ForwardClientIP,
 			&a.AuthType, &a.AuthPlugin, &a.AuthStatus, &a.AuthSubject, &a.AuthEmail, &a.AuthPlan,
-			&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw, &a.MaxConcurrency, &a.GroupRoutingPolicy, &a.ProxyID,
+			&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw, &a.MaxConcurrency, &a.GroupRoutingPolicy, &a.ProxyID, &allowedModelsRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan account row: %w", err)
 		}
@@ -122,7 +123,7 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 		// can't be decrypted because the key is wrong/missing) must NOT
 		// brick the whole routing pool — skip the unreadable account and
 		// keep the rest serving. The resolver simply sees fewer upstreams.
-		if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw, profileConfigRaw); err != nil {
+		if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw, profileConfigRaw, allowedModelsRaw); err != nil {
 			slog.Warn("skipping unreadable account in routing pool",
 				"account", a.Name, "id", a.ID, "err", err.Error())
 			continue
@@ -135,11 +136,14 @@ func (r *AccountRepo) ListEnabled(ctx context.Context) ([]*provider.Account, err
 // decodeRow runs every decode/decrypt step for one scanned account row.
 // Returns the first error; callers decide whether to skip (routing pool)
 // or surface it (single-row lookups).
-func (r *AccountRepo) decodeRow(a *provider.Account, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw, profileConfigRaw []byte) error {
+func (r *AccountRepo) decodeRow(a *provider.Account, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw, profileConfigRaw, allowedModelsRaw []byte) error {
 	if err := decodeCredentials(a, credentialsRaw, r.cipher); err != nil {
 		return err
 	}
 	if err := decodeRedirects(a, redirectsRaw); err != nil {
+		return err
+	}
+	if err := decodeAccountAllowedModels(a, allowedModelsRaw); err != nil {
 		return err
 	}
 	if err := decodeHeaders(a, headersRaw, r.cipher); err != nil {
@@ -259,6 +263,29 @@ func marshalEndpoints(e []string) ([]byte, error) {
 		return []byte("[]"), nil
 	}
 	return json.Marshal(e)
+}
+
+// decodeAccountAllowedModels unmarshals the allowed_models JSONB array
+// onto the account. An empty / "[]" payload leaves AllowedModels nil (no
+// restriction). Named to avoid colliding with the api-key allow-list
+// decoder in the same package.
+func decodeAccountAllowedModels(a *provider.Account, raw []byte) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(raw, &a.AllowedModels); err != nil {
+		return fmt.Errorf("decode allowed_models for account %q: %w", a.Name, err)
+	}
+	return nil
+}
+
+// marshalAllowedModels encodes the per-account model allow-list for the
+// allowed_models JSONB column, defaulting nil/empty to "[]" (NOT NULL).
+func marshalAllowedModels(m []string) ([]byte, error) {
+	if len(m) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(m)
 }
 
 // decodeParams unmarshals the param_overrides JSONB object onto the
@@ -433,6 +460,10 @@ type InsertParams struct {
 	ActiveTimezone     string
 	ForwardClientIP    bool
 
+	// AllowedModels is the per-account model allow-list (migration 0039).
+	// Nil/empty writes '[]' (no restriction).
+	AllowedModels []string
+
 	// Upstream auth model (migration 0036). Only the admin-configurable
 	// columns are set here; the runtime-maintained ones (auth_status,
 	// auth_subject/email/plan, auth_expires_at, last_refresh_at,
@@ -478,7 +509,7 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
                a.auth_expires_at, a.last_refresh_at, COALESCE(a.refresh_error, ''),
                COALESCE(a.client_profile, ''), a.client_profile_config,
                a.max_concurrency, COALESCE(g.routing_policy, ''),
-               a.proxy_id
+               a.proxy_id, a.allowed_models
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          ORDER BY a.id ASC`
@@ -509,6 +540,7 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			paramsRaw        []byte
 			windowsRaw       []byte
 			profileConfigRaw []byte
+			allowedModelsRaw []byte
 		)
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Provider, &enabled,
@@ -519,14 +551,14 @@ func (r *AccountRepo) ListAll(ctx context.Context) ([]*provider.Account, []bool,
 			&a.GroupID, &a.GroupName, &groupMultiplier,
 			&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone, &a.ForwardClientIP,
 			&a.AuthType, &a.AuthPlugin, &a.AuthStatus, &a.AuthSubject, &a.AuthEmail, &a.AuthPlan,
-			&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw, &a.MaxConcurrency, &a.GroupRoutingPolicy, &a.ProxyID,
+			&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw, &a.MaxConcurrency, &a.GroupRoutingPolicy, &a.ProxyID, &allowedModelsRaw,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan account row: %w", err)
 		}
 		a.CostMultiplier = multiplier
 		a.GroupCostMultiplier = groupMultiplier
 		applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
-		if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw, profileConfigRaw); err != nil {
+		if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw, profileConfigRaw, allowedModelsRaw); err != nil {
 			slog.Warn("skipping unreadable account in list", "account", a.Name, "id", a.ID, "err", err.Error())
 			continue
 		}
@@ -746,6 +778,10 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 	if err != nil {
 		return 0, fmt.Errorf("encode client_profile_config: %w", err)
 	}
+	allowedModelsJSON, err := marshalAllowedModels(p.AllowedModels)
+	if err != nil {
+		return 0, fmt.Errorf("encode allowed_models: %w", err)
+	}
 
 	const q = `
         INSERT INTO accounts (
@@ -756,11 +792,11 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
             health_probe_enabled, proxy_url, param_overrides, active_windows, active_timezone,
             forward_client_ip,
             auth_type, auth_plugin, client_profile, client_profile_config,
-            max_concurrency, proxy_id
+            max_concurrency, proxy_id, allowed_models
         )
         VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NULLIF($19, ''), $20, $21, NULLIF($22, ''), $23,
                 COALESCE(NULLIF($24, ''), 'api_key'), NULLIF($25, ''), NULLIF($26, ''), $27,
-                $28, $29)
+                $28, $29, $30)
         RETURNING id`
 
 	var id int64
@@ -771,7 +807,7 @@ func (r *AccountRepo) Insert(ctx context.Context, p InsertParams) (int64, error)
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
 		p.HealthProbeEnabled, proxyEnc, paramsJSON, windowsJSON, p.ActiveTimezone, p.ForwardClientIP,
 		p.AuthType, p.AuthPlugin, p.ClientProfile, profileConfigJSON,
-		p.MaxConcurrency, p.ProxyID,
+		p.MaxConcurrency, p.ProxyID, allowedModelsJSON,
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -802,7 +838,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
                a.auth_expires_at, a.last_refresh_at, COALESCE(a.refresh_error, ''),
                COALESCE(a.client_profile, ''), a.client_profile_config,
                a.max_concurrency, COALESCE(g.routing_policy, ''),
-               a.proxy_id
+               a.proxy_id, a.allowed_models
           FROM accounts a
           LEFT JOIN provider_groups g ON a.group_id = g.id
          WHERE a.id = $1`
@@ -822,6 +858,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		paramsRaw        []byte
 		windowsRaw       []byte
 		profileConfigRaw []byte
+		allowedModelsRaw []byte
 	)
 	err := r.pool.QueryRow(ctx, q, id).Scan(
 		&a.ID, &a.Name, &a.Provider, &enabled,
@@ -832,7 +869,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 		&a.GroupID, &a.GroupName, &groupMultiplier,
 		&headersRaw, &endpointsRaw, &a.HealthProbeEnabled, &a.ProxyURL, &paramsRaw, &windowsRaw, &a.ActiveTimezone, &a.ForwardClientIP,
 		&a.AuthType, &a.AuthPlugin, &a.AuthStatus, &a.AuthSubject, &a.AuthEmail, &a.AuthPlan,
-		&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw, &a.MaxConcurrency, &a.GroupRoutingPolicy, &a.ProxyID,
+		&a.AuthExpiresAt, &a.LastRefreshAt, &a.RefreshError, &a.ClientProfile, &profileConfigRaw, &a.MaxConcurrency, &a.GroupRoutingPolicy, &a.ProxyID, &allowedModelsRaw,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -843,7 +880,7 @@ func (r *AccountRepo) GetByID(ctx context.Context, id int64) (*provider.Account,
 	a.CostMultiplier = multiplier
 	a.GroupCostMultiplier = groupMultiplier
 	applyCircuitOverrides(&a, failureThreshold, openDurationMs, halfOpenSuccess)
-	if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw, profileConfigRaw); err != nil {
+	if err := r.decodeRow(&a, credentialsRaw, redirectsRaw, headersRaw, endpointsRaw, paramsRaw, windowsRaw, profileConfigRaw, allowedModelsRaw); err != nil {
 		return nil, false, err
 	}
 	return &a, enabled, nil
@@ -883,6 +920,10 @@ type UpdateParams struct {
 	ActiveWindows      []provider.ActiveWindow
 	ActiveTimezone     string
 	ForwardClientIP    bool
+
+	// AllowedModels is the per-account model allow-list (migration 0039).
+	// PUT-style replace; nil/empty writes '[]' (no restriction).
+	AllowedModels []string
 
 	// Upstream auth model (migration 0036). PUT-style replace of the
 	// admin-configurable columns only. The runtime-maintained columns
@@ -960,6 +1001,10 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
 	if err != nil {
 		return fmt.Errorf("encode client_profile_config: %w", err)
 	}
+	allowedModelsJSON, err := marshalAllowedModels(p.AllowedModels)
+	if err != nil {
+		return fmt.Errorf("encode allowed_models: %w", err)
+	}
 
 	const q = `
         UPDATE accounts SET
@@ -975,9 +1020,9 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
             forward_client_ip = $23,
             auth_type = COALESCE(NULLIF($24, ''), 'api_key'), auth_plugin = NULLIF($25, ''),
             client_profile = NULLIF($26, ''), client_profile_config = $27,
-            max_concurrency = $28, proxy_id = $29,
+            max_concurrency = $28, proxy_id = $29, allowed_models = $30,
             updated_at = NOW()
-         WHERE id = $30`
+         WHERE id = $31`
 
 	tag, err := r.pool.Exec(ctx, q,
 		p.Name, p.Provider, p.Enabled, p.Weight, p.Priority,
@@ -986,7 +1031,7 @@ func (r *AccountRepo) Update(ctx context.Context, id int64, p UpdateParams) erro
 		redirectsJSON, p.DailyUSDLimit, p.TotalUSDLimit, p.GroupID, headersJSON, endpointsJSON,
 		p.HealthProbeEnabled, proxyEnc, paramsJSON, windowsJSON, p.ActiveTimezone, p.ForwardClientIP,
 		p.AuthType, p.AuthPlugin, p.ClientProfile, profileConfigJSON,
-		p.MaxConcurrency, p.ProxyID,
+		p.MaxConcurrency, p.ProxyID, allowedModelsJSON,
 		id,
 	)
 	if err != nil {

@@ -94,6 +94,8 @@ export function AccountForm({
       : [],
   )
   const [endpoints, setEndpoints] = useState<string[]>(account?.endpoints ?? [])
+  // Per-account model allow-list, edited as a comma/newline-separated list.
+  const [allowedModels, setAllowedModels] = useState((account?.allowed_models ?? []).join(', '))
   const [proxyURL, setProxyURL] = useState(account?.proxy_url ?? '')
   const { data: proxies } = useProxies()
   const [proxyID, setProxyID] = useState(account?.proxy_id != null ? String(account.proxy_id) : '')
@@ -292,6 +294,10 @@ export function AccountForm({
       group_id: groupID === '' ? null : Number(groupID),
       custom_headers: cleanHeaders,
       endpoints: endpoints.map((e) => e.trim()).filter((e) => e !== ''),
+      allowed_models: allowedModels
+        .split(/[\n,]/)
+        .map((m) => m.trim())
+        .filter((m) => m !== ''),
       health_probe_enabled: healthProbe === '' ? null : healthProbe === 'true',
       proxy_url: proxyURL.trim(),
       proxy_id: proxyID === '' ? null : Number(proxyID),
@@ -603,6 +609,16 @@ export function AccountForm({
           <button type="button" onClick={addRedirect} className="text-sm text-muted hover:text-ink">
             {t('accountForm.addRedirect')}
           </button>
+        </div>
+        <div className="mt-4 border-t border-line pt-3">
+          <Field label={t('accountForm.allowedModelsLabel')} help={t('accountForm.allowedModelsHelp')}>
+            <input
+              className={FIELD}
+              value={allowedModels}
+              onChange={(e) => setAllowedModels(e.target.value)}
+              placeholder={t('accountForm.allowedModelsPlaceholder')}
+            />
+          </Field>
         </div>
       </details>
 

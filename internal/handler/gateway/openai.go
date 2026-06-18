@@ -105,7 +105,7 @@ func OpenAIChatCompletionsHandler(
 		)
 
 		for attempt := 0; attempt < maxAttempts; attempt++ {
-			account, driver, rerr := res.ResolveForProviders(sessionKey, openaiCompatibleProviders, attempted)
+			account, driver, rerr := res.ResolveForProviders(sessionKey, req.Model, openaiCompatibleProviders, attempted)
 			if rerr != nil {
 				if errors.Is(rerr, resolver.ErrNoUpstream) {
 					if attempt == 0 {

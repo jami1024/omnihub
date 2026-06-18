@@ -39,12 +39,15 @@ type Resolver interface {
 	// ResolveForProviders picks an account.
 	//
 	//   - sessionKey "" disables stickiness for this call.
+	//   - model is the requested model name; accounts whose AllowedModels
+	//     allow-list excludes it are skipped. "" disables model filtering.
 	//   - allowedProviders empty means "any provider".
 	//   - excludedAccountIDs nil means "no exclusions". A retry loop
 	//     fills it with account IDs already attempted on the same
 	//     request.
 	ResolveForProviders(
 		sessionKey string,
+		model string,
 		allowedProviders []string,
 		excludedAccountIDs []int64,
 	) (*provider.Account, provider.Driver, error)
@@ -124,11 +127,12 @@ func New(
 // selection the result is bound to sessionKey.
 func (r *WeightedResolver) ResolveForProviders(
 	sessionKey string,
+	model string,
 	allowedProviders []string,
 	excludedAccountIDs []int64,
 ) (*provider.Account, provider.Driver, error) {
 	// 1) Sticky binding takes priority over fresh selection.
-	if sticky := r.resolveSticky(sessionKey, allowedProviders, excludedAccountIDs); sticky != nil {
+	if sticky := r.resolveSticky(sessionKey, model, allowedProviders, excludedAccountIDs); sticky != nil {
 		drv, ok := r.registry.Get(sticky.Provider)
 		if ok {
 			return sticky, drv, nil
@@ -140,7 +144,7 @@ func (r *WeightedResolver) ResolveForProviders(
 		}
 	}
 
-	candidates := r.gather(allowedProviders, excludedAccountIDs)
+	candidates := r.gather(allowedProviders, model, excludedAccountIDs)
 	if len(candidates) == 0 {
 		return nil, nil, ErrNoUpstream
 	}
@@ -184,6 +188,7 @@ func (r *WeightedResolver) ResolveForProviders(
 // stickiness must never resurrect a sick or wrong-provider account.
 func (r *WeightedResolver) resolveSticky(
 	sessionKey string,
+	model string,
 	allowed []string,
 	excluded []int64,
 ) *provider.Account {
@@ -221,6 +226,9 @@ func (r *WeightedResolver) resolveSticky(
 		if r.conc != nil && r.conc.AtCap(a) {
 			return nil
 		}
+		if !a.ServesModel(model) {
+			return nil
+		}
 		if len(allowed) == 0 {
 			return a
 		}
@@ -236,9 +244,10 @@ func (r *WeightedResolver) resolveSticky(
 
 // gather returns the subset of pool accounts that:
 //   - have a provider in allowed (empty allow-list passes everything);
+//   - serve the requested model (empty AllowedModels passes everything);
 //   - are not in the excluded set;
 //   - pass the health tracker's IsAvailable check.
-func (r *WeightedResolver) gather(allowed []string, excluded []int64) []*provider.Account {
+func (r *WeightedResolver) gather(allowed []string, model string, excluded []int64) []*provider.Account {
 	now := time.Now()
 	excludedSet := make(map[int64]struct{}, len(excluded))
 	for _, id := range excluded {
@@ -277,6 +286,12 @@ func (r *WeightedResolver) gather(allowed []string, excluded []int64) []*provide
 		// Saturated accounts (max_concurrency reached) are skipped so
 		// failover attempts are not wasted on them.
 		if r.conc != nil && r.conc.AtCap(a) {
+			continue
+		}
+		// Per-account model allow-list: skip accounts that don't serve
+		// the requested model so unsupported models fail over to a
+		// capable account instead of hitting an upstream 400.
+		if !a.ServesModel(model) {
 			continue
 		}
 		out = append(out, a)

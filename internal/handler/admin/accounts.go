@@ -61,6 +61,11 @@ type accountDTO struct {
 	ActiveTimezone     string                   `json:"active_timezone"`
 	ForwardClientIP    bool                     `json:"forward_client_ip"`
 
+	// AllowedModels is the per-account model allow-list ([] = serve any
+	// model). When non-empty, the resolver skips this account for models
+	// not in the list.
+	AllowedModels []string `json:"allowed_models"`
+
 	// Upstream auth model. auth_type / auth_plugin / client_profile /
 	// client_profile_config are admin-configurable; the rest are
 	// read-only runtime state maintained by the TokenManager.
@@ -122,6 +127,10 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 	if endpoints == nil {
 		endpoints = []string{} // serialise as [] not null
 	}
+	allowedModels := a.AllowedModels
+	if allowedModels == nil {
+		allowedModels = []string{} // serialise as [] not null
+	}
 	windows := a.ActiveWindows
 	if windows == nil {
 		windows = []provider.ActiveWindow{} // serialise as [] not null
@@ -156,6 +165,7 @@ func toDTO(a *provider.Account, enabled bool) accountDTO {
 		ActiveWindows:           windows,
 		ActiveTimezone:          a.ActiveTimezone,
 		ForwardClientIP:         a.ForwardClientIP,
+		AllowedModels:           allowedModels,
 		AuthType:                a.AuthType,
 		AuthPlugin:              a.AuthPlugin,
 		AuthStatus:              a.AuthStatus,
@@ -189,6 +199,32 @@ func sanitizeRedirects(rules []provider.ModelRedirect) ([]provider.ModelRedirect
 		out = append(out, r)
 	}
 	return out, ""
+}
+
+// sanitizeAllowedModels trims each model name and drops blanks,
+// returning nil when nothing remains (so the column stores "[]" / "no
+// restriction"). Duplicates are collapsed to keep the list tidy.
+func sanitizeAllowedModels(models []string) []string {
+	if len(models) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(models))
+	out := make([]string, 0, len(models))
+	for _, m := range models {
+		m = strings.TrimSpace(m)
+		if m == "" {
+			continue
+		}
+		if _, dup := seen[m]; dup {
+			continue
+		}
+		seen[m] = struct{}{}
+		out = append(out, m)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // sanitizeHeaders trims header names, drops entries with a blank name,
@@ -355,6 +391,8 @@ type accountInput struct {
 	ActiveTimezone     string                   `json:"active_timezone"`
 	ForwardClientIP    bool                     `json:"forward_client_ip"`
 
+	AllowedModels []string `json:"allowed_models"`
+
 	// Upstream auth model (admin-configurable subset only). The runtime
 	// columns are never accepted from the client.
 	AuthType            string         `json:"auth_type"`
@@ -483,6 +521,7 @@ func CreateAccountHandler(store accountStore) gin.HandlerFunc {
 			ActiveWindows:           in.ActiveWindows,
 			ActiveTimezone:          strings.TrimSpace(in.ActiveTimezone),
 			ForwardClientIP:         in.ForwardClientIP,
+			AllowedModels:           sanitizeAllowedModels(in.AllowedModels),
 			AuthType:                authType,
 			AuthPlugin:              strings.TrimSpace(in.AuthPlugin),
 			ClientProfile:           strings.TrimSpace(in.ClientProfile),
@@ -604,6 +643,7 @@ func UpdateAccountHandler(store accountStore) gin.HandlerFunc {
 			ActiveWindows:           in.ActiveWindows,
 			ActiveTimezone:          strings.TrimSpace(in.ActiveTimezone),
 			ForwardClientIP:         in.ForwardClientIP,
+			AllowedModels:           sanitizeAllowedModels(in.AllowedModels),
 			AuthType:                authType,
 			AuthPlugin:              strings.TrimSpace(in.AuthPlugin),
 			ClientProfile:           strings.TrimSpace(in.ClientProfile),

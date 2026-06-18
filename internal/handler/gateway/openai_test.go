@@ -25,7 +25,7 @@ type stubResolver struct {
 	err     error
 }
 
-func (s *stubResolver) ResolveForProviders(string, []string, []int64) (*provider.Account, provider.Driver, error) {
+func (s *stubResolver) ResolveForProviders(string, string, []string, []int64) (*provider.Account, provider.Driver, error) {
 	if s.err != nil {
 		return nil, nil, s.err
 	}

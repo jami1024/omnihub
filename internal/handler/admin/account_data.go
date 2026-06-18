@@ -53,6 +53,7 @@ type exportedAccount struct {
 	ActiveWindows           []provider.ActiveWindow  `json:"active_windows"`
 	ActiveTimezone          string                   `json:"active_timezone"`
 	ForwardClientIP         bool                     `json:"forward_client_ip"`
+	AllowedModels           []string                 `json:"allowed_models"`
 	AuthType                string                   `json:"auth_type"`
 	AuthPlugin              string                   `json:"auth_plugin"`
 	ClientProfile           string                   `json:"client_profile"`
@@ -98,6 +99,7 @@ func toExported(a *provider.Account) exportedAccount {
 		ActiveWindows:           a.ActiveWindows,
 		ActiveTimezone:          a.ActiveTimezone,
 		ForwardClientIP:         a.ForwardClientIP,
+		AllowedModels:           a.AllowedModels,
 		AuthType:                a.AuthType,
 		AuthPlugin:              a.AuthPlugin,
 		ClientProfile:           a.ClientProfile,
@@ -234,6 +236,7 @@ func ImportAccountsHandler(store accountStore, groups groupLister) gin.HandlerFu
 				ActiveWindows:           ea.ActiveWindows,
 				ActiveTimezone:          strings.TrimSpace(ea.ActiveTimezone),
 				ForwardClientIP:         ea.ForwardClientIP,
+				AllowedModels:           sanitizeAllowedModels(ea.AllowedModels),
 				AuthType:                authType,
 				AuthPlugin:              strings.TrimSpace(ea.AuthPlugin),
 				ClientProfile:           strings.TrimSpace(ea.ClientProfile),
